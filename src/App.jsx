@@ -701,10 +701,16 @@ export default function Ours() {
   const shareLink = () => {
     const encoded = btoa(JSON.stringify(household));
     const url = `${window.location.origin}/?join=${encoded}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      }).catch(() => {
+        window.prompt(dir === "rtl" ? "העתיקו את הקישור:" : "Copy this link:", url);
+      });
+    } else {
+      window.prompt(dir === "rtl" ? "העתיקו את הקישור:" : "Copy this link:", url);
+    }
   };
 
   // ── Language switch ──
