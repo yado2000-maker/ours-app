@@ -856,8 +856,13 @@ export default function Ours() {
         <style>{CSS}</style>
         <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:pickFont}} dir={pickDir}>
           <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:6}}>Ours</div>
+          <p style={{fontSize:15,color:"var(--dark)",fontWeight:400,marginBottom:4,textAlign:"center"}}>
+            {pickDir === "rtl"
+              ? `ברוכים הבאים, ${household.name}`
+              : `Welcome, ${household.name}`}
+          </p>
           <p style={{fontSize:13,color:"var(--muted)",fontWeight:300,marginBottom:36}}>
-            {pickDir === "rtl" ? "מי אתה/את?" : "Who are you?"}
+            {pickDir === "rtl" ? "איך קוראים לך?" : "Who are you?"}
           </p>
           <div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:280}}>
             {household.members.map(m => (
@@ -955,7 +960,7 @@ export default function Ours() {
           </div>
           <div className="header-side right">
             <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingRight:4}}>{user.name}</div>
-            <button className="icon-btn" onClick={() => { setUser(null); setScreen("pick"); }} title={dir==="rtl" ? "החלף משתמש" : "Switch user"}>
+            <button className="icon-btn" onClick={() => { setUser(null); setScreen("pick"); }} title={dir==="rtl" ? "החלפת משתמש" : "Switch user"}>
               ⇄
             </button>
             <button className={`icon-btn`} onClick={() => setShowReset(true)} title={t.settingsTitle}>⚙</button>
