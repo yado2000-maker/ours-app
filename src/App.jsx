@@ -628,6 +628,7 @@ export default function Ours() {
   const [busy, setBusy]           = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [showLang, setShowLang]   = useState(false);
+  const [copied, setCopied]       = useState(false);
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
@@ -639,6 +640,19 @@ export default function Ours() {
   // ── Boot ──
   useEffect(() => {
     (async () => {
+      // Check for ?join= param first
+      const params = new URLSearchParams(window.location.search);
+      const joinParam = params.get("join");
+      if (joinParam) {
+        try {
+          const hh = JSON.parse(atob(joinParam));
+          setHousehold(hh); setUser(hh.members[0]); setLang(hh.lang || "en");
+          await save(hh, {}, [], []);
+          // Clean URL without reloading
+          window.history.replaceState({}, "", window.location.pathname);
+          setScreen("chat"); return;
+        } catch {}
+      }
       try {
         const r = await window.storage.get("ours-hh");
         if (r) {
@@ -681,6 +695,16 @@ export default function Ours() {
     }
     setHousehold(null); setUser(null); setAllMsgs({}); setTasks([]); setShopping([]); setInput("");
     setShowReset(false); setScreen("setup");
+  };
+
+  // ── Share join link ──
+  const shareLink = () => {
+    const encoded = btoa(JSON.stringify(household));
+    const url = `${window.location.origin}/?join=${encoded}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
   };
 
   // ── Language switch ──
@@ -817,7 +841,12 @@ export default function Ours() {
                 </button>
               ))}
             </div>
-            <button className="icon-btn" onClick={() => setShowReset(true)} title={t.settingsTitle}>⚙</button>
+            <button className={`icon-btn`} onClick={() => setShowReset(true)} title={t.settingsTitle}>⚙</button>
+            <button className={`icon-btn`} onClick={shareLink}
+              title={dir==="rtl" ? "שתפו קישור הצטרפות" : "Share join link"}
+              style={copied ? {color:"var(--green)",opacity:1} : {}}>
+              {copied ? "✓" : "🔗"}
+            </button>
           </div>
         </div>
 
