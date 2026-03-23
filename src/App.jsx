@@ -917,6 +917,7 @@ export default function Ours() {
     recognitionRef.current?.stop();
     setListening(false);
   };
+  const openTasks   = tasks.filter(x => !x.done).length;
   const neededItems = shopping.filter(x => !x.got).length;
   const userName    = user?.name || "";
   const starters    = [t.s1, t.s2, t.s3(userName), t.s4];
