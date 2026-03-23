@@ -308,9 +308,38 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
+// SUPABASE
 // ─────────────────────────────────────────────────────────────────────────────
-const uid = () => Math.random().toString(36).slice(2, 6);
+const SB_URL = "https://wzwwtghtnkapdwlgnrxr.supabase.co";
+const SB_KEY = "sb_publishable_w5_9MXaM2XAZRk2b8rquoQ_kFpcUMTA";
+
+const sbGet = async (hhId) => {
+  const res = await fetch(`${SB_URL}/rest/v1/households?id=eq.${hhId}&select=data`, {
+    headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` }
+  });
+  const rows = await res.json();
+  return rows?.[0]?.data || null;
+};
+
+const sbSet = async (hhId, data) => {
+  await fetch(`${SB_URL}/rest/v1/households`, {
+    method: "POST",
+    headers: {
+      "apikey": SB_KEY,
+      "Authorization": `Bearer ${SB_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "resolution=merge-duplicates",
+    },
+    body: JSON.stringify({ id: hhId, data, updated_at: new Date().toISOString() })
+  });
+};
+
+// Messages stay in localStorage — private per device
+const lsGet = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
+const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+
+const uid8 = () => Math.random().toString(36).slice(2, 10);
+const uid  = () => Math.random().toString(36).slice(2, 6);
 
 function CheckSVG() {
   return (
@@ -640,32 +669,35 @@ export default function Ours() {
   // ── Boot ──
   useEffect(() => {
     (async () => {
-      // Check for ?join= param first
+      // ?join=hhId from share link
       const params = new URLSearchParams(window.location.search);
-      const joinParam = params.get("join");
-      if (joinParam) {
+      const joinId = params.get("join");
+      if (joinId) {
         try {
-          const hh = JSON.parse(decodeURIComponent(escape(atob(joinParam))));
-          setHousehold(hh); setUser(hh.members[0]); setLang(hh.lang || "en");
-          await save(hh, {}, [], []);
-          // Clean URL without reloading
-          window.history.replaceState({}, "", window.location.pathname);
-          setScreen("chat"); return;
+          const data = await sbGet(joinId);
+          if (data) {
+            setHousehold(data.hh); setLang(data.hh.lang || "en");
+            setTasks(data.tasks || []); setShopping(data.shopping || []);
+            window.history.replaceState({}, "", window.location.pathname);
+            setScreen("pick"); return;
+          }
         } catch {}
       }
-      try {
-        const r = await window.storage.get("ours-hh");
-        if (r) {
-          const hh = JSON.parse(r.value);
-          setHousehold(hh);
-          setUser(hh.members[0]);
-          setLang(hh.lang || "en");
-          setScreen("chat");
-        } else { setScreen("setup"); }
-      } catch { setScreen("setup"); }
-      try { const r = await window.storage.get("ours-tasks");    if (r) setTasks(JSON.parse(r.value));    } catch {}
-      try { const r = await window.storage.get("ours-shopping"); if (r) setShopping(JSON.parse(r.value)); } catch {}
-      try { const r = await window.storage.get("ours-msgs");     if (r) setAllMsgs(JSON.parse(r.value));  } catch {}
+      // existing household in localStorage
+      const hhId = lsGet("ours-hhid");
+      if (hhId) {
+        try {
+          const data = await sbGet(hhId);
+          if (data) {
+            setHousehold(data.hh); setLang(data.hh.lang || "en");
+            setTasks(data.tasks || []); setShopping(data.shopping || []);
+            const msgs = lsGet("ours-msgs") || {};
+            setAllMsgs(msgs);
+            setScreen("pick"); return;
+          }
+        } catch {}
+      }
+      setScreen("setup");
     })();
   }, []);
 
@@ -676,23 +708,41 @@ export default function Ours() {
 
   // ── Persist ──
   const save = async (hh, m, tk, sh) => {
-    try { if (hh !== undefined) await window.storage.set("ours-hh",       JSON.stringify(hh)); } catch {}
-    try { if (m  !== undefined) await window.storage.set("ours-msgs",     JSON.stringify(m));  } catch {}
-    try { if (tk !== undefined) await window.storage.set("ours-tasks",    JSON.stringify(tk)); } catch {}
-    try { if (sh !== undefined) await window.storage.set("ours-shopping", JSON.stringify(sh)); } catch {}
+    const hhId = lsGet("ours-hhid");
+    if (!hhId) return;
+    const current = {
+      hh:       hh       !== undefined ? hh       : household,
+      tasks:    tk       !== undefined ? tk       : tasks,
+      shopping: sh       !== undefined ? sh       : shopping,
+    };
+    await sbSet(hhId, current);
+    if (m !== undefined) lsSet("ours-msgs", m);
   };
 
   // ── Setup done ──
   const handleSetup = async (hh) => {
-    setHousehold(hh); setUser(hh.members[0]); setLang(hh.lang || "en");
-    await save(hh, {}, [], []); setScreen("chat");
+    const hhId = uid8();
+    hh.id = hhId;
+    lsSet("ours-hhid", hhId);
+    await sbSet(hhId, { hh, tasks: [], shopping: [] });
+    setHousehold(hh); setLang(hh.lang || "en");
+    setTasks([]); setShopping([]);
+    setScreen("pick");
   };
 
   // ── Reset ──
   const doReset = async () => {
-    for (const k of ["ours-hh","ours-msgs","ours-tasks","ours-shopping"]) {
-      try { await window.storage.delete(k); } catch {}
+    const hhId = lsGet("ours-hhid");
+    if (hhId) {
+      try {
+        await fetch(`${SB_URL}/rest/v1/households?id=eq.${hhId}`, {
+          method: "DELETE",
+          headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` }
+        });
+      } catch {}
     }
+    localStorage.removeItem("ours-hhid");
+    localStorage.removeItem("ours-msgs");
     setHousehold(null); setUser(null); setAllMsgs({}); setTasks([]); setShopping([]); setInput("");
     setShowReset(false); setScreen("setup");
   };
@@ -701,8 +751,9 @@ export default function Ours() {
 
   // ── Share join link ──
   const shareLink = () => {
-    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(household))));
-    const url = `${window.location.origin}/?join=${encoded}`;
+    const hhId = lsGet("ours-hhid") || household?.id;
+    if (!hhId) return;
+    const url = `${window.location.origin}/?join=${hhId}`;
     setShareUrl(url);
   };
 
@@ -796,6 +847,54 @@ export default function Ours() {
 
   if (screen === "setup") return <><style>{CSS}</style><Setup onDone={handleSetup} /></>;
 
+  // ── User picker screen ──
+  if (screen === "pick") {
+    const pickDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
+    const pickFont = pickDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+    return (
+      <>
+        <style>{CSS}</style>
+        <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:pickFont}} dir={pickDir}>
+          <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:6}}>Ours</div>
+          <p style={{fontSize:13,color:"var(--muted)",fontWeight:300,marginBottom:36}}>
+            {pickDir === "rtl" ? "מי אתה/את?" : "Who are you?"}
+          </p>
+          <div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:280}}>
+            {household.members.map(m => (
+              <button key={m.id}
+                style={{padding:"15px 20px",borderRadius:14,border:"1.5px solid var(--border)",background:"var(--white)",fontFamily:pickFont,fontSize:16,fontWeight:500,color:"var(--dark)",cursor:"pointer",transition:"all 0.15s",boxShadow:"var(--sh)"}}
+                onMouseOver={e=>e.currentTarget.style.borderColor="var(--accent)"}
+                onMouseOut={e=>e.currentTarget.style.borderColor="var(--border)"}
+                onClick={async () => {
+                  // Save hhId locally if joining for the first time
+                  if (!lsGet("ours-hhid") && household?.id) {
+                    lsSet("ours-hhid", household.id);
+                  }
+                  // Fetch latest shared data from Supabase
+                  const hhId = lsGet("ours-hhid") || household?.id;
+                  if (hhId) {
+                    try {
+                      const data = await sbGet(hhId);
+                      if (data) {
+                        setTasks(data.tasks || []);
+                        setShopping(data.shopping || []);
+                      }
+                    } catch {}
+                  }
+                  const msgs = lsGet("ours-msgs") || {};
+                  setAllMsgs(msgs);
+                  setUser(m);
+                  setScreen("chat");
+                }}>
+                {m.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <style>{CSS}</style>
@@ -855,14 +954,10 @@ export default function Ours() {
             <div className="wordmark">Ours</div>
           </div>
           <div className="header-side right">
-            <div className="user-pills">
-              {household.members.map(m => (
-                <button key={m.id} className={`pill ${user.id===m.id?"active":""}`}
-                  onClick={() => { setUser(m); setTimeout(() => inputRef.current?.focus(), 80); }}>
-                  {m.name}
-                </button>
-              ))}
-            </div>
+            <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingRight:4}}>{user.name}</div>
+            <button className="icon-btn" onClick={() => { setUser(null); setScreen("pick"); }} title={dir==="rtl" ? "החלף משתמש" : "Switch user"}>
+              ⇄
+            </button>
             <button className={`icon-btn`} onClick={() => setShowReset(true)} title={t.settingsTitle}>⚙</button>
             <button className={`icon-btn`} onClick={shareLink}
               title={dir==="rtl" ? "שתפו קישור הצטרפות" : "Share join link"}
