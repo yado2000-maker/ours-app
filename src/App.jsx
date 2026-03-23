@@ -20,6 +20,11 @@ const T = {
     goBtn: "Let's go →",
     // header
     settingsTitle: "Settings",
+    settingsName: "Your name",
+    settingsSave: "Save",
+    settingsTheme: "Theme",
+    themeLight: "Light", themeDark: "Dark", themeAuto: "Auto",
+    settingsDanger: "Danger zone",
     // reset modal
     resetTitle: "Reset household?",
     resetSub: "Clears all messages, tasks, shopping, and household data. Can't be undone.",
@@ -73,6 +78,11 @@ const T = {
     addBtn: "הוסיפו",
     goBtn: "אפשר להתקדם ←",
     settingsTitle: "הגדרות",
+    settingsName: "השם שלך",
+    settingsSave: "שמור",
+    settingsTheme: "ערכת צבעים",
+    themeLight: "בהיר", themeDark: "כהה", themeAuto: "לפי המכשיר",
+    settingsDanger: "אזור מסוכן",
     resetTitle: "לאפס את משק הבית?",
     resetSub: "ימחק את כל ההודעות, המשימות, הקניות והנתונים. לא ניתן לבטל.",
     resetCancel: "ביטול",
@@ -120,6 +130,18 @@ const CSS = `
   --green:#4A7C59;--muted:#8A8070;--white:#fff;
   --border:rgba(28,26,23,0.1);
   --sh:0 1px 8px rgba(0,0,0,0.06);--shm:0 2px 18px rgba(0,0,0,0.09);
+}
+[data-theme="dark"]{
+  --cream:#1A1814;--dark:#F0EBE0;--warm:#C8BFB0;
+  --muted:#6A6258;--white:#242018;--border:rgba(240,235,224,0.1);
+  --sh:0 1px 8px rgba(0,0,0,0.3);--shm:0 2px 18px rgba(0,0,0,0.4);
+}
+@media(prefers-color-scheme:dark){
+  [data-theme="auto"]{
+    --cream:#1A1814;--dark:#F0EBE0;--warm:#C8BFB0;
+    --muted:#6A6258;--white:#242018;--border:rgba(240,235,224,0.1);
+    --sh:0 1px 8px rgba(0,0,0,0.3);--shm:0 2px 18px rgba(0,0,0,0.4);
+  }
 }
 html,body{height:100%;background:var(--cream);overflow:hidden;}
 .app{display:flex;flex-direction:column;height:100dvh;max-width:480px;margin:0 auto;background:var(--cream);}
@@ -197,6 +219,9 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .send-btn:hover:not(:disabled){background:var(--accent);}
 .send-btn:active:not(:disabled){transform:scale(0.92);}
 .send-btn:disabled{opacity:0.3;cursor:not-allowed;}
+.mic-btn{width:38px;height:38px;border-radius:50%;background:var(--cream);border:1.5px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.18s;font-size:15px;line-height:1;}
+.mic-btn:hover{border-color:var(--accent);}
+@keyframes pulse-mic{0%,100%{transform:scale(1)}50%{transform:scale(1.08);}}
 
 /* ── List views ── */
 .list-view{flex:1;overflow-y:auto;padding:14px 16px 20px;display:flex;flex-direction:column;gap:6px;}
@@ -658,6 +683,9 @@ export default function Ours() {
   const [showReset, setShowReset] = useState(false);
   const [showLang, setShowLang]   = useState(false);
   const [copied, setCopied]       = useState(false);
+  const [theme, setTheme]         = useState(() => lsGet("ours-theme") || "auto");
+  const [editName, setEditName]   = useState("");
+  const isFounder = !!lsGet("ours-founder");
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
@@ -693,6 +721,16 @@ export default function Ours() {
             setTasks(data.tasks || []); setShopping(data.shopping || []);
             const msgs = lsGet("ours-msgs") || {};
             setAllMsgs(msgs);
+            // If user already chose their name on this device — go straight to chat
+            const savedUser = lsGet("ours-user");
+            if (savedUser) {
+              // Verify the saved user still exists in the household
+              const stillExists = data.hh.members.find(m => m.id === savedUser.id);
+              if (stillExists) {
+                setUser(stillExists);
+                setScreen("chat"); return;
+              }
+            }
             setScreen("pick"); return;
           }
         } catch {}
@@ -700,6 +738,12 @@ export default function Ours() {
       setScreen("setup");
     })();
   }, []);
+
+  // ── Theme ──
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    lsSet("ours-theme", theme);
+  }, [theme]);
 
   // ── Scroll ──
   useEffect(() => {
@@ -724,6 +768,7 @@ export default function Ours() {
     const hhId = uid8();
     hh.id = hhId;
     lsSet("ours-hhid", hhId);
+    lsSet("ours-founder", true); // this device created the household
     await sbSet(hhId, { hh, tasks: [], shopping: [] });
     setHousehold(hh); setLang(hh.lang || "en");
     setTasks([]); setShopping([]);
@@ -743,11 +788,28 @@ export default function Ours() {
     }
     localStorage.removeItem("ours-hhid");
     localStorage.removeItem("ours-msgs");
+    localStorage.removeItem("ours-user");
     setHousehold(null); setUser(null); setAllMsgs({}); setTasks([]); setShopping([]); setInput("");
     setShowReset(false); setScreen("setup");
   };
 
   const [shareUrl, setShareUrl] = useState(null);
+
+  // ── Rename user ──
+  const renameUser = async () => {
+    const newName = editName.trim();
+    if (!newName || newName === user.name) { setShowReset(false); return; }
+    const updatedMembers = household.members.map(m =>
+      m.id === user.id ? { ...m, name: newName } : m
+    );
+    const updatedHh = { ...household, members: updatedMembers };
+    const updatedUser = { ...user, name: newName };
+    setHousehold(updatedHh);
+    setUser(updatedUser);
+    lsSet("ours-user", updatedUser);
+    await save(updatedHh, undefined, undefined, undefined);
+    setShowReset(false);
+  };
 
   // ── Share join link ──
   const shareLink = () => {
@@ -830,7 +892,31 @@ export default function Ours() {
     setBusy(false);
   };
 
-  const openTasks   = tasks.filter(x => !x.done).length;
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  const startVoice = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert(dir === "rtl" ? "הדפדפן שלך לא תומך בהקלטה קולית" : "Your browser doesn't support voice input"); return; }
+    const rec = new SR();
+    rec.lang = lang === "he" ? "he-IL" : "en-US";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onstart  = () => setListening(true);
+    rec.onend    = () => setListening(false);
+    rec.onerror  = () => setListening(false);
+    rec.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      setInput(prev => prev ? prev + " " + transcript : transcript);
+    };
+    recognitionRef.current = rec;
+    rec.start();
+  };
+
+  const stopVoice = () => {
+    recognitionRef.current?.stop();
+    setListening(false);
+  };
   const neededItems = shopping.filter(x => !x.got).length;
   const userName    = user?.name || "";
   const starters    = [t.s1, t.s2, t.s3(userName), t.s4];
@@ -888,6 +974,8 @@ export default function Ours() {
                   }
                   const msgs = lsGet("ours-msgs") || {};
                   setAllMsgs(msgs);
+                  // Lock this user to this device
+                  lsSet("ours-user", m);
                   setUser(m);
                   setScreen("chat");
                 }}>
@@ -904,16 +992,57 @@ export default function Ours() {
     <>
       <style>{CSS}</style>
 
-      {/* Reset modal */}
+      {/* Settings modal */}
       {showReset && (
         <div className="overlay" onClick={() => setShowReset(false)}>
-          <div className="modal" dir={dir} onClick={e => e.stopPropagation()}>
-            <div className="modal-title">{t.resetTitle}</div>
-            <p className="modal-sub">{t.resetSub}</p>
-            <div className="modal-btns">
-              <button className="modal-cancel" onClick={() => setShowReset(false)}>{t.resetCancel}</button>
-              <button className="modal-confirm" onClick={doReset}>{t.resetConfirm}</button>
+          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:22}}>
+            <div className="modal-title">{t.settingsTitle}</div>
+
+            {/* Rename */}
+            <div>
+              <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>{t.settingsName}</div>
+              <div style={{display:"flex",gap:8}}>
+                <input
+                  style={{flex:1,padding:"10px 13px",borderRadius:10,border:"1.5px solid var(--border)",background:"var(--cream)",fontFamily:"inherit",fontSize:14,color:"var(--dark)",outline:"none"}}
+                  defaultValue={user.name}
+                  onChange={e => setEditName(e.target.value)}
+                  onFocus={e => setEditName(e.target.value)}
+                  dir={dir}
+                />
+                <button onClick={renameUser}
+                  style={{padding:"10px 16px",borderRadius:10,background:"var(--dark)",color:"var(--white)",border:"none",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                  {t.settingsSave}
+                </button>
+              </div>
             </div>
+
+            {/* Theme */}
+            <div>
+              <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>{t.settingsTheme}</div>
+              <div style={{display:"flex",gap:7}}>
+                {[["light", t.themeLight], ["dark", t.themeDark], ["auto", t.themeAuto]].map(([val, label]) => (
+                  <button key={val} onClick={() => setTheme(val)}
+                    style={{flex:1,padding:"9px 6px",borderRadius:10,border:`1.5px solid ${theme===val?"var(--dark)":"var(--border)"}`,background:theme===val?"var(--dark)":"transparent",color:theme===val?"var(--white)":"var(--warm)",fontSize:12.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reset — founder only */}
+            {isFounder && (
+              <div>
+                <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>{t.settingsDanger}</div>
+                <div className="modal-btns">
+                  <button className="modal-cancel" onClick={() => setShowReset(false)}>{t.resetCancel}</button>
+                  <button className="modal-confirm" onClick={doReset}>{t.resetConfirm}</button>
+                </div>
+              </div>
+            )}
+
+            {!isFounder && (
+              <button className="modal-cancel" onClick={() => setShowReset(false)} style={{marginTop:-8}}>{t.resetCancel}</button>
+            )}
           </div>
         </div>
       )}
@@ -960,9 +1089,6 @@ export default function Ours() {
           </div>
           <div className="header-side right">
             <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingRight:4}}>{user.name}</div>
-            <button className="icon-btn" onClick={() => { setUser(null); setScreen("pick"); }} title={dir==="rtl" ? "החלפת משתמש" : "Switch user"}>
-              ⇄
-            </button>
             <button className={`icon-btn`} onClick={() => setShowReset(true)} title={t.settingsTitle}>⚙</button>
             <button className={`icon-btn`} onClick={shareLink}
               title={dir==="rtl" ? "שתפו קישור הצטרפות" : "Share join link"}
@@ -1009,6 +1135,11 @@ export default function Ours() {
                   placeholder={t.inputPlaceholder(userName)}
                   value={input} onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
+                <button className="mic-btn" onClick={listening ? stopVoice : startVoice}
+                  title={dir==="rtl" ? "הקלטה קולית" : "Voice input"}
+                  style={listening ? {background:"var(--accent)",color:"white",animation:"pulse-mic 1s ease-in-out infinite"} : {}}>
+                  {listening ? "⏹" : "🎤"}
+                </button>
                 <button className="send-btn" onClick={() => send()} disabled={!input.trim() || busy}>
                   {sendArrow}
                 </button>
