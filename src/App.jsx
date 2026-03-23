@@ -645,7 +645,7 @@ export default function Ours() {
       const joinParam = params.get("join");
       if (joinParam) {
         try {
-          const hh = JSON.parse(atob(joinParam));
+          const hh = JSON.parse(decodeURIComponent(escape(atob(joinParam))));
           setHousehold(hh); setUser(hh.members[0]); setLang(hh.lang || "en");
           await save(hh, {}, [], []);
           // Clean URL without reloading
@@ -697,20 +697,13 @@ export default function Ours() {
     setShowReset(false); setScreen("setup");
   };
 
+  const [shareUrl, setShareUrl] = useState(null);
+
   // ── Share join link ──
   const shareLink = () => {
-    const encoded = btoa(JSON.stringify(household));
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(household))));
     const url = `${window.location.origin}/?join=${encoded}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2500);
-      }).catch(() => {
-        window.prompt(dir === "rtl" ? "העתיקו את הקישור:" : "Copy this link:", url);
-      });
-    } else {
-      window.prompt(dir === "rtl" ? "העתיקו את הקישור:" : "Copy this link:", url);
-    }
+    setShareUrl(url);
   };
 
   // ── Language switch ──
@@ -824,6 +817,29 @@ export default function Ours() {
       {/* Lang switch modal */}
       {showLang && (
         <LangModal lang={lang} onSelect={switchLang} onClose={() => setShowLang(false)} />
+      )}
+
+      {/* Share modal */}
+      {shareUrl && (
+        <div className="overlay" onClick={() => setShareUrl(null)}>
+          <div className="modal" dir={dir} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">{dir === "rtl" ? "קישור הצטרפות" : "Join link"}</div>
+            <p className="modal-sub">{dir === "rtl" ? "שלחו את הקישור הזה לבני המשפחה. כשייכנסו דרכו — הבית כבר מוגדר." : "Send this to your family. When they open it, the household is already set up."}</p>
+            <div style={{background:"var(--cream)",borderRadius:10,padding:"11px 14px",fontSize:12,wordBreak:"break-all",color:"var(--warm)",marginBottom:16,userSelect:"all",border:"1px solid var(--border)"}}>
+              {shareUrl}
+            </div>
+            <div className="modal-btns">
+              <button className="modal-cancel" onClick={() => setShareUrl(null)}>
+                {dir === "rtl" ? "סגור" : "Close"}
+              </button>
+              <a className="modal-confirm" style={{textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center"}}
+                href={`https://wa.me/?text=${encodeURIComponent(shareUrl)}`} target="_blank" rel="noreferrer"
+                onClick={() => setShareUrl(null)}>
+                {dir === "rtl" ? "שתף בוואטסאפ ↗" : "Share on WhatsApp ↗"}
+              </a>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="app" dir={dir}>
