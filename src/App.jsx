@@ -729,7 +729,7 @@ export default function Ours() {
         method: "POST",
       headers: {
   "Content-Type": "application/json",
-  "x-api-key": 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,
+  "x-api-key":   "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY,
   "anthropic-version": "2023-06-01",
   "anthropic-dangerous-direct-browser-calls": "true",
 },
