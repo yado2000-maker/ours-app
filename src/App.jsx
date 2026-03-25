@@ -407,7 +407,7 @@ function CheckSVG() {
 // ─────────────────────────────────────────────────────────────────────────────
 // SYSTEM PROMPT
 // ─────────────────────────────────────────────────────────────────────────────
-const buildPrompt = (household, tasks, shopping, user, lang) => {
+const buildPrompt = (household, tasks, shopping, events, user, lang) => {
   const isHe = lang === "he";
   const langNote = isHe
     ? `The household language is Hebrew. ALWAYS respond in Hebrew.
@@ -430,27 +430,28 @@ Today's date: ${new Date().toLocaleDateString(lang === "he" ? "he-IL" : "en-GB",
 
 Personality: warm, direct. No filler phrases. Short responses unless detail is needed. Never nag. Use names naturally.
 
-CURRENT TASKS & EVENTS:
-${tasks.length === 0 ? "(none)" : tasks.map(t => {
-  const sched = t.scheduledFor ? ` 📅 ${t.scheduledFor}` : "";
-  const status = t.done ? "done" : t.scheduledFor ? "scheduled" : "open";
-  return `• [${status}] ${t.title}${t.assignedTo?` → ${t.assignedTo}`:""}${sched} (id:${t.id})`;
-}).join("\n")}
+CURRENT TASKS (chores & to-dos only — no scheduled events):
+${tasks.length === 0 ? "(none)" : tasks.map(t => `• [${t.done?"done":"open"}] ${t.title}${t.assignedTo?` → ${t.assignedTo}`:""} (id:${t.id})`).join("\n")}
+
+CURRENT EVENTS (scheduled calendar items):
+${events.length === 0 ? "(none)" : events.map(e => `• ${e.title}${e.assignedTo?` → ${e.assignedTo}`:""} @ ${e.scheduledFor} (id:${e.id})`).join("\n")}
 
 CURRENT SHOPPING LIST:
 ${shopping.length === 0 ? "(empty)" : shopping.map(s => `• [${s.got?"got":"need"}] ${s.name}${s.qty?` ×${s.qty}`:""} [${s.category}] (id:${s.id})`).join("\n")}
 
 Respond ONLY as this exact JSON — no other text, no markdown fences:
-{"message":"...","tasks":[],"shopping":[]}
+{"message":"...","tasks":[],"shopping":[],"events":[]}
 
-Task shape: {"id":"xxxx","title":"...","assignedTo":"name or null","done":false,"completedBy":"name or null","completedAt":"ISO string or null","scheduledFor":"ISO string or null"}
+Task shape:  {"id":"xxxx","title":"...","assignedTo":"name or null","done":false,"completedBy":"name or null","completedAt":"ISO string or null"}
+Event shape: {"id":"xxxx","title":"...","assignedTo":"name or null","scheduledFor":"ISO string"}
+Shopping shape: {"id":"xxxx","name":"...","qty":"number string or null","category":"one of the category names","got":false}
 
-scheduledFor rules:
-- Set when user mentions a specific date/time for an event or reminder
-- Always use ISO 8601 format: "2026-03-28T17:00:00"
-- Resolve relative dates like "ביום שלישי", "Tuesday", "מחר", "tomorrow" based on today's date above
-- scheduledFor tasks are NOT done — they are upcoming events
-- A task can have both assignedTo and scheduledFor
+CRITICAL ROUTING RULES:
+- Chores, to-dos, household tasks → tasks array ONLY
+- Anything with a specific date/time (classes, appointments, reminders, events) → events array ONLY
+- Never put a scheduled event into tasks, never put a chore into events
+- Resolve relative dates ("Tuesday", "ביום שלישי", "tomorrow", "מחר") using today's date above
+- Always use ISO 8601: "2026-03-28T17:00:00"
 
 ${isHe
   ? 'Shopping categories (use these exact Hebrew names): פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר'
@@ -588,11 +589,6 @@ function TasksView({ tasks, user, lang, onToggle, onClaim, onDelete, onClearDone
                       </div>
                     : <button className="take-btn" onClick={() => onClaim(task.id, user.name)}>{t.takeIt}</button>
                   }
-                  {task.scheduledFor && (
-                    <div style={{fontSize:10.5,color:"var(--accent)",background:"var(--accent-soft)",borderRadius:100,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>
-                      📅 {new Date(task.scheduledFor).toLocaleDateString([], {day:"numeric",month:"numeric"})} {new Date(task.scheduledFor).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
-                    </div>
-                  )}
                   <button className="del-btn" onClick={() => onDelete("task", task.id)}>×</button>
                 </div>
               ))}
@@ -692,11 +688,10 @@ function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // WEEK VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function WeekView({ tasks, t, lang }) {
-  const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, -1 = last week, etc.
+function WeekView({ tasks, events, t, lang }) {
+  const [weekOffset, setWeekOffset] = useState(0);
   const today = new Date();
 
-  // Start of the displayed week
   const startOfWeek = new Date(today);
   startOfWeek.setDate(today.getDate() - today.getDay() + weekOffset * 7);
   startOfWeek.setHours(0, 0, 0, 0);
@@ -711,20 +706,19 @@ function WeekView({ tasks, t, lang }) {
     return d;
   });
 
+  // Completed tasks this week
   const doneTasks = tasks.filter(task => {
     if (!task.done || !task.completedAt) return false;
     const ts = new Date(task.completedAt);
     return ts >= startOfWeek && ts <= endOfWeek;
   });
 
-  // Scheduled (future/present events) this week
-  const scheduledTasks = tasks.filter(task => {
-    if (task.done || !task.scheduledFor) return false;
-    const ts = new Date(task.scheduledFor);
+  // Events this week
+  const weekEvents = (events || []).filter(ev => {
+    if (!ev.scheduledFor) return false;
+    const ts = new Date(ev.scheduledFor);
     return ts >= startOfWeek && ts <= endOfWeek;
   });
-
-  const allWeekTasks = [...doneTasks, ...scheduledTasks];
 
   const byDay = {};
   doneTasks.forEach(task => {
@@ -732,25 +726,24 @@ function WeekView({ tasks, t, lang }) {
     if (!byDay[d]) byDay[d] = [];
     byDay[d].push({ ...task, _type: "done" });
   });
-  scheduledTasks.forEach(task => {
-    const d = new Date(task.scheduledFor).getDay();
+  weekEvents.forEach(ev => {
+    const d = new Date(ev.scheduledFor).getDay();
     if (!byDay[d]) byDay[d] = [];
-    byDay[d].push({ ...task, _type: "scheduled" });
+    byDay[d].push({ ...ev, _type: "event" });
   });
-  // Sort each day by time
   Object.values(byDay).forEach(arr => arr.sort((a, b) => {
     const aTime = a._type === "done" ? a.completedAt : a.scheduledFor;
     const bTime = b._type === "done" ? b.completedAt : b.scheduledFor;
     return new Date(aTime) - new Date(bTime);
   }));
 
+  const allWeekItems = [...doneTasks, ...weekEvents];
   const pad = n => String(n).padStart(2, "0");
   const fmtTime = iso => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const isToday = d => weekOffset === 0 && d.toDateString() === today.toDateString();
-
-  const weekRange = `${pad(days[0].getDate())}.${pad(days[0].getMonth()+1)} – ${pad(days[6].getDate())}.${pad(days[6].getMonth()+1)}`;
   const isCurrentWeek = weekOffset === 0;
   const dir = lang === "he" ? "rtl" : "ltr";
+  const weekRange = `${pad(days[0].getDate())}.${pad(days[0].getMonth()+1)} – ${pad(days[6].getDate())}.${pad(days[6].getMonth()+1)}`;
 
   return (
     <div className="week-view">
@@ -768,14 +761,13 @@ function WeekView({ tasks, t, lang }) {
             {dir === "rtl" ? "›" : "‹"}
           </button>
           <div style={{fontSize:11.5,color:"var(--muted)",minWidth:70,textAlign:"center"}}>{weekRange}</div>
-          <button onClick={() => setWeekOffset(w => Math.min(0, w + 1))}
-            disabled={isCurrentWeek}
-            style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:isCurrentWeek?"not-allowed":"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:isCurrentWeek?"var(--border)":"var(--warm)",opacity:isCurrentWeek?0.3:1}}>
+          <button onClick={() => setWeekOffset(w => w + 1)}
+            style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
             {dir === "rtl" ? "‹" : "›"}
           </button>
         </div>
       </div>
-      {allWeekTasks.length === 0 ? (
+      {allWeekItems.length === 0 ? (
         <div className="week-empty">
           <div className="week-empty-icon">📅</div>
           <p className="week-empty-text">{t.weekEmpty}</p>
@@ -786,20 +778,20 @@ function WeekView({ tasks, t, lang }) {
             <div key={i} className="week-col">
               <div className={`week-day-label ${isToday(day) ? "today" : ""}`}>{t.weekDays[i]}</div>
               <div className={`week-date ${isToday(day) ? "today" : ""}`}>{day.getDate()}</div>
-              {(byDay[i] || []).map(task => (
-                <div key={task.id} className={`week-task-chip ${task._type === "scheduled" ? "scheduled" : ""}`}>
-                  <div className="week-task-name">{task.title}</div>
-                  {task._type === "scheduled" ? (
+              {(byDay[i] || []).map(item => (
+                <div key={item.id} className={`week-task-chip ${item._type === "event" ? "scheduled" : ""}`}>
+                  <div className="week-task-name">{item.title}</div>
+                  {item._type === "event" ? (
                     <>
-                      {task.assignedTo && <div className="week-task-who">{task.assignedTo}</div>}
+                      {item.assignedTo && <div className="week-task-who">{item.assignedTo}</div>}
                       <div className="week-task-time" style={{color:"var(--accent)"}}>
-                        {fmtTime(task.scheduledFor)} · {t.weekScheduled}
+                        {fmtTime(item.scheduledFor)}
                       </div>
                     </>
                   ) : (
                     <>
-                      {task.completedBy && <div className="week-task-who">{task.completedBy}</div>}
-                      <div className="week-task-time">{fmtTime(task.completedAt)} · {t.weekDone}</div>
+                      {item.completedBy && <div className="week-task-who">{item.completedBy}</div>}
+                      <div className="week-task-time">{fmtTime(item.completedAt)}</div>
                     </>
                   )}
                 </div>
@@ -847,6 +839,7 @@ export default function Ours() {
   const [allMsgs, setAllMsgs]     = useState({});
   const [tasks, setTasks]         = useState([]);
   const [shopping, setShopping]   = useState([]);
+  const [events, setEvents]       = useState([]);
   const [input, setInput]         = useState("");
   const [busy, setBusy]           = useState(false);
   const [showReset, setShowReset] = useState(false);
@@ -874,7 +867,7 @@ export default function Ours() {
           const data = await sbGet(joinId);
           if (data) {
             setHousehold(data.hh); setLang(data.hh.lang || "en");
-            setTasks(data.tasks || []); setShopping(data.shopping || []);
+            setTasks(data.tasks || []); setShopping(data.shopping || []); setEvents(data.events || []);
             window.history.replaceState({}, "", window.location.pathname);
             setScreen("pick"); return;
           }
@@ -887,7 +880,7 @@ export default function Ours() {
           const data = await sbGet(hhId);
           if (data) {
             setHousehold(data.hh); setLang(data.hh.lang || "en");
-            setTasks(data.tasks || []); setShopping(data.shopping || []);
+            setTasks(data.tasks || []); setShopping(data.shopping || []); setEvents(data.events || []);
             const msgs = lsGet("ours-msgs") || {};
             setAllMsgs(msgs);
             // If user already chose their name on this device — go straight to chat
@@ -920,13 +913,14 @@ export default function Ours() {
   }, [msgs, busy, tab]);
 
   // ── Persist ──
-  const save = async (hh, m, tk, sh) => {
+  const save = async (hh, m, tk, sh, ev) => {
     const hhId = lsGet("ours-hhid");
     if (!hhId) return;
     const current = {
-      hh:       hh       !== undefined ? hh       : household,
-      tasks:    tk       !== undefined ? tk       : tasks,
-      shopping: sh       !== undefined ? sh       : shopping,
+      hh:       hh !== undefined ? hh       : household,
+      tasks:    tk !== undefined ? tk       : tasks,
+      shopping: sh !== undefined ? sh       : shopping,
+      events:   ev !== undefined ? ev       : events,
     };
     await sbSet(hhId, current);
     if (m !== undefined) lsSet("ours-msgs", m);
@@ -937,10 +931,10 @@ export default function Ours() {
     const hhId = uid8();
     hh.id = hhId;
     lsSet("ours-hhid", hhId);
-    lsSet("ours-founder", true); // this device created the household
-    await sbSet(hhId, { hh, tasks: [], shopping: [] });
+    lsSet("ours-founder", true);
+    await sbSet(hhId, { hh, tasks: [], shopping: [], events: [] });
     setHousehold(hh); setLang(hh.lang || "en");
-    setTasks([]); setShopping([]);
+    setTasks([]); setShopping([]); setEvents([]);
     setScreen("pick");
   };
 
@@ -958,7 +952,7 @@ export default function Ours() {
     localStorage.removeItem("ours-hhid");
     localStorage.removeItem("ours-msgs");
     localStorage.removeItem("ours-user");
-    setHousehold(null); setUser(null); setAllMsgs({}); setTasks([]); setShopping([]); setInput("");
+    setHousehold(null); setUser(null); setAllMsgs({}); setTasks([]); setShopping([]); setEvents([]); setInput("");
     setShowReset(false); setScreen("setup");
   };
 
@@ -1038,7 +1032,7 @@ export default function Ours() {
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1200,
-          system: buildPrompt(household, tasks, shopping, user, lang),
+          system: buildPrompt(household, tasks, shopping, events, user, lang),
           messages: updated.slice(-20).map(m => ({ role: m.role, content: m.content })),
         })
       });
@@ -1052,8 +1046,9 @@ export default function Ours() {
       const finalAll  = { ...nextAll, [user.id]: finalMsgs };
       const newTasks  = Array.isArray(parsed.tasks)    ? parsed.tasks    : tasks;
       const newShop   = Array.isArray(parsed.shopping) ? parsed.shopping : shopping;
-      setAllMsgs(finalAll); setTasks(newTasks); setShopping(newShop);
-      await save(undefined, finalAll, newTasks, newShop);
+      const newEvents = Array.isArray(parsed.events)   ? parsed.events   : events;
+      setAllMsgs(finalAll); setTasks(newTasks); setShopping(newShop); setEvents(newEvents);
+      await save(undefined, finalAll, newTasks, newShop, newEvents);
     } catch {
       const aMsg = { role:"assistant", content: t.networkError, ts: Date.now() };
       setAllMsgs({ ...nextAll, [user.id]: [...updated, aMsg] });
@@ -1139,6 +1134,7 @@ export default function Ours() {
                       if (data) {
                         setTasks(data.tasks || []);
                         setShopping(data.shopping || []);
+                        setEvents(data.events || []);
                       }
                     } catch {}
                   }
@@ -1326,7 +1322,7 @@ export default function Ours() {
           )}
 
           {tab === "week" && (
-            <WeekView tasks={tasks} t={t} lang={lang} />
+            <WeekView tasks={tasks} events={events} t={t} lang={lang} />
           )}
 
         </div>
