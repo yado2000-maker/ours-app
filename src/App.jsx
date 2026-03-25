@@ -31,7 +31,13 @@ const T = {
     resetCancel: "Cancel",
     resetConfirm: "Reset everything",
     // nav
-    navChat: "Chat", navTasks: "Tasks", navShopping: "Shopping",
+    navChat: "Chat", navTasks: "Tasks", navShopping: "Shopping", navWeek: "Week",
+    weekTitle: "This Week",
+    weekEmpty: "Nothing this week.",
+    weekDays: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],
+    weekToday: "Today",
+    weekScheduled: "Upcoming",
+    weekDone: "Completed",
     // chat empty
     hiName: (n) => `Hi ${n} 👋`,
     chatSub: "Tell me what needs doing, or what to pick up.",
@@ -87,7 +93,13 @@ const T = {
     resetSub: "ימחק את כל ההודעות, המשימות, הקניות והנתונים. לא ניתן לבטל.",
     resetCancel: "ביטול",
     resetConfirm: "אפסו הכל",
-    navChat: "צ׳אט", navTasks: "משימות", navShopping: "קניות",
+    navChat: "צ׳אט", navTasks: "משימות", navShopping: "קניות", navWeek: "שבוע",
+    weekTitle: "השבוע",
+    weekEmpty: "אין כלום השבוע.",
+    weekDays: ["א׳","ב׳","ג׳","ד׳","ה׳","ו׳","ש׳"],
+    weekToday: "היום",
+    weekScheduled: "מתוכנן",
+    weekDone: "בוצע",
     hiName: (n) => `היי ${n} 👋`,
     chatSub: "תגידו לי מה צריך לעשות, או מה לקנות.",
     s1: "אילו מטלות עוד לא נעשו?",
@@ -273,7 +285,25 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .clear-btn{background:none;border:1.5px solid var(--border);border-radius:10px;padding:5px 12px;font-size:12px;color:var(--muted);cursor:pointer;transition:all 0.15s;}
 .clear-btn:hover{border-color:var(--accent);color:var(--accent);}
 
-/* ── Setup ── */
+/* ── Week view ── */
+.week-view{flex:1;overflow-y:auto;padding:14px 12px 20px;display:flex;flex-direction:column;gap:0;}
+.week-header{padding:2px 2px 12px;display:flex;align-items:center;justify-content:space-between;}
+.week-title{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:400;color:var(--dark);}
+.week-subtitle{font-size:12px;color:var(--muted);font-weight:400;}
+.week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:4px;}
+.week-col{display:flex;flex-direction:column;gap:4px;}
+.week-day-label{font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);text-align:center;padding:4px 2px;}
+.week-day-label.today{color:var(--accent);}
+.week-date{font-size:18px;font-weight:400;font-family:'Cormorant Garamond',serif;text-align:center;color:var(--dark);padding:2px 0 6px;border-bottom:1.5px solid var(--border);margin-bottom:4px;}
+.week-date.today{color:var(--accent);}
+.week-task-chip{background:var(--white);border-radius:8px;padding:6px 7px;box-shadow:var(--sh);border:1px solid var(--border);margin-bottom:3px;animation:rowIn 0.2s ease;}
+.week-task-chip.scheduled{border-color:var(--accent-mid);background:var(--accent-soft);}
+.week-task-name{font-size:11px;color:var(--dark);font-weight:400;line-height:1.3;word-break:break-word;}
+.week-task-who{font-size:10px;color:var(--accent);font-weight:500;margin-top:2px;}
+.week-task-time{font-size:9.5px;color:var(--muted);margin-top:1px;}
+.week-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:40px 24px;text-align:center;}
+.week-empty-icon{font-size:36px;opacity:0.3;}
+.week-empty-text{font-size:13.5px;color:var(--muted);font-weight:300;line-height:1.65;max-width:210px;}
 .setup-wrap{min-height:100dvh;background:var(--cream);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;overflow-y:auto;}
 .setup-mark{font-family:'Cormorant Garamond',serif;font-weight:300;font-size:38px;letter-spacing:0.22em;color:var(--dark);margin-bottom:4px;}
 .setup-tagline{font-size:13px;color:var(--muted);font-weight:300;margin-bottom:36px;letter-spacing:0.03em;}
@@ -396,11 +426,16 @@ ${langNote}
 
 Members: ${household.members.map(m => m.name).join(", ")}.
 Talking to: ${user.name}.
+Today's date: ${new Date().toLocaleDateString(lang === "he" ? "he-IL" : "en-GB", {weekday:"long",year:"numeric",month:"long",day:"numeric"})}.
 
 Personality: warm, direct. No filler phrases. Short responses unless detail is needed. Never nag. Use names naturally.
 
-CURRENT TASKS:
-${tasks.length === 0 ? "(none)" : tasks.map(t => `• [${t.done?"done":"open"}] ${t.title}${t.assignedTo?` → ${t.assignedTo}`:""} (id:${t.id})`).join("\n")}
+CURRENT TASKS & EVENTS:
+${tasks.length === 0 ? "(none)" : tasks.map(t => {
+  const sched = t.scheduledFor ? ` 📅 ${t.scheduledFor}` : "";
+  const status = t.done ? "done" : t.scheduledFor ? "scheduled" : "open";
+  return `• [${status}] ${t.title}${t.assignedTo?` → ${t.assignedTo}`:""}${sched} (id:${t.id})`;
+}).join("\n")}
 
 CURRENT SHOPPING LIST:
 ${shopping.length === 0 ? "(empty)" : shopping.map(s => `• [${s.got?"got":"need"}] ${s.name}${s.qty?` ×${s.qty}`:""} [${s.category}] (id:${s.id})`).join("\n")}
@@ -408,8 +443,14 @@ ${shopping.length === 0 ? "(empty)" : shopping.map(s => `• [${s.got?"got":"nee
 Respond ONLY as this exact JSON — no other text, no markdown fences:
 {"message":"...","tasks":[],"shopping":[]}
 
-Task shape: {"id":"xxxx","title":"...","assignedTo":"name or null","done":false,"completedBy":"name or null","completedAt":"ISO string or null"}
-Shopping shape: {"id":"xxxx","name":"...","qty":"number string or null","category":"one of the category names","got":false}
+Task shape: {"id":"xxxx","title":"...","assignedTo":"name or null","done":false,"completedBy":"name or null","completedAt":"ISO string or null","scheduledFor":"ISO string or null"}
+
+scheduledFor rules:
+- Set when user mentions a specific date/time for an event or reminder
+- Always use ISO 8601 format: "2026-03-28T17:00:00"
+- Resolve relative dates like "ביום שלישי", "Tuesday", "מחר", "tomorrow" based on today's date above
+- scheduledFor tasks are NOT done — they are upcoming events
+- A task can have both assignedTo and scheduledFor
 
 ${isHe
   ? 'Shopping categories (use these exact Hebrew names): פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר'
@@ -547,6 +588,11 @@ function TasksView({ tasks, user, lang, onToggle, onClaim, onDelete, onClearDone
                       </div>
                     : <button className="take-btn" onClick={() => onClaim(task.id, user.name)}>{t.takeIt}</button>
                   }
+                  {task.scheduledFor && (
+                    <div style={{fontSize:10.5,color:"var(--accent)",background:"var(--accent-soft)",borderRadius:100,padding:"2px 8px",whiteSpace:"nowrap",flexShrink:0}}>
+                      📅 {new Date(task.scheduledFor).toLocaleDateString([], {day:"numeric",month:"numeric"})} {new Date(task.scheduledFor).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+                    </div>
+                  )}
                   <button className="del-btn" onClick={() => onDelete("task", task.id)}>×</button>
                 </div>
               ))}
@@ -638,6 +684,129 @@ function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t }) {
             </>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEEK VIEW
+// ─────────────────────────────────────────────────────────────────────────────
+function WeekView({ tasks, t, lang }) {
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = this week, -1 = last week, etc.
+  const today = new Date();
+
+  // Start of the displayed week
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay() + weekOffset * 7);
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  endOfWeek.setHours(23, 59, 59, 999);
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(startOfWeek);
+    d.setDate(startOfWeek.getDate() + i);
+    return d;
+  });
+
+  const doneTasks = tasks.filter(task => {
+    if (!task.done || !task.completedAt) return false;
+    const ts = new Date(task.completedAt);
+    return ts >= startOfWeek && ts <= endOfWeek;
+  });
+
+  // Scheduled (future/present events) this week
+  const scheduledTasks = tasks.filter(task => {
+    if (task.done || !task.scheduledFor) return false;
+    const ts = new Date(task.scheduledFor);
+    return ts >= startOfWeek && ts <= endOfWeek;
+  });
+
+  const allWeekTasks = [...doneTasks, ...scheduledTasks];
+
+  const byDay = {};
+  doneTasks.forEach(task => {
+    const d = new Date(task.completedAt).getDay();
+    if (!byDay[d]) byDay[d] = [];
+    byDay[d].push({ ...task, _type: "done" });
+  });
+  scheduledTasks.forEach(task => {
+    const d = new Date(task.scheduledFor).getDay();
+    if (!byDay[d]) byDay[d] = [];
+    byDay[d].push({ ...task, _type: "scheduled" });
+  });
+  // Sort each day by time
+  Object.values(byDay).forEach(arr => arr.sort((a, b) => {
+    const aTime = a._type === "done" ? a.completedAt : a.scheduledFor;
+    const bTime = b._type === "done" ? b.completedAt : b.scheduledFor;
+    return new Date(aTime) - new Date(bTime);
+  }));
+
+  const pad = n => String(n).padStart(2, "0");
+  const fmtTime = iso => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const isToday = d => weekOffset === 0 && d.toDateString() === today.toDateString();
+
+  const weekRange = `${pad(days[0].getDate())}.${pad(days[0].getMonth()+1)} – ${pad(days[6].getDate())}.${pad(days[6].getMonth()+1)}`;
+  const isCurrentWeek = weekOffset === 0;
+  const dir = lang === "he" ? "rtl" : "ltr";
+
+  return (
+    <div className="week-view">
+      <div className="week-header">
+        <div className="week-title">{isCurrentWeek ? t.weekTitle : weekRange}</div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          {!isCurrentWeek && (
+            <button onClick={() => setWeekOffset(0)}
+              style={{fontSize:11,color:"var(--accent)",background:"none",border:"1.5px solid var(--accent-mid)",borderRadius:100,padding:"2px 10px",cursor:"pointer",fontFamily:"inherit",fontWeight:500}}>
+              {lang === "he" ? "השבוע" : "This week"}
+            </button>
+          )}
+          <button onClick={() => setWeekOffset(w => w - 1)}
+            style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
+            {dir === "rtl" ? "›" : "‹"}
+          </button>
+          <div style={{fontSize:11.5,color:"var(--muted)",minWidth:70,textAlign:"center"}}>{weekRange}</div>
+          <button onClick={() => setWeekOffset(w => Math.min(0, w + 1))}
+            disabled={isCurrentWeek}
+            style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:isCurrentWeek?"not-allowed":"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:isCurrentWeek?"var(--border)":"var(--warm)",opacity:isCurrentWeek?0.3:1}}>
+            {dir === "rtl" ? "‹" : "›"}
+          </button>
+        </div>
+      </div>
+      {allWeekTasks.length === 0 ? (
+        <div className="week-empty">
+          <div className="week-empty-icon">📅</div>
+          <p className="week-empty-text">{t.weekEmpty}</p>
+        </div>
+      ) : (
+        <div className="week-grid">
+          {days.map((day, i) => (
+            <div key={i} className="week-col">
+              <div className={`week-day-label ${isToday(day) ? "today" : ""}`}>{t.weekDays[i]}</div>
+              <div className={`week-date ${isToday(day) ? "today" : ""}`}>{day.getDate()}</div>
+              {(byDay[i] || []).map(task => (
+                <div key={task.id} className={`week-task-chip ${task._type === "scheduled" ? "scheduled" : ""}`}>
+                  <div className="week-task-name">{task.title}</div>
+                  {task._type === "scheduled" ? (
+                    <>
+                      {task.assignedTo && <div className="week-task-who">{task.assignedTo}</div>}
+                      <div className="week-task-time" style={{color:"var(--accent)"}}>
+                        {fmtTime(task.scheduledFor)} · {t.weekScheduled}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {task.completedBy && <div className="week-task-who">{task.completedBy}</div>}
+                      <div className="week-task-time">{fmtTime(task.completedAt)} · {t.weekDone}</div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1156,6 +1325,10 @@ export default function Ours() {
             <ShoppingView shopping={shopping} onToggle={toggleShop} onDelete={deleteItem} onClearGot={clearGot} t={t} />
           )}
 
+          {tab === "week" && (
+            <WeekView tasks={tasks} t={t} lang={lang} />
+          )}
+
         </div>
 
         {/* ── Bottom Nav ── */}
@@ -1173,6 +1346,10 @@ export default function Ours() {
             <span className="nav-icon">🛒</span>
             <span className="nav-label">{t.navShopping}</span>
             {neededItems > 0 && <span className="nav-badge">{neededItems}</span>}
+          </button>
+          <button className={`nav-btn ${tab==="week"?"active":""}`} onClick={() => setTab("week")}>
+            <span className="nav-icon">📅</span>
+            <span className="nav-label">{t.navWeek}</span>
           </button>
         </div>
 
