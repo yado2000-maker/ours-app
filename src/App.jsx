@@ -453,6 +453,16 @@ CRITICAL ROUTING RULES:
 - Resolve relative dates ("Tuesday", "ביום שלישי", "tomorrow", "מחר") using today's date above
 - Always use ISO 8601: "2026-03-28T17:00:00"
 
+HEBREW DAY NAMES — memorize this mapping exactly:
+יום ראשון = Sunday (day 0)
+יום שני = Monday (day 1)
+יום שלישי = Tuesday (day 2)
+יום רביעי = Wednesday (day 3)
+יום חמישי = Thursday (day 4)
+יום שישי = Friday (day 5)
+שבת = Saturday (day 6)
+Example: "ראשון ורביעי" = Sunday + Wednesday. NOT Monday + Thursday.
+
 ${isHe
   ? 'Shopping categories (use these exact Hebrew names): פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר'
   : 'Shopping categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Health Store, Other'
@@ -756,14 +766,14 @@ function WeekView({ tasks, events, t, lang }) {
               {lang === "he" ? "השבוע" : "This week"}
             </button>
           )}
-          <button onClick={() => setWeekOffset(w => w - 1)}
+          <button onClick={() => setWeekOffset(w => dir === "rtl" ? w + 1 : w - 1)}
             style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
-            {dir === "rtl" ? "›" : "‹"}
+            ‹
           </button>
           <div style={{fontSize:11.5,color:"var(--muted)",minWidth:70,textAlign:"center"}}>{weekRange}</div>
-          <button onClick={() => setWeekOffset(w => w + 1)}
+          <button onClick={() => setWeekOffset(w => dir === "rtl" ? w - 1 : w + 1)}
             style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
-            {dir === "rtl" ? "‹" : "›"}
+            ›
           </button>
         </div>
       </div>
