@@ -365,28 +365,25 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 // ─────────────────────────────────────────────────────────────────────────────
 // SUPABASE
 // ─────────────────────────────────────────────────────────────────────────────
+import { createClient } from "@supabase/supabase-js";
+
 const SB_URL = "https://wzwwtghtnkapdwlgnrxr.supabase.co";
 const SB_KEY = "sb_publishable_w5_9MXaM2XAZRk2b8rquoQ_kFpcUMTA";
+const supabase = createClient(SB_URL, SB_KEY);
 
 const sbGet = async (hhId) => {
-  const res = await fetch(`${SB_URL}/rest/v1/households?id=eq.${hhId}&select=data`, {
-    headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` }
-  });
-  const rows = await res.json();
-  return rows?.[0]?.data || null;
+  const { data } = await supabase
+    .from("households")
+    .select("data")
+    .eq("id", hhId)
+    .single();
+  return data?.data || null;
 };
 
 const sbSet = async (hhId, data) => {
-  await fetch(`${SB_URL}/rest/v1/households`, {
-    method: "POST",
-    headers: {
-      "apikey": SB_KEY,
-      "Authorization": `Bearer ${SB_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "resolution=merge-duplicates",
-    },
-    body: JSON.stringify({ id: hhId, data, updated_at: new Date().toISOString() })
-  });
+  await supabase
+    .from("households")
+    .upsert({ id: hhId, data, updated_at: new Date().toISOString() });
 };
 
 // Messages stay in localStorage — private per device
@@ -698,7 +695,7 @@ function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // WEEK VIEW
 // ─────────────────────────────────────────────────────────────────────────────
-function WeekView({ tasks, events, t, lang }) {
+function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const today = new Date();
 
@@ -754,13 +751,19 @@ function WeekView({ tasks, events, t, lang }) {
   const isCurrentWeek = weekOffset === 0;
   const dir = lang === "he" ? "rtl" : "ltr";
   const weekRange = `${pad(days[0].getDate())}.${pad(days[0].getMonth()+1)} – ${pad(days[6].getDate())}.${pad(days[6].getMonth()+1)}`;
+  const weekLabel = () => {
+    if (weekOffset === 0)  return t.weekTitle;
+    if (weekOffset === -1) return lang === "he" ? "השבוע שעבר" : "Last week";
+    if (weekOffset === 1)  return lang === "he" ? "השבוע הבא"  : "Next week";
+    return weekRange;
+  };
 
   return (
     <div className="week-view">
       <div className="week-header">
-        <div className="week-title">{isCurrentWeek ? t.weekTitle : weekRange}</div>
+        <div className="week-title">{weekLabel()}</div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
-          {!isCurrentWeek && (
+          {weekOffset !== 0 && (
             <button onClick={() => setWeekOffset(0)}
               style={{fontSize:11,color:"var(--accent)",background:"none",border:"1.5px solid var(--accent-mid)",borderRadius:100,padding:"2px 10px",cursor:"pointer",fontFamily:"inherit",fontWeight:500}}>
               {lang === "he" ? "השבוע" : "This week"}
@@ -790,7 +793,17 @@ function WeekView({ tasks, events, t, lang }) {
               <div className={`week-date ${isToday(day) ? "today" : ""}`}>{day.getDate()}</div>
               {(byDay[i] || []).map(item => (
                 <div key={item.id} className={`week-task-chip ${item._type === "event" ? "scheduled" : ""}`}>
-                  <div className="week-task-name">{item.title}</div>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:3}}>
+                    <div className="week-task-name">{item.title}</div>
+                    {item._type === "event" && (
+                      <button onClick={() => onDeleteEvent(item.id)}
+                        style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:12,lineHeight:1,padding:0,flexShrink:0,opacity:0.6,marginTop:1}}
+                        onMouseOver={e=>e.currentTarget.style.opacity=1}
+                        onMouseOut={e=>e.currentTarget.style.opacity=0.6}>
+                        ×
+                      </button>
+                    )}
+                  </div>
                   {item._type === "event" ? (
                     <>
                       {item.assignedTo && <div className="week-task-who">{item.assignedTo}</div>}
@@ -922,6 +935,34 @@ export default function Ours() {
     if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, busy, tab]);
 
+  // ── Realtime sync ──
+  useEffect(() => {
+    if (screen !== "chat") return;
+    const hhId = lsGet("ours-hhid");
+    if (!hhId) return;
+
+    const channel = supabase
+      .channel(`household-${hhId}`)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "households",
+        filter: `id=eq.${hhId}`,
+      }, (payload) => {
+        const d = payload.new?.data;
+        if (!d) return;
+        // Only update shared data — never overwrite local messages
+        if (d.tasks)    setTasks(d.tasks);
+        if (d.shopping) setShopping(d.shopping);
+        if (d.events)   setEvents(d.events);
+        // Update household metadata (e.g. member rename)
+        if (d.hh)       setHousehold(d.hh);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [screen]);
+
   // ── Persist ──
   const save = async (hh, m, tk, sh, ev) => {
     const hhId = lsGet("ours-hhid");
@@ -1020,8 +1061,9 @@ export default function Ours() {
     if (type === "task") { const n = tasks.filter(x => x.id!==id); setTasks(n); await save(undefined,undefined,n,undefined); }
     else { const n = shopping.filter(x => x.id!==id); setShopping(n); await save(undefined,undefined,undefined,n); }
   };
-  const clearDone = async () => { const n = tasks.filter(x => !x.done); setTasks(n); await save(undefined,undefined,n,undefined); };
-  const clearGot  = async () => { const n = shopping.filter(x => !x.got); setShopping(n); await save(undefined,undefined,undefined,n); };
+  const clearDone = async () => { const n = tasks.filter(x => !x.done); setTasks(n); await save(undefined,undefined,n,undefined,undefined); };
+  const clearGot  = async () => { const n = shopping.filter(x => !x.got); setShopping(n); await save(undefined,undefined,undefined,n,undefined); };
+  const deleteEvent = async (id) => { const n = events.filter(x => x.id !== id); setEvents(n); await save(undefined,undefined,undefined,undefined,n); };
 
   // ── Send ──
   const send = async (text) => {
@@ -1332,7 +1374,7 @@ export default function Ours() {
           )}
 
           {tab === "week" && (
-            <WeekView tasks={tasks} events={events} t={t} lang={lang} />
+            <WeekView tasks={tasks} events={events} t={t} lang={lang} onDeleteEvent={deleteEvent} />
           )}
 
         </div>
