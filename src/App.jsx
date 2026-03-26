@@ -418,12 +418,25 @@ Tone in Hebrew:
 - Short sentences. Get to the point. No unnecessary padding.`
     : "The household language is English.";
 
+  const today = new Date();
+  const hebrewDayNames = ["ראשון","שני","שלישי","רביעי","חמישי","שישי","שבת"];
+  const englishDayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const upcomingDays = Array.from({length:7}, (_,i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const pad = n => String(n).padStart(2,"0");
+    const iso = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const name = lang === "he" ? hebrewDayNames[d.getDay()] : englishDayNames[d.getDay()];
+    return `${name} = ${iso}${i===0?" (today)":""}`;
+  }).join(", ");
+
   return `You are Ours — the shared AI for the ${household.name}.
 ${langNote}
 
 Members: ${household.members.map(m => m.name).join(", ")}.
 Talking to: ${user.name}.
-Today's date: ${new Date().toLocaleDateString(lang === "he" ? "he-IL" : "en-GB", {weekday:"long",year:"numeric",month:"long",day:"numeric"})}.
+Today: ${today.toISOString().slice(0,10)} (${lang === "he" ? hebrewDayNames[today.getDay()] : englishDayNames[today.getDay()]})
+Upcoming days: ${upcomingDays}
 
 Personality: warm, direct. No filler phrases. Short responses unless detail is needed. Never nag. Use names naturally.
 
