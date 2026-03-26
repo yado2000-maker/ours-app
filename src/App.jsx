@@ -766,12 +766,12 @@ function WeekView({ tasks, events, t, lang }) {
               {lang === "he" ? "השבוע" : "This week"}
             </button>
           )}
-          <button onClick={() => setWeekOffset(w => dir === "rtl" ? w + 1 : w - 1)}
+          <button onClick={() => setWeekOffset(w => w - 1)}
             style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
             ‹
           </button>
           <div style={{fontSize:11.5,color:"var(--muted)",minWidth:70,textAlign:"center"}}>{weekRange}</div>
-          <button onClick={() => setWeekOffset(w => dir === "rtl" ? w - 1 : w + 1)}
+          <button onClick={() => setWeekOffset(w => w + 1)}
             style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
             ›
           </button>
