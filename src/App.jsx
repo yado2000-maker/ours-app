@@ -902,8 +902,8 @@ export default function Ours() {
         try {
           const data = await sbGet(joinId);
           if (data) {
-            setHousehold(data.hh); setLang(data.hh.lang || "en");
-            setTasks(data.tasks || []); setShopping(data.shopping || []); setEvents(data.events || []);
+            setHouseholdS(data.hh); setLang(data.hh.lang || "en");
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
             window.history.replaceState({}, "", window.location.pathname);
             setScreen("pick"); return;
           }
@@ -915,8 +915,8 @@ export default function Ours() {
         try {
           const data = await sbGet(hhId);
           if (data) {
-            setHousehold(data.hh); setLang(data.hh.lang || "en");
-            setTasks(data.tasks || []); setShopping(data.shopping || []); setEvents(data.events || []);
+            setHouseholdS(data.hh); setLang(data.hh.lang || "en");
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
             const msgs = lsGet("ours-msgs") || {};
             setAllMsgs(msgs);
             // If user already chose their name on this device — go straight to chat
@@ -948,15 +948,17 @@ export default function Ours() {
     if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, busy, tab]);
 
-  // Refs to always have fresh state in async callbacks
-  const householdRef = useRef(household);
-  const tasksRef     = useRef(tasks);
-  const shoppingRef  = useRef(shopping);
-  const eventsRef    = useRef(events);
-  useEffect(() => { householdRef.current = household; }, [household]);
-  useEffect(() => { tasksRef.current     = tasks;     }, [tasks]);
-  useEffect(() => { shoppingRef.current  = shopping;  }, [shopping]);
-  useEffect(() => { eventsRef.current    = events;    }, [events]);
+  // Refs always in sync with state — updated together with every setState call
+  const householdRef = useRef(null);
+  const tasksRef     = useRef([]);
+  const shoppingRef  = useRef([]);
+  const eventsRef    = useRef([]);
+
+  // Wrappers that keep refs in sync
+  const setHouseholdS = (v) => { householdRef.current = v; setHousehold(v); };
+  const setTasksS     = (v) => { tasksRef.current     = v; setTasks(v);     };
+  const setShoppingS  = (v) => { shoppingRef.current  = v; setShopping(v);  };
+  const setEventsS    = (v) => { eventsRef.current    = v; setEvents(v);    };
 
   // ── Realtime sync ──
   const lastSaveRef = useRef(0); // timestamp of last local save
@@ -978,10 +980,10 @@ export default function Ours() {
         if (Date.now() - lastSaveRef.current < 3000) return;
         const d = payload.new?.data;
         if (!d) return;
-        if (d.tasks)    setTasks(d.tasks);
-        if (d.shopping) setShopping(d.shopping);
-        if (d.events)   setEvents(d.events);
-        if (d.hh)       setHousehold(d.hh);
+        if (d.tasks)    setTasksS(d.tasks);
+        if (d.shopping) setShoppingS(d.shopping);
+        if (d.events)   setEventsS(d.events);
+        if (d.hh)       setHouseholdS(d.hh);
       })
       .subscribe();
 
@@ -1010,8 +1012,8 @@ export default function Ours() {
     lsSet("ours-hhid", hhId);
     lsSet("ours-founder", true);
     await sbSet(hhId, { hh, tasks: [], shopping: [], events: [] });
-    setHousehold(hh); setLang(hh.lang || "en");
-    setTasks([]); setShopping([]); setEvents([]);
+    setHouseholdS(hh); setLang(hh.lang || "en");
+    setTasksS([]); setShoppingS([]); setEventsS([]);
     setScreen("pick");
   };
 
@@ -1029,7 +1031,7 @@ export default function Ours() {
     localStorage.removeItem("ours-hhid");
     localStorage.removeItem("ours-msgs");
     localStorage.removeItem("ours-user");
-    setHousehold(null); setUser(null); setAllMsgs({}); setTasks([]); setShopping([]); setEvents([]); setInput("");
+    setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setInput("");
     setShowReset(false); setScreen("setup");
   };
 
@@ -1044,7 +1046,7 @@ export default function Ours() {
     );
     const updatedHh = { ...household, members: updatedMembers };
     const updatedUser = { ...user, name: newName };
-    setHousehold(updatedHh);
+    setHouseholdS(updatedHh);
     setUser(updatedUser);
     lsSet("ours-user", updatedUser);
     await save(updatedHh, undefined, undefined, undefined);
@@ -1064,7 +1066,7 @@ export default function Ours() {
     setLang(l); setShowLang(false);
     if (household) {
       const updated = { ...household, lang: l };
-      setHousehold(updated);
+      setHouseholdS(updated);
       await save(updated, undefined, undefined, undefined);
     }
   };
@@ -1076,20 +1078,20 @@ export default function Ours() {
       const nowDone = !x.done;
       return { ...x, done: nowDone, completedBy: nowDone ? user.name : null, completedAt: nowDone ? new Date().toISOString() : null };
     });
-    setTasks(n); await save(undefined, undefined, n, undefined);
+    setTasksS(n); await save(undefined, undefined, n, undefined);
   };
   const claimTask = async (id, name) => {
     const n = tasks.map(x => x.id === id ? { ...x, assignedTo: name } : x);
-    setTasks(n); await save(undefined, undefined, n, undefined);
+    setTasksS(n); await save(undefined, undefined, n, undefined);
   };
-  const toggleShop = async (id) => { const n = shopping.map(x => x.id===id ? {...x,got:!x.got} : x); setShopping(n); await save(undefined,undefined,undefined,n); };
+  const toggleShop = async (id) => { const n = shopping.map(x => x.id===id ? {...x,got:!x.got} : x); setShoppingS(n); await save(undefined,undefined,undefined,n); };
   const deleteItem = async (type, id) => {
-    if (type === "task") { const n = tasks.filter(x => x.id!==id); setTasks(n); await save(undefined,undefined,n,undefined); }
-    else { const n = shopping.filter(x => x.id!==id); setShopping(n); await save(undefined,undefined,undefined,n); }
+    if (type === "task") { const n = tasks.filter(x => x.id!==id); setTasksS(n); await save(undefined,undefined,n,undefined); }
+    else { const n = shopping.filter(x => x.id!==id); setShoppingS(n); await save(undefined,undefined,undefined,n); }
   };
-  const clearDone = async () => { const n = tasks.filter(x => !x.done); setTasks(n); await save(undefined,undefined,n,undefined,undefined); };
-  const clearGot  = async () => { const n = shopping.filter(x => !x.got); setShopping(n); await save(undefined,undefined,undefined,n,undefined); };
-  const deleteEvent = async (id) => { const n = events.filter(x => x.id !== id); setEvents(n); await save(undefined,undefined,undefined,undefined,n); };
+  const clearDone = async () => { const n = tasks.filter(x => !x.done); setTasksS(n); await save(undefined,undefined,n,undefined,undefined); };
+  const clearGot  = async () => { const n = shopping.filter(x => !x.got); setShoppingS(n); await save(undefined,undefined,undefined,n,undefined); };
+  const deleteEvent = async (id) => { const n = events.filter(x => x.id !== id); setEventsS(n); await save(undefined,undefined,undefined,undefined,n); };
 
   // ── Send ──
   const send = async (text) => {
@@ -1125,7 +1127,7 @@ export default function Ours() {
       const newTasks  = Array.isArray(parsed.tasks)    ? parsed.tasks    : tasks;
       const newShop   = Array.isArray(parsed.shopping) ? parsed.shopping : shopping;
       const newEvents = Array.isArray(parsed.events)   ? parsed.events   : events;
-      setAllMsgs(finalAll); setTasks(newTasks); setShopping(newShop); setEvents(newEvents);
+      setAllMsgs(finalAll); setTasksS(newTasks); setShoppingS(newShop); setEventsS(newEvents);
       await save(undefined, finalAll, newTasks, newShop, newEvents);
     } catch {
       const aMsg = { role:"assistant", content: t.networkError, ts: Date.now() };
@@ -1210,9 +1212,9 @@ export default function Ours() {
                     try {
                       const data = await sbGet(hhId);
                       if (data) {
-                        setTasks(data.tasks || []);
-                        setShopping(data.shopping || []);
-                        setEvents(data.events || []);
+                        setTasksS(data.tasks || []);
+                        setShoppingS(data.shopping || []);
+                        setEventsS(data.events || []);
                       }
                     } catch {}
                   }
