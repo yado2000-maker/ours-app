@@ -949,6 +949,8 @@ export default function Ours() {
   }, [msgs, busy, tab]);
 
   // ── Realtime sync ──
+  const lastSaveRef = useRef(0); // timestamp of last local save
+
   useEffect(() => {
     if (screen !== "chat") return;
     const hhId = lsGet("ours-hhid");
@@ -962,13 +964,13 @@ export default function Ours() {
         table: "households",
         filter: `id=eq.${hhId}`,
       }, (payload) => {
+        // Ignore echoes from this device's own saves (within 3 seconds)
+        if (Date.now() - lastSaveRef.current < 3000) return;
         const d = payload.new?.data;
         if (!d) return;
-        // Only update shared data — never overwrite local messages
         if (d.tasks)    setTasks(d.tasks);
         if (d.shopping) setShopping(d.shopping);
         if (d.events)   setEvents(d.events);
-        // Update household metadata (e.g. member rename)
         if (d.hh)       setHousehold(d.hh);
       })
       .subscribe();
@@ -980,6 +982,7 @@ export default function Ours() {
   const save = async (hh, m, tk, sh, ev) => {
     const hhId = lsGet("ours-hhid");
     if (!hhId) return;
+    lastSaveRef.current = Date.now(); // mark this device as the writer
     const current = {
       hh:       hh !== undefined ? hh       : household,
       tasks:    tk !== undefined ? tk       : tasks,
