@@ -40,11 +40,11 @@ const T = {
     weekDone: "Completed",
     // chat empty
     hiName: (n) => `Hi ${n} 👋`,
-    chatSub: "Tell me what needs doing, or what to pick up.",
+    chatSub: "Chores, shopping, classes, rides and family events — all in one place.",
     s1: "What chores still need doing?",
     s2: "Add milk, eggs and bread to the list",
     s3: (n) => `Add 'vacuum living room' for ${n}`,
-    s4: "What's on the shopping list?",
+    s4: "What's on the calendar this week?",
     inputPlaceholder: (n) => `Message Ours as ${n}…`,
     oursLabel: "Ours",
     // tasks
@@ -101,11 +101,11 @@ const T = {
     weekScheduled: "מתוכנן",
     weekDone: "בוצע",
     hiName: (n) => `היי ${n} 👋`,
-    chatSub: "תגידו לי מה צריך לעשות, או מה לקנות.",
+    chatSub: "מטלות, קניות, חוגים, הסעות ואירועים משפחתיים — הכל במקום אחד.",
     s1: "אילו מטלות עוד לא נעשו?",
     s2: "תוסיפו חלב, ביצים ולחם לרשימה",
     s3: (n) => `תוסיפו 'לשאוב אבק בסלון' בשביל ${n}`,
-    s4: "מה יש ברשימת הקניות?",
+    s4: "מה יש בלוז השבוע?",
     inputPlaceholder: (n) => `הודעה ל-Ours בתור ${n}…`,
     oursLabel: "Ours",
     tasksTitle: "מטלות ומשימות",
@@ -948,6 +948,16 @@ export default function Ours() {
     if (tab === "chat") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, busy, tab]);
 
+  // Refs to always have fresh state in async callbacks
+  const householdRef = useRef(household);
+  const tasksRef     = useRef(tasks);
+  const shoppingRef  = useRef(shopping);
+  const eventsRef    = useRef(events);
+  useEffect(() => { householdRef.current = household; }, [household]);
+  useEffect(() => { tasksRef.current     = tasks;     }, [tasks]);
+  useEffect(() => { shoppingRef.current  = shopping;  }, [shopping]);
+  useEffect(() => { eventsRef.current    = events;    }, [events]);
+
   // ── Realtime sync ──
   const lastSaveRef = useRef(0); // timestamp of last local save
 
@@ -982,12 +992,12 @@ export default function Ours() {
   const save = async (hh, m, tk, sh, ev) => {
     const hhId = lsGet("ours-hhid");
     if (!hhId) return;
-    lastSaveRef.current = Date.now(); // mark this device as the writer
+    lastSaveRef.current = Date.now();
     const current = {
-      hh:       hh !== undefined ? hh       : household,
-      tasks:    tk !== undefined ? tk       : tasks,
-      shopping: sh !== undefined ? sh       : shopping,
-      events:   ev !== undefined ? ev       : events,
+      hh:       hh !== undefined ? hh : householdRef.current,
+      tasks:    tk !== undefined ? tk : tasksRef.current,
+      shopping: sh !== undefined ? sh : shoppingRef.current,
+      events:   ev !== undefined ? ev : eventsRef.current,
     };
     await sbSet(hhId, current);
     if (m !== undefined) lsSet("ours-msgs", m);
