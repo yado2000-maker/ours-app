@@ -47,10 +47,7 @@ export const loadHousehold = async (hhId) => {
       members: (membersRes.data || []).map(m => ({ id: m.id, name: m.display_name })),
     },
     tasks: tasksRes.data || [],
-    shopping: (shoppingRes.data || []).map(s => ({
-      ...s,
-      // Normalize field names: DB uses "got", app uses "got" — already matching
-    })),
+    shopping: shoppingRes.data || [],
     events: eventsRes.data || [],
   };
 };
