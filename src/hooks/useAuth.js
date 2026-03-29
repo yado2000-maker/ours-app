@@ -8,11 +8,16 @@ export function useAuth() {
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id);
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        if (session) fetchProfile(session.user.id);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("[Auth] getSession failed:", err);
+        setLoading(false); // Always resolve loading, even on error
+      });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
