@@ -163,6 +163,14 @@ async function logMessage(
 
 async function upsertMemberMapping(householdId: string, phone: string, name: string) {
   try {
+    // Skip the bot's own messages (phone matches the bot's number)
+    const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "";
+    if (phone === botPhone || phone === botPhone.replace("+", "")) return;
+
+    // Skip if name is just a phone number (no real name from WhatsApp)
+    if (/^\d+$/.test(name)) return;
+
+    // 1. Update phone→name mapping
     await supabase.from("whatsapp_member_mapping").upsert(
       {
         household_id: householdId,
@@ -171,6 +179,23 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
       },
       { onConflict: "household_id,phone_number" }
     );
+
+    // 2. Auto-add to household_members if not already there (so AI knows the family)
+    const { data: existing } = await supabase
+      .from("household_members")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("display_name", name)
+      .single();
+
+    if (!existing) {
+      await supabase.from("household_members").insert({
+        household_id: householdId,
+        display_name: name,
+        role: "member",
+      });
+      console.log(`[Members] Auto-added "${name}" to household ${householdId}`);
+    }
   } catch (err) {
     console.error("[upsertMemberMapping] Error:", err);
   }
