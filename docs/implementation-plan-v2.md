@@ -364,6 +364,37 @@ Every WhatsApp group Ours joins contains 3-8 family members. Each family member 
 
 ---
 
+## Multi-Channel Expansion Strategy
+
+### Multi-Channel Architecture (US Market Expansion)
+
+The US market doesn't use WhatsApp like Israel. US families use iMessage (50% - iPhone users), Facebook Messenger (108M users, #1 messaging app), SMS/RCS, and Discord. Ours must be platform-agnostic.
+
+**Architecture:** The AI brain, database, action executor, and proactive features are 100% shared. Only the messaging transport layer changes per market. The provider abstraction layer in the WhatsApp bot technical spec was designed for exactly this.
+
+```
+MessagingProvider interface:
+  WhatsAppProvider  → Israel (primary)
+  MessengerProvider → US (primary) — FREE bot API, no per-message fees
+  RCSProvider       → US (fallback) — $0.01-0.03/msg, works on all phones
+  DiscordProvider   → US teens/gamers
+```
+
+**Expansion timeline:**
+- Phase 1-2 (Month 1-6): WhatsApp only → Israel market
+- Phase 3 (Month 6-9): Add Facebook Messenger → US market entry. Cost: FREE (Meta doesn't charge for Messenger bots). Effort: 1-2 weeks (similar API to WhatsApp, same Meta ecosystem).
+- Phase 4 (Month 9-12): Add SMS/RCS → US universal fallback. Cost: ~$0.01-0.03/msg. Effort: 2-3 weeks.
+- Phase 5 (Month 12+): Apple Messages for Business → premium iMessage integration
+
+**US market entry strategy:**
+1. Israeli Anglo community (English-speaking Israelis) — already use WhatsApp, test English language
+2. US families via Facebook Messenger — "Add Ours to your family Messenger group" — same 10-second onboarding
+3. SMS/RCS for iPhone-only families — "Text this number to add Ours to your family"
+
+**Key insight:** Messenger being free makes US expansion CHEAPER than Israel.
+
+---
+
 ## Phase 4: Scale & Expand (Months 9-12)
 
 ### 4.1 Multi-Language Expansion
@@ -694,6 +725,34 @@ The web app's shopping list should work offline (service worker + IndexedDB), sy
 5. **WhatsApp API dependency.** The entire business depends on WhatsApp group API access continuing to work and be affordable. This is a platform risk with no perfect mitigation.
 
 6. **Solo founder executing all of this.** Even with an AI agent team, the WhatsApp bot is a fundamentally different product than a web app. It requires backend message processing, NLP, real-time message queuing, and platform API expertise. The agent team helps, but the founder is still the only human making decisions, testing with real families, and handling the unexpected.
+
+---
+
+## Hebrew NLP Strategy
+
+Hebrew presents unique challenges for an AI family assistant:
+
+**The 4x Token Cost Problem:** Hebrew is tokenized per letter (~4 tokens/word vs ~1 token/word in English). Every API call costs 4x more in Hebrew. Mitigations:
+- Haiku filter: skip 70-80% of social messages cheaply ($0.0001/msg vs $0.003)
+- 30-second message batching: 60% fewer API calls
+- Anthropic prompt caching: 90% discount on the family context (which is 80% of token cost)
+- Result: per-message cost drops from ~$0.01 to ~$0.001-0.003 even in Hebrew
+
+**Morphological Complexity:** Hebrew has 70M valid word forms vs English's 1M. A single root generates thousands of forms. Solution: Claude already handles Hebrew morphology well (93.34% accuracy in benchmarks, above GPT-4's 92%). The system prompt adds family-specific context that resolves most ambiguity.
+
+**Casual Hebrew Chat Patterns:** The system prompt teaches Claude 8 specific patterns Israeli families use in WhatsApp:
+1. Bare nouns = shopping items ("חלב" → add milk)
+2. [person] [activity] [time] = task ("נועה חוג 5" → pick up Noa at 5)
+3. Questions about who = unassigned tasks ("מי אוסף?" → create unassigned pickup task)
+4. "אני" after a task question = task claim
+5. Israeli time formats ("ב5" = 17:00, "אחרי הגן" = ~16:00, "לפני שבת" = Friday before sunset)
+6. Ignore: photos, stickers, forwarded memes, greetings, goodnight messages
+7. Mixed Hebrew-English ("יש meeting ב-3" → Event at 15:00)
+8. Abbreviations ("סבבה" = OK/confirmation, "בנט" = meanwhile, "תיכף" = soon)
+
+**Why Hebrew-first is a moat:** If the AI works with Hebrew family chat (the hard case), English works out of the box. Any US competitor adding Hebrew later faces the same challenges we've already solved.
+
+**Iterative improvement:** Every failed classification becomes a new pattern in the prompt. Over 3-6 months, the prompt becomes an incredibly valuable, proprietary asset.
 
 ---
 
