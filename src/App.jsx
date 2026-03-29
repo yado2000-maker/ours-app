@@ -5,6 +5,7 @@ import { supabase, sbGet, sbSet, lsGet, lsSet, uid8 } from "./lib/supabase.js";
 import buildPrompt from "./lib/prompt.js";
 import Setup from "./components/Setup.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
+import WelcomeScreen from "./components/WelcomeScreen.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
@@ -45,9 +46,9 @@ export default function Ours() {
   useEffect(() => {
     if (authLoading) return; // wait for auth to resolve
 
-    // Not authenticated → show auth screen
+    // Not authenticated → show welcome screen (value prop first, then auth)
     if (!session) {
-      setScreen("auth");
+      setScreen("welcome");
       return;
     }
 
@@ -326,7 +327,20 @@ export default function Ours() {
     </div>
   );
 
-  if (screen === "auth") return <AuthScreen onAuthSuccess={() => {}} lang={lang} />;
+  if (screen === "welcome") return (
+    <WelcomeScreen
+      onGetStarted={() => setScreen("auth")}
+      onSignIn={() => setScreen("auth")}
+    />
+  );
+
+  if (screen === "auth") return (
+    <AuthScreen
+      onAuthSuccess={() => {}}
+      onBack={() => setScreen("welcome")}
+      lang={lang}
+    />
+  );
 
   if (screen === "setup") return <Setup onDone={handleSetup} />;
 

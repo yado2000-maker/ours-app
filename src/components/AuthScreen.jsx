@@ -2,7 +2,7 @@ import { useState } from "react";
 import T from "../locales/index.js";
 import { useAuth } from "../hooks/useAuth.js";
 
-export default function AuthScreen({ onAuthSuccess, lang = "en" }) {
+export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -250,6 +250,25 @@ export default function AuthScreen({ onAuthSuccess, lang = "en" }) {
           {isHe ? "\u05d4\u05de\u05e9\u05da \u05e2\u05dd Google" : "Continue with Google"}
         </button>
       </form>
+
+      {/* Back button */}
+      {onBack && (
+        <button
+          onClick={onBack}
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--muted)",
+            fontSize: 13,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            padding: 8,
+            marginTop: 8,
+          }}
+        >
+          {isHe ? "← חזרה" : "← Back"}
+        </button>
+      )}
     </div>
   );
 }
