@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import T from "./locales/index.js";
 import "./styles/app.css";
-import { supabase, sbGet, sbSet, lsGet, lsSet, uid8 } from "./lib/supabase.js";
+import { supabase, sbGet, sbSet, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents } from "./lib/supabase.js";
 import buildPrompt from "./lib/prompt.js";
 import Setup from "./components/Setup.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
@@ -56,9 +56,20 @@ export default function Ours() {
     (async () => {
       const params = new URLSearchParams(window.location.search);
       const joinId = params.get("join");
+
+      // Helper: load from normalized tables first, fallback to old JSON blob
+      const loadData = async (id) => {
+        // Try new normalized tables first
+        const v2 = await loadHousehold(id);
+        if (v2) return v2;
+        // Fallback to old JSON blob (for households not yet migrated)
+        const old = await sbGet(id);
+        return old;
+      };
+
       if (joinId) {
         try {
-          const data = await sbGet(joinId);
+          const data = await loadData(joinId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
             setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
@@ -70,7 +81,7 @@ export default function Ours() {
       const hhId = lsGet("ours-hhid");
       if (hhId) {
         try {
-          const data = await sbGet(hhId);
+          const data = await loadData(hhId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
             setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
@@ -122,8 +133,9 @@ export default function Ours() {
     const hhId = lsGet("ours-hhid");
     if (!hhId) return;
 
-    const channel = supabase
-      .channel(`household-${hhId}`)
+    // Listen on OLD households table (backward compat)
+    const oldChannel = supabase
+      .channel(`household-old-${hhId}`)
       .on("postgres_changes", {
         event: "UPDATE",
         schema: "public",
@@ -140,14 +152,47 @@ export default function Ours() {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Listen on NEW normalized tables (WhatsApp bot writes here)
+    const reloadFromTables = async () => {
+      if (Date.now() - lastSaveRef.current < 3000) return;
+      const v2 = await loadHousehold(hhId);
+      if (v2) {
+        setTasksS(v2.tasks);
+        setShoppingS(v2.shopping);
+        setEventsS(v2.events);
+      }
+    };
+
+    const tasksChannel = supabase
+      .channel(`tasks-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks", filter: `household_id=eq.${hhId}` }, reloadFromTables)
+      .subscribe();
+
+    const shoppingChannel = supabase
+      .channel(`shopping-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "shopping_items", filter: `household_id=eq.${hhId}` }, reloadFromTables)
+      .subscribe();
+
+    const eventsChannel = supabase
+      .channel(`events-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `household_id=eq.${hhId}` }, reloadFromTables)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(oldChannel);
+      supabase.removeChannel(tasksChannel);
+      supabase.removeChannel(shoppingChannel);
+      supabase.removeChannel(eventsChannel);
+    };
   }, [screen]);
 
-  // ── Persist ──
+  // ── Persist (writes to BOTH old JSON blob AND new normalized tables) ──
   const save = async (hh, m, tk, sh, ev) => {
     const hhId = lsGet("ours-hhid");
     if (!hhId) return;
     lastSaveRef.current = Date.now();
+
+    // Write to old JSON blob (backward compat for existing households)
     const current = {
       hh:       hh !== undefined ? hh : householdRef.current,
       tasks:    tk !== undefined ? tk : tasksRef.current,
@@ -155,6 +200,16 @@ export default function Ours() {
       events:   ev !== undefined ? ev : eventsRef.current,
     };
     await sbSet(hhId, current);
+
+    // Also write to normalized tables (so WhatsApp bot sees changes)
+    try {
+      if (tk !== undefined) await saveAllTasks(hhId, tk);
+      if (sh !== undefined) await saveAllShopping(hhId, sh);
+      if (ev !== undefined) await saveAllEvents(hhId, ev);
+    } catch (err) {
+      console.error("[save] Normalized table write error:", err);
+    }
+
     if (m !== undefined) lsSet("ours-msgs", m);
   };
 
@@ -164,7 +219,24 @@ export default function Ours() {
     hh.id = hhId;
     lsSet("ours-hhid", hhId);
     lsSet("ours-founder", true);
+
+    // Write to old JSON blob
     await sbSet(hhId, { hh, tasks: [], shopping: [], events: [] });
+
+    // Also create in normalized tables
+    try {
+      await supabase.from("households_v2").upsert({ id: hhId, name: hh.name, lang: hh.lang || "he" });
+      for (const member of hh.members) {
+        await supabase.from("household_members").insert({
+          household_id: hhId,
+          display_name: member.name,
+          role: "member",
+        });
+      }
+    } catch (err) {
+      console.error("[handleSetup] Normalized table error:", err);
+    }
+
     setHouseholdS(hh); setLang(hh.lang || "en");
     setTasksS([]); setShoppingS([]); setEventsS([]);
     setScreen("pick");
