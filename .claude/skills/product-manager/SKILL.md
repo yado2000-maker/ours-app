@@ -13,10 +13,14 @@ Ours is a mobile-first PWA where family members collaborate through an AI chat i
 
 **Current screens:** Auth → Setup (household name + members) → User Picker → Main App (4 tabs: Chat, Tasks, Shopping, Week) + Settings modal + Share modal + Language modal
 
-**Business model:** Freemium
-- Free: 3 members, 10 AI messages/day, basic features
-- Premium (14.90 ILS/mo): Unlimited members + AI, push notifications, calendar sync, weekly report
-- Family+ (24.90 ILS/mo): Multiple households, meal planning, recurring tasks, analytics
+**Primary interface:** WhatsApp bot — an AI family member that lives inside the family WhatsApp group as a proactive listener. The web app is the dashboard/settings layer.
+
+**Business model:** Freemium (try-before-you-pay)
+- Free: WhatsApp bot in ONE group with 30 actions/month + web dashboard. Full experience, limited volume. Enough to feel the magic for ~2 weeks.
+- Premium (19.90 ILS/mo): Unlimited actions. Morning briefing. Smart reminders. Calendar sync.
+- Family+ (34.90 ILS/mo): Multiple groups, weekly AI report, advanced features.
+
+**Conversion moment:** The paywall hits AFTER families experience the bot working in their group. When the 30 free actions run out mid-month, Ours sends a gentle message in the group asking to upgrade. They're paying to KEEP something they love, not to TRY something unknown.
 
 **North star metric:** Weekly Active Households with 2+ active members
 

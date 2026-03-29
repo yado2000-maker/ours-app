@@ -18,7 +18,7 @@ v2 flips the architecture. **Ours is now an AI family member that lives inside t
 
 4. **The viral loop is built into the product.** Every WhatsApp group Ours joins exposes 3-8 family members. If even one person in another family sees it working and asks "what is that?", the answer is "add this number to your group." That is a 10-second conversion.
 
-5. **The web app becomes a premium upsell, not a barrier.** Free tier = web app only (low cost to serve). Premium = WhatsApp bot in your group (the thing that actually delivers daily value). This is a natural paywall that does not feel punitive.
+5. **Try before you pay.** Free tier includes the WhatsApp bot with limited actions (30/month) so families experience the magic firsthand. Once they see Ours organizing their group — tasks tracked, shopping lists maintained, events captured — the upgrade to unlimited is a no-brainer. People pay to keep something they already love, not to try something they haven't seen.
 
 ### What Stays The Same
 
@@ -35,11 +35,13 @@ v2 flips the architecture. **Ours is now an AI family member that lives inside t
 
 | Tier | Price | What You Get |
 |------|-------|--------------|
-| **Free** | 0 | Web app only. 3 members, 10 AI messages/day. No WhatsApp bot. See what Ours can do, but interact through browser only. |
-| **Premium** | 19.90 ILS/mo (~$5.50) | WhatsApp bot in ONE family group. Unlimited AI messages. Push notifications. Google Calendar sync. Shared shopping list with real-time updates. |
-| **Family+** | 34.90 ILS/mo (~$9.50) | WhatsApp bot in MULTIPLE groups (divorced parents, grandparents, extended family). Weekly AI family report. Priority response time. Advanced features (meal planning, budget suggestions). |
+| **Free** | 0 | WhatsApp bot in ONE group with **30 actions/month** (tasks, shopping items, events created). Web dashboard included. Full experience — just limited volume. Enough to feel the magic for 1-2 weeks of normal use. |
+| **Premium** | 19.90 ILS/mo (~$5.50) | **Unlimited actions.** Morning briefing. Smart reminders. Google Calendar sync. End-of-day summary. The bot never stops helping. |
+| **Family+** | 34.90 ILS/mo (~$9.50) | Everything in Premium + bot in **MULTIPLE groups** (divorced parents, grandparents, extended family). Weekly AI family report. Priority response time. Advanced features (meal planning, budget suggestions). |
 
 **Why prices are higher than v1:** The WhatsApp bot costs ~$29/mo in API fees (Whapi.Cloud) plus Claude API usage per group. At 19.90 ILS/mo, break-even is approximately 20 paid subscribers for the API cost alone. The value delivered is also significantly higher -- an always-on AI family assistant vs. a web app you have to remember to open.
+
+**Conversion psychology:** The free tier includes the WhatsApp bot because that's where the "aha moment" lives. A family must FEEL Ours organizing their group before they'll pay. 30 free actions gives ~1-2 weeks of normal use. When the counter hits zero mid-week and Ours says "I've used my free actions this month — upgrade to keep me helping your family" — they've already experienced the value. This is fundamentally different from gating the bot behind a paywall and asking people to pay for something they've never tried.
 
 **Price justification for Israeli market:** 19.90 ILS/mo is less than a single cup of coffee at Aroma. Family+ at 34.90 ILS/mo is less than a single Wolt delivery fee. For a service that runs your family's logistics daily, this is impulse-purchase pricing.
 
@@ -172,7 +174,7 @@ Premium: web_access=true, whatsapp_bot=true, max_groups=1, ai_messages_daily=unl
 Family+: web_access=true, whatsapp_bot=true, max_groups=5, ai_messages_daily=unlimited, weekly_report=true
 ```
 
-**The paywall moment:** User signs up for free, uses web dashboard, sees value. Clicks "Add Ours to WhatsApp" -> paywall. This is the natural upgrade moment because the WhatsApp bot is clearly the killer feature.
+**The paywall moment:** User adds Ours to their WhatsApp group for free. Bot works beautifully for ~2 weeks (30 actions). Then Ours sends a gentle message: "היי משפחת כהן, השתמשתם ב-30 הפעולות החינמיות החודשיות שלכם. שדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 19.90 ₪ לחודש." The family has already experienced the value. The upgrade is to KEEP something they love, not to TRY something unknown.
 
 ### Phase 1 Cost Summary
 
@@ -447,7 +449,7 @@ The web app's shopping list should work offline (service worker + IndexedDB), sy
 2. **Passive exposure = marketing.** Every message the bot sends in a group is seen by all members. Family members organically talk about it to friends.
 3. **Network effects compound.** At 500 active groups x 5 members = 2,500 people seeing Ours daily. Some percentage mentions it in other contexts.
 4. **Churn is structurally lower.** Unsubscribing means removing a family member from the group -- psychologically harder than uninstalling an app nobody notices is gone.
-5. **Conversion rate is higher.** The paywall sits at the moment of highest intent: "I want this bot in my group." Not at a random feature gate.
+5. **Conversion rate is higher.** The paywall hits AFTER the family has experienced Ours working in their group for ~2 weeks. They're not paying for a promise — they're paying to keep a service they already depend on. This is the Spotify/Netflix model: let them use it, then ask them to pay to continue.
 
 **Kill criteria (updated):** If <50 paid by Month 4, the WhatsApp-first thesis is wrong. Reassess everything.
 
@@ -512,7 +514,7 @@ The web app's shopping list should work offline (service worker + IndexedDB), sy
 - Test Hebrew NLP edge cases: slang, abbreviations, voice-to-text typos, mixed Hebrew-English
 - Test rate limiting and error handling (what happens when Whapi.Cloud is down?)
 - Test privacy: verify bot does not leak data between groups, verify message purge after 30 days
-- Test paywall flow: free user tries to add bot -> paywall -> payment -> bot activation
+- Test paywall flow: free user adds bot to group -> bot works (30 actions) -> limit reached -> paywall message in group -> payment via web dashboard -> unlimited unlocked
 
 ### Agent 7: Ambassador -- Community Management
 
@@ -542,7 +544,7 @@ The web app's shopping list should work offline (service worker + IndexedDB), sy
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Nobody pays | Fatal | The paywall is at a natural desire point (adding bot to group). If nobody pays, the product does not deliver enough value in WhatsApp. Validate with 10 beta families before marketing spend. |
+| Nobody pays | Fatal | The paywall hits after families have used 30 free actions (~2 weeks). If they still won't pay, the bot isn't delivering enough value in their daily routine. Validate with 10 beta families before marketing spend. |
 | Low viral coefficient (k<0.15) | Growth stalls | Product is inherently visible to all group members. If even that does not generate word-of-mouth, the product is not impressive enough. Fix the bot's responses. |
 | AI costs spiral | Margin pressure | Use Haiku for classification ($0.001/msg), Sonnet only for complex queries. At 10K groups: ~$10K/mo vs ~$63K/mo revenue = manageable. Cache common responses. |
 | Security incident | Trust destroyed | Phase 1 auth + RLS. WhatsApp messages stored encrypted, purged after 30 days. Bot never shares data between groups. |
