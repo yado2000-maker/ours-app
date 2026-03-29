@@ -44,12 +44,20 @@ export default function Ours() {
 
   // ── Boot ──
   useEffect(() => {
-    if (authLoading) return; // wait for auth to resolve
+    // Safety timeout: if stuck loading for 5 seconds, go to welcome
+    const timeout = setTimeout(() => {
+      if (screen === "loading") {
+        console.warn("[Boot] Timeout — forcing welcome screen");
+        setScreen("welcome");
+      }
+    }, 5000);
+
+    if (authLoading) return () => clearTimeout(timeout);
 
     // Not authenticated → show welcome screen (value prop first, then auth)
     if (!session) {
       setScreen("welcome");
-      return;
+      return () => clearTimeout(timeout);
     }
 
     // Authenticated → proceed with household loading
@@ -57,14 +65,21 @@ export default function Ours() {
       const params = new URLSearchParams(window.location.search);
       const joinId = params.get("join");
 
-      // Helper: load from normalized tables first, fallback to old JSON blob
+      // Helper: try old JSON blob first (more reliable), then normalized tables
       const loadData = async (id) => {
-        // Try new normalized tables first
-        const v2 = await loadHousehold(id);
-        if (v2) return v2;
-        // Fallback to old JSON blob (for households not yet migrated)
-        const old = await sbGet(id);
-        return old;
+        try {
+          const old = await sbGet(id);
+          if (old) return old;
+        } catch (e) {
+          console.warn("[Boot] sbGet failed:", e);
+        }
+        try {
+          const v2 = await loadHousehold(id);
+          if (v2) return v2;
+        } catch (e) {
+          console.warn("[Boot] loadHousehold failed:", e);
+        }
+        return null;
       };
 
       if (joinId) {
@@ -76,7 +91,7 @@ export default function Ours() {
             window.history.replaceState({}, "", window.location.pathname);
             setScreen("pick"); return;
           }
-        } catch {}
+        } catch (e) { console.error("[Boot] Join load error:", e); }
       }
       const hhId = lsGet("ours-hhid");
       if (hhId) {
@@ -97,10 +112,12 @@ export default function Ours() {
             }
             setScreen("pick"); return;
           }
-        } catch {}
+        } catch (e) { console.error("[Boot] Household load error:", e); }
       }
       setScreen("setup");
     })();
+
+    return () => clearTimeout(timeout);
   }, [authLoading, session]);
 
   // ── Theme ──
