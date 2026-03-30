@@ -3,7 +3,7 @@ import T from "../../locales/index.js";
 export default function LangModal({ lang, onSelect, onClose }) {
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="lang-switch-modal" onClick={e => e.stopPropagation()}>
+      <div className="lang-switch-modal" dir={lang === "he" ? "rtl" : "ltr"} onClick={e => e.stopPropagation()}>
         <div className="modal-title" style={{fontFamily:"'Cormorant Garamond',serif"}}>
           {lang === "he" ? T.he.langStep : T.en.langStep}
         </div>

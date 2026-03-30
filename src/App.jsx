@@ -585,7 +585,7 @@ export default function Ours() {
             <div className="wordmark">Ours</div>
           </div>
           <div className="header-side right">
-            <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingRight:4}}>{user.name}</div>
+            <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingInlineEnd:4}}>{user.name}</div>
             <button className="icon-btn" onClick={() => setShowReset(true)} title={t.settingsTitle}><SettingsIcon size={18} /></button>
             <button className={`icon-btn`} onClick={shareLink}
               title={dir==="rtl" ? "שתפו קישור הצטרפות" : "Share join link"}

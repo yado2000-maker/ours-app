@@ -266,7 +266,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
             marginTop: 8,
           }}
         >
-          {isHe ? "חזרה →" : "← Back"}
+          {isHe ? "→ חזרה" : "← Back"}
         </button>
       )}
     </div>

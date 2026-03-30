@@ -74,7 +74,7 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .nav-btn.active::after{content:'';position:absolute;top:0;left:22%;right:22%;height:2.5px;background:var(--accent);border-radius:0 0 3px 3px;}
 .nav-icon{font-size:19px;line-height:1;}
 .nav-label{font-size:10px;font-weight:500;letter-spacing:0.03em;}
-.nav-badge{position:absolute;top:5px;right:calc(50% - 20px);background:var(--accent);color:white;border-radius:100px;font-size:9px;font-weight:700;padding:2px 5px;min-width:16px;text-align:center;line-height:1.2;}
+.nav-badge{position:absolute;top:5px;inset-inline-end:calc(50% - 20px);background:var(--accent);color:white;border-radius:100px;font-size:9px;font-weight:700;padding:2px 5px;min-width:16px;text-align:center;line-height:1.2;}
 
 /* ── Tab body ── */
 .tab-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
@@ -98,6 +98,7 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .thinking-wrap{align-self:flex-start;}
 [dir="rtl"] .thinking-wrap{align-self:flex-end;}
 .dots{display:flex;gap:5px;padding:13px 15px;background:var(--white);border-radius:18px;border-bottom-left-radius:4px;box-shadow:var(--sh);}
+[dir="rtl"] .dots{border-bottom-left-radius:18px;border-bottom-right-radius:4px;}
 .dots span{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:dot 1.2s ease-in-out infinite;}
 .dots span:nth-child(2){animation-delay:0.18s}.dots span:nth-child(3){animation-delay:0.36s}
 @keyframes dot{0%,60%,100%{transform:translateY(0);opacity:0.35}30%{transform:translateY(-6px);opacity:1}}
@@ -142,7 +143,7 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .task-col{flex:1;display:flex;flex-direction:column;gap:2px;}
 .task-meta{font-size:11px;color:var(--green);font-weight:400;}
 .task-row.done .task-text{text-decoration:line-through;color:var(--muted);}
-.assignee-badge{font-size:11px;font-weight:500;color:var(--accent);background:var(--accent-soft);border-radius:100px;padding:3px 8px 3px 10px;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:4px;}
+.assignee-badge{font-size:11px;font-weight:500;color:var(--accent);background:var(--accent-soft);border-radius:100px;padding:3px 8px 3px 10px;padding-inline:10px 8px;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:4px;}
 .badge-x{background:none;border:none;cursor:pointer;color:var(--accent);font-size:13px;line-height:1;padding:0;opacity:0.6;transition:opacity 0.12s;}
 .badge-x:hover{opacity:1;}
 .completed-by-badge{font-size:11px;font-weight:500;color:var(--green);background:rgba(74,124,89,0.1);border-radius:100px;padding:3px 10px;white-space:nowrap;flex-shrink:0;}
@@ -275,6 +276,9 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ── RTL: Week nav arrows flip ── */
+[dir="rtl"] .week-nav-btn svg { transform: scaleX(-1); }
 
 /* ── Nav Icon SVG ── */
 .nav-icon-svg {

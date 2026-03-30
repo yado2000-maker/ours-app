@@ -175,6 +175,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             display: "flex",
             alignItems: "center",
             gap: 10,
+            direction: "ltr",
           }}>
             <div style={{
               width: 32, height: 32, borderRadius: "50%",
@@ -182,7 +183,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 14,
             }}>👨‍👩‍👧</div>
-            <div>
+            <div style={{ direction: dir, textAlign: "start" }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: waText }}>
                 {isHe ? "קבוצת המשפחה" : "Family Group"}
               </div>
@@ -211,6 +212,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
                   alignItems: msg.side === "me" ? "flex-end" : "flex-start",
                   animation: `msgIn 0.3s ease ${i * 0.15}s both`,
                   marginBottom: 2,
+                  direction: "ltr",
                 }}
               >
                 {/* Sender name (not for "me" messages) */}
@@ -221,6 +223,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
                     color: msg.side === "bot" ? "#25D366" : "#53bdeb",
                     marginBottom: 1,
                     padding: "0 6px",
+                    direction: dir,
                   }}>
                     {msg.sender}
                   </span>
@@ -245,15 +248,16 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
                     whiteSpace: "pre-line",
                     color: waText,
                     paddingBottom: 14,
+                    direction: dir,
+                    textAlign: "start",
                   }}>
                     {msg.text}
                   </div>
-                  {/* Timestamp */}
+                  {/* Timestamp — always bottom-right like real WhatsApp */}
                   <span style={{
                     position: "absolute",
                     bottom: 3,
-                    right: dir === "rtl" ? "auto" : 7,
-                    left: dir === "rtl" ? 7 : "auto",
+                    right: 7,
                     fontSize: 10,
                     color: waTime,
                   }}>

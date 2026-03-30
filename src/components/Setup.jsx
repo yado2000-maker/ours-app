@@ -71,7 +71,7 @@ export default function Setup({ onDone }) {
               {t.goBtn}
             </button>
             <button className="back-btn" onClick={() => setStep(0)}>
-              {lang === "he" ? "\u05E9\u05D9\u05E0\u05D5\u05D9 \u05E9\u05E4\u05D4 \u2190" : "\u2190 Change language"}
+              {lang === "he" ? "\u2192 \u05E9\u05D9\u05E0\u05D5\u05D9 \u05E9\u05E4\u05D4" : "\u2190 Change language"}
             </button>
           </>
         )}
