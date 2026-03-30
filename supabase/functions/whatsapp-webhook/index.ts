@@ -60,6 +60,12 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // 3b. Skip bot's own messages (Whapi sends outgoing messages back as webhooks)
+    const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+    if (message.senderPhone === botPhone || message.senderPhone === botPhone.replace("+", "")) {
+      return new Response("OK", { status: 200 });
+    }
+
     // 4. Look up household by WhatsApp group ID
     const { data: config } = await supabase
       .from("whatsapp_config")

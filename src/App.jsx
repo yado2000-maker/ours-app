@@ -12,6 +12,8 @@ import ShoppingView from "./components/ShoppingView.jsx";
 import WeekView from "./components/WeekView.jsx";
 import LangModal from "./components/modals/LangModal.jsx";
 import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, SettingsIcon, ShareIcon, CheckmarkIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
+import JoinOrCreate from "./components/JoinOrCreate.jsx";
+import { detectHousehold, joinByCode } from "./lib/household-detect.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
@@ -20,6 +22,7 @@ export default function Ours() {
   const [screen, setScreen]       = useState("loading");
   const [tab, setTab]             = useState("chat");
   const [household, setHousehold] = useState(null);
+  const [detectedHh, setDetectedHh] = useState(null); // Auto-detected household for join flow
   const [user, setUser]           = useState(null);
   const [lang, setLang]           = useState("en");
   const [allMsgs, setAllMsgs]     = useState({});
@@ -146,42 +149,8 @@ export default function Ours() {
           }
         } catch (e) { console.error("[Boot] Join load error:", e); }
       }
-      let hhId = lsGet("ours-hhid");
-
-      // If no hhId in localStorage (cleared), try to find it from household_members
-      if (!hhId && session?.user?.id) {
-        try {
-          const { data: membership } = await supabase
-            .from("household_members")
-            .select("household_id")
-            .eq("user_id", session.user.id)
-            .limit(1)
-            .single();
-          if (membership?.household_id) {
-            hhId = membership.household_id;
-            lsSet("ours-hhid", hhId);
-            console.log("[Boot] Recovered hhId from membership:", hhId);
-          }
-        } catch (e) { console.warn("[Boot] membership lookup:", e); }
-      }
-
-      // If still no hhId, try to find any household in old blob table
-      if (!hhId) {
-        try {
-          const { data: anyHh } = await supabase
-            .from("households")
-            .select("id")
-            .limit(1)
-            .single();
-          if (anyHh?.id) {
-            hhId = anyHh.id;
-            lsSet("ours-hhid", hhId);
-            console.log("[Boot] Recovered hhId from households:", hhId);
-          }
-        } catch (e) { console.warn("[Boot] households lookup:", e); }
-      }
-
-      console.log("[Boot] Using hhId:", hhId);
+      // Try to load household from localStorage
+      const hhId = lsGet("ours-hhid");
       if (hhId) {
         try {
           const data = await loadData(hhId);
@@ -192,12 +161,11 @@ export default function Ours() {
             setAllMsgs(msgs);
             const savedUser = lsGet("ours-user");
             if (savedUser) {
-              // Match by ID first, then by name (IDs differ between old blob and new tables)
               const stillExists = data.hh.members.find(m => m.id === savedUser.id)
                 || data.hh.members.find(m => m.name === savedUser.name);
               if (stillExists) {
                 setUser(stillExists);
-                lsSet("ours-user", stillExists); // Update localStorage with current ID
+                lsSet("ours-user", stillExists);
                 setScreen("chat"); return;
               }
             }
@@ -205,7 +173,28 @@ export default function Ours() {
           }
         } catch (e) { console.error("[Boot] Household load error:", e); }
       }
-      setScreen("setup");
+
+      // No household in localStorage — try auto-detect
+      console.log("[Boot] No hhId, running auto-detect...");
+      try {
+        const detected = await detectHousehold(session.user.id, session.user.email);
+        if (detected) {
+          console.log("[Boot] Auto-detected household:", detected.name, detected.id);
+          // Auto-join: load the detected household directly
+          lsSet("ours-hhid", detected.id);
+          const data = await loadData(detected.id);
+          if (data) {
+            setHouseholdS(data.hh); setLang(data.hh.lang || "en");
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+            setScreen("pick"); return;
+          }
+          // If load failed, still show join-or-create with detected info
+          setDetectedHh(detected);
+        }
+      } catch (e) { console.warn("[Boot] Auto-detect error:", e); }
+
+      // Show join-or-create screen (with or without detected household)
+      setScreen("join-or-create");
     })();
 
   }, [authLoading, session]); // session in deps so it runs when auth completes, but bootedRef prevents re-runs
@@ -522,6 +511,29 @@ export default function Ours() {
       onAuthSuccess={() => {}}
       onBack={() => setScreen("welcome")}
       lang={lang}
+    />
+  );
+
+  if (screen === "join-or-create") return (
+    <JoinOrCreate
+      lang={lang}
+      detectedHousehold={detectedHh}
+      onJoinHousehold={async (hhId) => {
+        const info = await joinByCode(hhId);
+        lsSet("ours-hhid", info.id);
+        // Link auth user to this household
+        try {
+          await supabase.from("household_members").upsert({
+            household_id: info.id,
+            user_id: session?.user?.id,
+            display_name: session?.user?.user_metadata?.full_name || session?.user?.email || "Member",
+            role: "member",
+          }, { onConflict: "household_id,user_id", ignoreDuplicates: true });
+        } catch (e) { console.warn("[Join] member link error:", e); }
+        // Reload to pick up the household
+        window.location.reload();
+      }}
+      onCreateNew={() => setScreen("setup")}
     />
   );
 
