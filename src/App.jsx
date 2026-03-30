@@ -43,22 +43,16 @@ export default function Ours() {
   const msgs = user ? (allMsgs[user.id] || []) : [];
   const isRtl = dir === "rtl";
 
-  // ── Boot ──
+  // ── Boot (runs ONCE when auth resolves) ──
+  const bootedRef = useRef(false);
   useEffect(() => {
-    // Safety timeout: if stuck loading for 5 seconds, go to welcome
-    const timeout = setTimeout(() => {
-      if (screen === "loading") {
-        console.warn("[Boot] Timeout — forcing welcome screen");
-        setScreen("welcome");
-      }
-    }, 5000);
+    if (authLoading) return; // Wait for auth
+    if (bootedRef.current) return; // Already booted — don't re-run on auth state changes
+    bootedRef.current = true;
 
-    if (authLoading) return () => clearTimeout(timeout);
-
-    // Not authenticated → show welcome screen (only if still loading, don't reset if already on welcome/auth)
     if (!session) {
-      setScreen(prev => prev === "loading" ? "welcome" : prev);
-      return () => clearTimeout(timeout);
+      setScreen("welcome");
+      return;
     }
 
     // Authenticated → proceed with household loading
@@ -142,8 +136,7 @@ export default function Ours() {
       setScreen("setup");
     })();
 
-    return () => clearTimeout(timeout);
-  }, [authLoading, session]);
+  }, [authLoading, session]); // session in deps so it runs when auth completes, but bootedRef prevents re-runs
 
   // ── Theme ──
   useEffect(() => {
@@ -446,6 +439,7 @@ export default function Ours() {
 
   if (screen === "welcome") return (
     <WelcomeScreen
+      key="welcome-screen"
       onGetStarted={() => setScreen("auth")}
       onSignIn={() => setScreen("auth")}
     />
