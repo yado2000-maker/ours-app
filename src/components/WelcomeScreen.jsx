@@ -1,5 +1,6 @@
 import { useState } from "react";
 import T from "../locales/index.js";
+import { ShoppingFeatureIcon, CalendarFeatureIcon, ChoresFeatureIcon, BackArrowIcon } from "./Icons.jsx";
 
 // Welcome screen — shows value before asking for auth
 // Flow: Language pick → Value prop with WhatsApp-style mock → CTA → Auth
@@ -26,13 +27,13 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   ];
 
   const features = isHe ? [
-    { icon: "🛒", title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Ours מוסיף לרשימה בשנייה" },
-    { icon: "📅", title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
-    { icon: "✅", title: "חלוקת מטלות", sub: "Ours זוכר מי צריך לעשות מה ומתי" },
+    { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Ours מוסיף לרשימה בשנייה" },
+    { icon: <CalendarFeatureIcon size={28} />, title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
+    { icon: <ChoresFeatureIcon size={28} />, title: "חלוקת מטלות", sub: "Ours זוכר מי צריך לעשות מה ומתי" },
   ] : [
-    { icon: "🛒", title: "Smart shopping list", sub: "Say 'milk' in the group — it's on the list instantly" },
-    { icon: "📅", title: "Family calendar", sub: "Classes, pickups, events — organized by themselves" },
-    { icon: "✅", title: "Task sharing", sub: "Ours remembers who needs to do what, and when" },
+    { icon: <ShoppingFeatureIcon size={28} />, title: "Smart shopping list", sub: "Say 'milk' in the group — it's on the list instantly" },
+    { icon: <CalendarFeatureIcon size={28} />, title: "Family calendar", sub: "Classes, pickups, events — organized by themselves" },
+    { icon: <ChoresFeatureIcon size={28} />, title: "Task sharing", sub: "Ours remembers who needs to do what, and when" },
   ];
 
   const selectLang = (l) => {
@@ -287,7 +288,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
                 animation: `msgIn 0.3s ease ${0.6 + i * 0.1}s both`,
               }}
             >
-              <span style={{ fontSize: 22, flexShrink: 0 }}>{f.icon}</span>
+              <span style={{ flexShrink: 0, color: "var(--accent)", display: "flex", alignItems: "center" }}>{f.icon}</span>
               <div>
                 <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--dark)", marginBottom: 1 }}>{f.title}</div>
                 <div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 300, lineHeight: 1.4 }}>{f.sub}</div>
@@ -325,7 +326,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             marginBottom: 8,
           }}
         >
-          {isHe ? "→ בואו נתחיל" : "Get started →"}
+          {isHe ? "בואו נתחיל ←" : "Get started →"}
         </button>
 
         <button
