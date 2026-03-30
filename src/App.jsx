@@ -55,9 +55,9 @@ export default function Ours() {
 
     if (authLoading) return () => clearTimeout(timeout);
 
-    // Not authenticated → show welcome screen (value prop first, then auth)
+    // Not authenticated → show welcome screen (only if still loading, don't reset if already on welcome/auth)
     if (!session) {
-      setScreen("welcome");
+      setScreen(prev => prev === "loading" ? "welcome" : prev);
       return () => clearTimeout(timeout);
     }
 
