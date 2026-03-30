@@ -492,15 +492,15 @@ export default function Ours() {
       {/* Settings modal */}
       {showReset && (
         <div className="overlay" onClick={() => setShowReset(false)}>
-          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:22}}>
+          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:20,maxHeight:"85dvh",overflowY:"auto"}}>
             <div className="modal-title">{t.settingsTitle}</div>
 
             {/* Rename */}
             <div>
-              <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>{t.settingsName}</div>
-              <div style={{display:"flex",gap:8}}>
+              <div className="section-head" style={{marginBottom:8}}>{t.settingsName}</div>
+              <div style={{display:"flex",gap:8,flexDirection:dir==="rtl"?"row-reverse":"row"}}>
                 <input
-                  style={{flex:1,padding:"10px 13px",borderRadius:10,border:"1.5px solid var(--border)",background:"var(--cream)",fontFamily:"inherit",fontSize:14,color:"var(--dark)",outline:"none"}}
+                  style={{flex:1,padding:"10px 13px",borderRadius:10,border:"1.5px solid var(--border)",background:"var(--cream)",fontFamily:"inherit",fontSize:14,color:"var(--dark)",outline:"none",textAlign:"start"}}
                   defaultValue={user.name}
                   onChange={e => setEditName(e.target.value)}
                   onFocus={e => setEditName(e.target.value)}
@@ -515,31 +515,51 @@ export default function Ours() {
 
             {/* Theme */}
             <div>
-              <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>{t.settingsTheme}</div>
+              <div className="section-head" style={{marginBottom:8}}>{t.settingsTheme}</div>
               <div style={{display:"flex",gap:7}}>
                 {[["light", t.themeLight], ["dark", t.themeDark], ["auto", t.themeAuto]].map(([val, label]) => (
                   <button key={val} onClick={() => setTheme(val)}
-                    style={{flex:1,padding:"9px 6px",borderRadius:10,border:`1.5px solid ${theme===val?"var(--dark)":"var(--border)"}`,background:theme===val?"var(--dark)":"transparent",color:theme===val?"var(--white)":"var(--warm)",fontSize:12.5,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
+                    style={{flex:1,padding:"10px 6px",borderRadius:10,border:`1.5px solid ${theme===val?"var(--dark)":"var(--border)"}`,background:theme===val?"var(--dark)":"transparent",color:theme===val?"var(--white)":"var(--warm)",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
                     {label}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Reset — founder only */}
-            {isFounder && (
-              <div>
-                <div style={{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>{t.settingsDanger}</div>
-                <div className="modal-btns">
-                  <button className="modal-cancel" onClick={() => setShowReset(false)}>{t.resetCancel}</button>
-                  <button className="modal-confirm" onClick={doReset}>{t.resetConfirm}</button>
+            {/* Household info */}
+            <div>
+              <div className="section-head" style={{marginBottom:8}}>{dir === "rtl" ? "משק בית" : "Household"}</div>
+              <div style={{padding:"10px 14px",borderRadius:10,background:"var(--cream)",border:"1px solid var(--border)",fontSize:13,color:"var(--warm)"}}>
+                <div style={{fontWeight:500,color:"var(--dark)",marginBottom:2}}>{household?.name || ""}</div>
+                <div style={{fontSize:12,color:"var(--muted)"}}>
+                  {household?.members?.length || 0} {dir === "rtl" ? "חברים" : "members"}
                 </div>
+              </div>
+            </div>
+
+            {/* Sign out */}
+            <button onClick={async () => { await signOut(); setShowReset(false); setScreen("welcome"); }}
+              style={{padding:"11px 16px",borderRadius:10,background:"transparent",border:"1.5px solid var(--border)",color:"var(--warm)",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s",textAlign:"center"}}>
+              {dir === "rtl" ? "התנתקות" : "Sign out"}
+            </button>
+
+            {/* Reset — founder only, small and understated */}
+            {isFounder && (
+              <div style={{paddingTop:8,borderTop:"1px solid var(--border)"}}>
+                <button onClick={doReset}
+                  style={{background:"none",border:"none",color:"var(--muted)",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:4,opacity:0.6,transition:"opacity 0.15s"}}
+                  onMouseOver={e => e.currentTarget.style.opacity = 1}
+                  onMouseOut={e => e.currentTarget.style.opacity = 0.6}>
+                  {dir === "rtl" ? "איפוס משק בית" : "Reset household"}
+                </button>
               </div>
             )}
 
-            {!isFounder && (
-              <button className="modal-cancel" onClick={() => setShowReset(false)} style={{marginTop:-8}}>{t.resetCancel}</button>
-            )}
+            {/* Close */}
+            <button onClick={() => setShowReset(false)}
+              style={{padding:"12px",borderRadius:10,background:"var(--cream)",border:"1.5px solid var(--border)",color:"var(--warm)",fontSize:14,fontWeight:500,cursor:"pointer",fontFamily:"inherit",textAlign:"center"}}>
+              {dir === "rtl" ? "סגור" : "Close"}
+            </button>
           </div>
         </div>
       )}
