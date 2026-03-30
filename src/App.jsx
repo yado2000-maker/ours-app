@@ -126,9 +126,12 @@ export default function Ours() {
             setAllMsgs(msgs);
             const savedUser = lsGet("ours-user");
             if (savedUser) {
-              const stillExists = data.hh.members.find(m => m.id === savedUser.id);
+              // Match by ID first, then by name (IDs differ between old blob and new tables)
+              const stillExists = data.hh.members.find(m => m.id === savedUser.id)
+                || data.hh.members.find(m => m.name === savedUser.name);
               if (stillExists) {
                 setUser(stillExists);
+                lsSet("ours-user", stillExists); // Update localStorage with current ID
                 setScreen("chat"); return;
               }
             }
