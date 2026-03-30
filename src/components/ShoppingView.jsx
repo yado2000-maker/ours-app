@@ -1,4 +1,5 @@
 import CheckSVG from "./CheckSVG.jsx";
+import { EmptyShoppingIcon, DeleteIcon } from "./Icons.jsx";
 
 export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t }) {
   const need = shopping.filter(s => !s.got);
@@ -15,7 +16,7 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
       </div>
       {shopping.length === 0 ? (
         <div className="list-empty">
-          <div className="list-empty-icon">🛒</div>
+          <div className="list-empty-icon"><EmptyShoppingIcon size={44} /></div>
           <p className="list-empty-text">{t.shopEmpty}</p>
         </div>
       ) : (
@@ -35,7 +36,7 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
                     <div className="shop-name">{s.name}</div>
                     {s.qty && <div className="shop-qty">{t.qtyLabel(s.qty)}</div>}
                   </div>
-                  <button className="del-btn" onClick={() => onDelete("shop", s.id)}>×</button>
+                  <button className="del-btn" onClick={() => onDelete("shop", s.id)}><DeleteIcon size={14} /></button>
                 </div>
               ))}
             </div>
@@ -50,7 +51,7 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
                   </div>
                   <div className="shop-text"><div className="shop-name">{s.name}</div></div>
                   <div className="cat-badge">{s.category}</div>
-                  <button className="del-btn" onClick={() => onDelete("shop", s.id)}>×</button>
+                  <button className="del-btn" onClick={() => onDelete("shop", s.id)}><DeleteIcon size={14} /></button>
                 </div>
               ))}
             </>

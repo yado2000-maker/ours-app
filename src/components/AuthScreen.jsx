@@ -105,7 +105,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
                 fontWeight: 500,
                 cursor: "pointer",
                 fontFamily: "inherit",
-                transition: "all 0.15s",
+                transition: "all 0.2s ease",
               }}>
               {m === "signin"
                 ? (isHe ? "\u05d4\u05ea\u05d7\u05d1\u05e8\u05d5\u05ea" : "Sign In")
@@ -181,7 +181,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         {error && (
           <p style={{
             fontSize: 13,
-            color: "#b33",
+            color: "var(--accent)",
             textAlign: "center",
             margin: 0,
           }}>{error}</p>
@@ -266,7 +266,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
             marginTop: 8,
           }}
         >
-          {isHe ? "← חזרה" : "← Back"}
+          {isHe ? "חזרה →" : "← Back"}
         </button>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EmptyCalendarIcon, ChevronLeftIcon, ChevronRightIcon, DeleteIcon } from "./Icons.jsx";
 
 export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
   const [weekOffset, setWeekOffset] = useState(0);
@@ -70,20 +71,18 @@ export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
               {lang === "he" ? "\u05D4\u05E9\u05D1\u05D5\u05E2" : "This week"}
             </button>
           )}
-          <button onClick={() => setWeekOffset(w => w - 1)}
-            style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
-            \u2039
+          <button className="week-nav-btn" onClick={() => setWeekOffset(w => w - 1)}>
+            <ChevronLeftIcon size={16} />
           </button>
           <div style={{fontSize:11.5,color:"var(--muted)",minWidth:70,textAlign:"center"}}>{weekRange}</div>
-          <button onClick={() => setWeekOffset(w => w + 1)}
-            style={{background:"none",border:"1.5px solid var(--border)",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--warm)"}}>
-            \u203A
+          <button className="week-nav-btn" onClick={() => setWeekOffset(w => w + 1)}>
+            <ChevronRightIcon size={16} />
           </button>
         </div>
       </div>
       {allWeekItems.length === 0 ? (
         <div className="week-empty">
-          <div className="week-empty-icon">📅</div>
+          <div className="week-empty-icon"><EmptyCalendarIcon size={44} /></div>
           <p className="week-empty-text">{t.weekEmpty}</p>
         </div>
       ) : (
@@ -101,7 +100,7 @@ export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
                         style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:12,lineHeight:1,padding:0,flexShrink:0,opacity:0.6,marginTop:1}}
                         onMouseOver={e=>e.currentTarget.style.opacity=1}
                         onMouseOut={e=>e.currentTarget.style.opacity=0.6}>
-                        \u00D7
+                        <DeleteIcon size={12} />
                       </button>
                     )}
                   </div>

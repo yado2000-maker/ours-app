@@ -26,13 +26,13 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   ];
 
   const features = isHe ? [
-    { icon: "🛒", title: "רשימת קניות חכמה", sub: "תגידו 'חלב' בקבוצה — Ours מוסיף לרשימה" },
-    { icon: "📅", title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודר אוטומטית" },
-    { icon: "✅", title: "מטלות בית", sub: "מי שוטף כלים? מי מוציא אשפה? Ours עוקב" },
+    { icon: "🛒", title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Ours מוסיף לרשימה בשנייה" },
+    { icon: "📅", title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
+    { icon: "✅", title: "חלוקת מטלות", sub: "Ours זוכר מי צריך לעשות מה ומתי" },
   ] : [
-    { icon: "🛒", title: "Smart shopping list", sub: "Say 'milk' in the group — Ours adds it" },
-    { icon: "📅", title: "Family calendar", sub: "Classes, rides, events — organized automatically" },
-    { icon: "✅", title: "Household chores", sub: "Who's doing dishes? Ours tracks it all" },
+    { icon: "🛒", title: "Smart shopping list", sub: "Say 'milk' in the group — it's on the list instantly" },
+    { icon: "📅", title: "Family calendar", sub: "Classes, pickups, events — organized by themselves" },
+    { icon: "✅", title: "Task sharing", sub: "Ours remembers who needs to do what, and when" },
   ];
 
   const selectLang = (l) => {
@@ -325,7 +325,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             marginBottom: 8,
           }}
         >
-          {isHe ? "בואו נתחיל →" : "Get started →"}
+          {isHe ? "→ בואו נתחיל" : "Get started →"}
         </button>
 
         <button

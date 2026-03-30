@@ -11,6 +11,7 @@ import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
 import WeekView from "./components/WeekView.jsx";
 import LangModal from "./components/modals/LangModal.jsx";
+import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, SettingsIcon, ShareIcon, CheckmarkIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
@@ -40,7 +41,7 @@ export default function Ours() {
   const t   = T[lang] || T.en;
   const dir = t.dir;
   const msgs = user ? (allMsgs[user.id] || []) : [];
-  const sendArrow = dir === "rtl" ? "←" : "→";
+  const isRtl = dir === "rtl";
 
   // ── Boot ──
   useEffect(() => {
@@ -411,8 +412,11 @@ export default function Ours() {
 
   // ── Screens ──
   if (screen === "loading") return (
-    <div style={{height:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F5F0E8",fontSize:14,color:"#8A8070"}}>
-      {T.en.loading}
+    <div style={{height:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--cream)",gap:8}}>
+      <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:28,letterSpacing:"0.22em",color:"var(--dark)",opacity:0.6}}>Ours</div>
+      <div style={{fontSize:13,color:"var(--muted)",fontWeight:300}}>
+        {T.en.loading}
+      </div>
     </div>
   );
 
@@ -582,11 +586,11 @@ export default function Ours() {
           </div>
           <div className="header-side right">
             <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingRight:4}}>{user.name}</div>
-            <button className={`icon-btn`} onClick={() => setShowReset(true)} title={t.settingsTitle}>⚙</button>
+            <button className="icon-btn" onClick={() => setShowReset(true)} title={t.settingsTitle}><SettingsIcon size={18} /></button>
             <button className={`icon-btn`} onClick={shareLink}
               title={dir==="rtl" ? "שתפו קישור הצטרפות" : "Share join link"}
               style={copied ? {color:"var(--green)",opacity:1} : {}}>
-              {copied ? "✓" : "🔗"}
+              {copied ? <CheckmarkIcon size={16} /> : <ShareIcon size={18} />}
             </button>
           </div>
         </div>
@@ -631,10 +635,10 @@ export default function Ours() {
                 <button className="mic-btn" onClick={listening ? stopVoice : startVoice}
                   title={dir==="rtl" ? "הקלטה קולית" : "Voice input"}
                   style={listening ? {background:"var(--accent)",color:"white",animation:"pulse-mic 1s ease-in-out infinite"} : {}}>
-                  {listening ? "⏹" : "🎤"}
+                  {listening ? <StopIcon size={16} /> : <MicIcon size={16} />}
                 </button>
                 <button className="send-btn" onClick={() => send()} disabled={!input.trim() || busy}>
-                  {sendArrow}
+                  <SendIcon size={16} rtl={isRtl} />
                 </button>
               </div>
             </>
@@ -657,21 +661,21 @@ export default function Ours() {
         {/* ── Bottom Nav ── */}
         <div className="bottom-nav">
           <button className={`nav-btn ${tab==="chat"?"active":""}`} onClick={() => setTab("chat")}>
-            <span className="nav-icon">💬</span>
+            <span className="nav-icon"><ChatIcon size={20} /></span>
             <span className="nav-label">{t.navChat}</span>
           </button>
           <button className={`nav-btn ${tab==="tasks"?"active":""}`} onClick={() => setTab("tasks")}>
-            <span className="nav-icon">✅</span>
+            <span className="nav-icon"><TasksIcon size={20} /></span>
             <span className="nav-label">{t.navTasks}</span>
             {openTasks > 0 && <span className="nav-badge">{openTasks}</span>}
           </button>
           <button className={`nav-btn ${tab==="shopping"?"active":""}`} onClick={() => setTab("shopping")}>
-            <span className="nav-icon">🛒</span>
+            <span className="nav-icon"><ShoppingIcon size={20} /></span>
             <span className="nav-label">{t.navShopping}</span>
             {neededItems > 0 && <span className="nav-badge">{neededItems}</span>}
           </button>
           <button className={`nav-btn ${tab==="week"?"active":""}`} onClick={() => setTab("week")}>
-            <span className="nav-icon">📅</span>
+            <span className="nav-icon"><WeekIcon size={20} /></span>
             <span className="nav-label">{t.navWeek}</span>
           </button>
         </div>

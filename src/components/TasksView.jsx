@@ -1,4 +1,5 @@
 import CheckSVG from "./CheckSVG.jsx";
+import { EmptyTasksIcon, DeleteIcon } from "./Icons.jsx";
 
 const formatTs = (iso) => {
   if (!iso) return "";
@@ -20,7 +21,7 @@ export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDele
       </div>
       {tasks.length === 0 ? (
         <div className="list-empty">
-          <div className="list-empty-icon">📋</div>
+          <div className="list-empty-icon"><EmptyTasksIcon size={44} /></div>
           <p className="list-empty-text">{t.tasksEmpty}</p>
         </div>
       ) : (
@@ -44,7 +45,7 @@ export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDele
                       </div>
                     : <button className="take-btn" onClick={() => onClaim(task.id, user.name)}>{t.takeIt}</button>
                   }
-                  <button className="del-btn" onClick={() => onDelete("task", task.id)}>×</button>
+                  <button className="del-btn" onClick={() => onDelete("task", task.id)}><DeleteIcon size={14} /></button>
                 </div>
               ))}
             </>
@@ -64,7 +65,7 @@ export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDele
                       <div className="task-text">{task.title}</div>
                       {who && <div className="task-meta">{ts ? t.completedAt(who, ts) : t.doneBy(who)}</div>}
                     </div>
-                    <button className="del-btn" onClick={() => onDelete("task", task.id)}>×</button>
+                    <button className="del-btn" onClick={() => onDelete("task", task.id)}><DeleteIcon size={14} /></button>
                   </div>
                 );
               })}
