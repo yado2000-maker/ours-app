@@ -83,8 +83,9 @@ export default function Ours() {
         try { oldData = await sbGet(id); } catch (e) { console.warn("[Boot] sbGet:", e); }
         try { v2Data = await loadHousehold(id); } catch (e) { console.warn("[Boot] loadHousehold:", e); }
 
-        console.log("[Boot] oldData:", oldData ? `tasks:${oldData.tasks?.length} shop:${oldData.shopping?.length}` : "null");
-        console.log("[Boot] v2Data:", v2Data ? `tasks:${v2Data.tasks?.length} shop:${v2Data.shopping?.length}` : "null");
+        console.log("[Boot] oldData:", oldData ? JSON.stringify({tasks: oldData.tasks?.length, shop: oldData.shopping?.length, hhName: oldData.hh?.name}) : "null");
+        console.log("[Boot] v2Data:", v2Data ? JSON.stringify({tasks: v2Data.tasks?.length, shop: v2Data.shopping?.length, hhName: v2Data.hh?.name}) : "null");
+        console.log("[Boot] hhId used:", lsGet("ours-hhid"));
 
         if (!oldData && !v2Data) return null;
 
@@ -145,7 +146,42 @@ export default function Ours() {
           }
         } catch (e) { console.error("[Boot] Join load error:", e); }
       }
-      const hhId = lsGet("ours-hhid");
+      let hhId = lsGet("ours-hhid");
+
+      // If no hhId in localStorage (cleared), try to find it from household_members
+      if (!hhId && session?.user?.id) {
+        try {
+          const { data: membership } = await supabase
+            .from("household_members")
+            .select("household_id")
+            .eq("user_id", session.user.id)
+            .limit(1)
+            .single();
+          if (membership?.household_id) {
+            hhId = membership.household_id;
+            lsSet("ours-hhid", hhId);
+            console.log("[Boot] Recovered hhId from membership:", hhId);
+          }
+        } catch (e) { console.warn("[Boot] membership lookup:", e); }
+      }
+
+      // If still no hhId, try to find any household in old blob table
+      if (!hhId) {
+        try {
+          const { data: anyHh } = await supabase
+            .from("households")
+            .select("id")
+            .limit(1)
+            .single();
+          if (anyHh?.id) {
+            hhId = anyHh.id;
+            lsSet("ours-hhid", hhId);
+            console.log("[Boot] Recovered hhId from households:", hhId);
+          }
+        } catch (e) { console.warn("[Boot] households lookup:", e); }
+      }
+
+      console.log("[Boot] Using hhId:", hhId);
       if (hhId) {
         try {
           const data = await loadData(hhId);
