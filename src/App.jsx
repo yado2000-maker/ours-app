@@ -492,7 +492,7 @@ export default function Ours() {
       {/* Settings modal */}
       {showReset && (
         <div className="overlay" onClick={() => setShowReset(false)}>
-          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:20,maxHeight:"85dvh",overflowY:"auto"}}>
+          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:20,maxHeight:"85dvh",overflowY:"auto",fontFamily:dir==="rtl"?"'Heebo',sans-serif":"'DM Sans',sans-serif"}}>
             <div className="modal-title">{t.settingsTitle}</div>
 
             {/* Rename */}
@@ -550,7 +550,7 @@ export default function Ours() {
                   style={{background:"none",border:"none",color:"var(--muted)",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:4,opacity:0.6,transition:"opacity 0.15s"}}
                   onMouseOver={e => e.currentTarget.style.opacity = 1}
                   onMouseOut={e => e.currentTarget.style.opacity = 0.6}>
-                  {dir === "rtl" ? "איפוס משק בית" : "Reset household"}
+                  {dir === "rtl" ? "מחיקת כל הנתונים ואיפוס" : "Delete all data and reset"}
                 </button>
               </div>
             )}
@@ -572,7 +572,7 @@ export default function Ours() {
       {/* Share modal */}
       {shareUrl && (
         <div className="overlay" onClick={() => setShareUrl(null)}>
-          <div className="modal" dir={dir} onClick={e => e.stopPropagation()}>
+          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{fontFamily:dir==="rtl"?"'Heebo',sans-serif":"'DM Sans',sans-serif"}}>
             <div className="modal-title">{dir === "rtl" ? "קישור הצטרפות" : "Join link"}</div>
             <p className="modal-sub">{dir === "rtl" ? "שלחו את הקישור הזה לבני המשפחה. כשייכנסו דרכו — הבית כבר מוגדר." : "Send this to your family. When they open it, the household is already set up."}</p>
             <div style={{background:"var(--cream)",borderRadius:10,padding:"11px 14px",fontSize:12,wordBreak:"break-all",color:"var(--warm)",marginBottom:16,userSelect:"all",border:"1px solid var(--border)"}}>
