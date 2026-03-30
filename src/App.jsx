@@ -83,6 +83,9 @@ export default function Ours() {
         try { oldData = await sbGet(id); } catch (e) { console.warn("[Boot] sbGet:", e); }
         try { v2Data = await loadHousehold(id); } catch (e) { console.warn("[Boot] loadHousehold:", e); }
 
+        console.log("[Boot] oldData:", oldData ? `tasks:${oldData.tasks?.length} shop:${oldData.shopping?.length}` : "null");
+        console.log("[Boot] v2Data:", v2Data ? `tasks:${v2Data.tasks?.length} shop:${v2Data.shopping?.length}` : "null");
+
         if (!oldData && !v2Data) return null;
 
         // Merge: use old blob for household info (has members with old IDs),
@@ -103,12 +106,32 @@ export default function Ours() {
           return Array.from(map.values());
         };
 
-        return {
+        // Normalize v2 tasks from snake_case to camelCase (DB uses assigned_to, app uses assignedTo)
+        const normalizeTask = (t) => ({
+          id: t.id, title: t.title, done: t.done,
+          assignedTo: t.assignedTo || t.assigned_to || null,
+          completedBy: t.completedBy || t.completed_by || null,
+          completedAt: t.completedAt || t.completed_at || null,
+        });
+        const normalizeEvent = (e) => ({
+          id: e.id, title: e.title,
+          assignedTo: e.assignedTo || e.assigned_to || null,
+          scheduledFor: e.scheduledFor || e.scheduled_for || null,
+        });
+
+        const oldTasks = (oldData?.tasks || []).map(normalizeTask);
+        const v2Tasks = (v2Data?.tasks || []).map(normalizeTask);
+        const oldEvents = (oldData?.events || []).map(normalizeEvent);
+        const v2Events = (v2Data?.events || []).map(normalizeEvent);
+
+        const merged = {
           hh,
-          tasks: mergeById(oldData?.tasks, v2Data?.tasks),
+          tasks: mergeById(oldTasks, v2Tasks),
           shopping: mergeById(oldData?.shopping, v2Data?.shopping),
-          events: mergeById(oldData?.events, v2Data?.events),
+          events: mergeById(oldEvents, v2Events),
         };
+        console.log("[Boot] Merged:", `tasks:${merged.tasks.length} shop:${merged.shopping.length} events:${merged.events.length}`);
+        return merged;
       };
 
       if (joinId) {
