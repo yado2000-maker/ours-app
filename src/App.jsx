@@ -66,21 +66,42 @@ export default function Ours() {
       const params = new URLSearchParams(window.location.search);
       const joinId = params.get("join");
 
-      // Helper: try old JSON blob first (more reliable), then normalized tables
+      // Helper: load from BOTH old blob AND new tables, merge results
+      // WhatsApp bot writes to new tables; web app chat writes to old blob
+      // We need data from both sources until fully migrated
       const loadData = async (id) => {
-        try {
-          const old = await sbGet(id);
-          if (old) return old;
-        } catch (e) {
-          console.warn("[Boot] sbGet failed:", e);
+        let oldData = null;
+        let v2Data = null;
+
+        try { oldData = await sbGet(id); } catch (e) { console.warn("[Boot] sbGet:", e); }
+        try { v2Data = await loadHousehold(id); } catch (e) { console.warn("[Boot] loadHousehold:", e); }
+
+        if (!oldData && !v2Data) return null;
+
+        // Merge: use old blob for household info (has members with old IDs),
+        // but combine tasks/shopping/events from BOTH sources (deduplicate by ID)
+        const hh = oldData?.hh || v2Data?.hh;
+        if (!hh) return null;
+
+        // If v2 has members, prefer those (auto-learned from WhatsApp)
+        if (v2Data?.hh?.members?.length > 0) {
+          hh.members = v2Data.hh.members;
         }
-        try {
-          const v2 = await loadHousehold(id);
-          if (v2) return v2;
-        } catch (e) {
-          console.warn("[Boot] loadHousehold failed:", e);
-        }
-        return null;
+
+        // Merge arrays by ID (deduplicate)
+        const mergeById = (arr1, arr2) => {
+          const map = new Map();
+          for (const item of (arr1 || [])) map.set(item.id, item);
+          for (const item of (arr2 || [])) map.set(item.id, item);
+          return Array.from(map.values());
+        };
+
+        return {
+          hh,
+          tasks: mergeById(oldData?.tasks, v2Data?.tasks),
+          shopping: mergeById(oldData?.shopping, v2Data?.shopping),
+          events: mergeById(oldData?.events, v2Data?.events),
+        };
       };
 
       if (joinId) {

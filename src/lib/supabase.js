@@ -113,49 +113,42 @@ export const clearGotShopping = async (hhId) => {
   await supabase.from("shopping_items").delete().eq("household_id", hhId).eq("got", true);
 };
 
-// Save all tasks (used when AI chat returns a full array)
+// Save all tasks (upsert — won't delete WhatsApp bot data)
 export const saveAllTasks = async (hhId, tasks) => {
-  // Delete existing, insert fresh — simplest approach for AI-returned arrays
-  await supabase.from("tasks").delete().eq("household_id", hhId);
-  if (tasks.length > 0) {
-    const rows = tasks.map(t => ({
-      id: t.id,
-      household_id: hhId,
-      title: t.title,
-      assigned_to: t.assignedTo || t.assigned_to || null,
-      done: t.done || false,
-      completed_by: t.completedBy || t.completed_by || null,
-      completed_at: t.completedAt || t.completed_at || null,
-    }));
-    await supabase.from("tasks").insert(rows);
-  }
+  if (tasks.length === 0) return;
+  const rows = tasks.map(t => ({
+    id: t.id,
+    household_id: hhId,
+    title: t.title,
+    assigned_to: t.assignedTo || t.assigned_to || null,
+    done: t.done || false,
+    completed_by: t.completedBy || t.completed_by || null,
+    completed_at: t.completedAt || t.completed_at || null,
+  }));
+  await supabase.from("tasks").upsert(rows);
 };
 
 export const saveAllShopping = async (hhId, items) => {
-  await supabase.from("shopping_items").delete().eq("household_id", hhId);
-  if (items.length > 0) {
-    const rows = items.map(s => ({
-      id: s.id,
-      household_id: hhId,
-      name: s.name,
-      qty: s.qty || null,
-      category: s.category || "Other",
-      got: s.got || false,
-    }));
-    await supabase.from("shopping_items").insert(rows);
-  }
+  if (items.length === 0) return;
+  const rows = items.map(s => ({
+    id: s.id,
+    household_id: hhId,
+    name: s.name,
+    qty: s.qty || null,
+    category: s.category || "Other",
+    got: s.got || false,
+  }));
+  await supabase.from("shopping_items").upsert(rows);
 };
 
 export const saveAllEvents = async (hhId, events) => {
-  await supabase.from("events").delete().eq("household_id", hhId);
-  if (events.length > 0) {
-    const rows = events.map(e => ({
-      id: e.id,
-      household_id: hhId,
-      title: e.title,
-      assigned_to: e.assignedTo || e.assigned_to || null,
-      scheduled_for: e.scheduledFor || e.scheduled_for,
-    }));
-    await supabase.from("events").insert(rows);
-  }
+  if (events.length === 0) return;
+  const rows = events.map(e => ({
+    id: e.id,
+    household_id: hhId,
+    title: e.title,
+    assigned_to: e.assignedTo || e.assigned_to || null,
+    scheduled_for: e.scheduledFor || e.scheduled_for,
+  }));
+  await supabase.from("events").upsert(rows);
 };
