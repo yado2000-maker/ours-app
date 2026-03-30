@@ -560,21 +560,12 @@ export default function Ours() {
               style={{padding:"15px 20px",borderRadius:14,border:"1.5px solid var(--border)",background:"var(--white)",fontFamily:pickFont,fontSize:16,fontWeight:500,color:"var(--dark)",cursor:"pointer",transition:"all 0.15s",boxShadow:"var(--sh)"}}
               onMouseOver={e=>e.currentTarget.style.borderColor="var(--accent)"}
               onMouseOut={e=>e.currentTarget.style.borderColor="var(--border)"}
-              onClick={async () => {
+              onClick={() => {
                 if (!lsGet("ours-hhid") && household?.id) {
                   lsSet("ours-hhid", household.id);
                 }
-                const hhId = lsGet("ours-hhid") || household?.id;
-                if (hhId) {
-                  try {
-                    const data = await sbGet(hhId);
-                    if (data) {
-                      setTasksS(data.tasks || []);
-                      setShoppingS(data.shopping || []);
-                      setEventsS(data.events || []);
-                    }
-                  } catch {}
-                }
+                // Data is already loaded and merged in state — no need to reload
+                // Just restore messages from localStorage and set the user
                 const msgs = lsGet("ours-msgs") || {};
                 setAllMsgs(msgs);
                 lsSet("ours-user", m);
