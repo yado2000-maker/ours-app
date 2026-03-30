@@ -45,9 +45,22 @@ export default function Ours() {
 
   // ── Boot (runs ONCE when auth resolves) ──
   const bootedRef = useRef(false);
+
+  // Safety: if auth never resolves, force welcome after 3 seconds
   useEffect(() => {
-    if (authLoading) return; // Wait for auth
-    if (bootedRef.current) return; // Already booted — don't re-run on auth state changes
+    const safety = setTimeout(() => {
+      if (!bootedRef.current) {
+        console.warn("[Boot] Auth timeout — forcing welcome");
+        bootedRef.current = true;
+        setScreen("welcome");
+      }
+    }, 3000);
+    return () => clearTimeout(safety);
+  }, []);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (bootedRef.current) return;
     bootedRef.current = true;
 
     if (!session) {
