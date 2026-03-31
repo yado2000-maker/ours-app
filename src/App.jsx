@@ -50,23 +50,24 @@ export default function Sheli() {
   const msgs = user ? (allMsgs[user.id] || []) : [];
   const isRtl = dir === "rtl";
 
-  // ── Boot (runs ONCE when auth resolves) ──
+  // ── Boot (runs when auth resolves OR times out) ──
   const bootedRef = useRef(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
 
-  // Safety: if auth never resolves, force welcome after 3 seconds
+  // Safety: if auth never resolves, force boot after 5 seconds
   useEffect(() => {
     const safety = setTimeout(() => {
       if (!bootedRef.current) {
-        console.warn("[Boot] Auth timeout — forcing welcome");
-        bootedRef.current = true;
-        setScreen("welcome");
+        console.warn("[Boot] Auth timeout after 5s — forcing boot");
+        setAuthTimedOut(true);
       }
-    }, 3000);
+    }, 5000);
     return () => clearTimeout(safety);
   }, []);
 
   useEffect(() => {
-    if (authLoading) return;
+    // Wait for either auth to resolve OR timeout
+    if (authLoading && !authTimedOut) return;
     if (bootedRef.current) return;
     bootedRef.current = true;
 
