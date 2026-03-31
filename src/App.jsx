@@ -202,7 +202,7 @@ export default function Sheli() {
       setScreen("join-or-create");
     })();
 
-  }, [authLoading, session]); // session in deps so it runs when auth completes, but bootedRef prevents re-runs
+  }, [authLoading, session, authTimedOut]); // runs when auth resolves, session changes, or timeout fires
 
   // ── Theme ──
   useEffect(() => {
