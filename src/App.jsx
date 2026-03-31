@@ -446,9 +446,18 @@ export default function Sheli() {
       const aMsg = { role:"assistant", content: parsed.message, ts: Date.now() };
       const finalMsgs = [...updated, aMsg];
       const finalAll  = { ...nextAll, [user.id]: finalMsgs };
-      const newTasks  = Array.isArray(parsed.tasks)    ? parsed.tasks    : tasks;
-      const newShop   = Array.isArray(parsed.shopping) ? parsed.shopping : shopping;
-      const newEvents = Array.isArray(parsed.events)   ? parsed.events   : events;
+      // Merge AI response with current state — don't let empty arrays wipe existing data
+      const mergeLists = (aiList, current) => {
+        if (!Array.isArray(aiList)) return current;
+        if (aiList.length === 0 && current.length > 0) return current; // AI didn't touch this list
+        // Merge by ID: AI items win, keep any current items the AI didn't mention
+        const aiIds = new Set(aiList.map(x => x.id));
+        const kept = current.filter(x => !aiIds.has(x.id) && x.id);
+        return [...aiList, ...kept];
+      };
+      const newTasks  = mergeLists(parsed.tasks, tasks);
+      const newShop   = mergeLists(parsed.shopping, shopping);
+      const newEvents = mergeLists(parsed.events, events);
       setAllMsgs(finalAll); setTasksS(newTasks); setShoppingS(newShop); setEventsS(newEvents);
       await save(undefined, finalAll, newTasks, newShop, newEvents);
     } catch {
