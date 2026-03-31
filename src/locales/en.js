@@ -55,5 +55,21 @@ const en = {
   cats: ["Produce","Dairy","Meat","Bakery","Pantry","Frozen","Drinks","Household","Health Store","Other"],
   networkError: "Network error \u2014 check your connection.",
   genericError: "Something went wrong \u2014 try again.",
+  // Welcome flow
+  welcomeHi: (name) => `Hi, ${name}! I\u2019m Sheli \uD83D\uDC4B`,
+  welcomeSub: "I\u2019m your home\u2019s smart assistant. Tell me what needs doing and I\u2019ll organize \u2014 tasks, shopping, calendar, and events.",
+  welcomeGo: "Let\u2019s go \u2192",
+  // WhatsApp connect
+  waTitle: "Want me in your WhatsApp too?",
+  waSub: "Add my number to your WhatsApp group and I\u2019ll handle tasks, shopping, and events right from the chat.",
+  waStep1: "1. Save this number",
+  waStep2: "2. Add me to your group",
+  waBtn: "Save number",
+  waLater: "Maybe later",
+  waPhone: "+972 55-517-5553",
+  // Settings WhatsApp
+  waSettingsTitle: "WhatsApp",
+  waSettingsSub: "Add Sheli to your home or family WhatsApp group",
+  waSettingsBtn: "Add to group",
 };
 export default en;

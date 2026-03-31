@@ -15,6 +15,10 @@ import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, SettingsIcon, ShareIcon, C
 import JoinOrCreate from "./components/JoinOrCreate.jsx";
 import { detectHousehold, joinByCode } from "./lib/household-detect.js";
 
+const SHELI_PHONE = "972555175553";
+const SHELI_WA_LINK = `https://wa.me/${SHELI_PHONE}?text=${encodeURIComponent("שלום שלי")}`;
+const SHELI_PHONE_DISPLAY = "+972 55-517-5553";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────────────────
@@ -335,7 +339,7 @@ export default function Sheli() {
 
     setHouseholdS(hh); setLang(hh.lang || "en");
     setTasksS([]); setShoppingS([]); setEventsS([]);
-    setScreen("pick");
+    setScreen("welcome-sheli");
   };
 
   // ── Reset ──
@@ -549,6 +553,51 @@ export default function Sheli() {
 
   if (screen === "setup") return <Setup onDone={handleSetup} />;
 
+  // ── Welcome Sheli screen (post-setup, first time only) ──
+  if (screen === "welcome-sheli") {
+    const wDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
+    const wFont = wDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+    const wt = T[household?.lang || "en"] || T.en;
+    return (
+      <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:wFont,textAlign:"center"}} dir={wDir}>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:24}}>Sheli</div>
+        <div style={{fontSize:22,fontWeight:500,color:"var(--dark)",marginBottom:12,lineHeight:1.4}}>{wt.welcomeHi(household?.name || "")}</div>
+        <p style={{fontSize:15,color:"var(--muted)",fontWeight:400,lineHeight:1.65,maxWidth:300,marginBottom:40}}>{wt.welcomeSub}</p>
+        <button onClick={() => setScreen("connect-wa")}
+          style={{padding:"15px 40px",borderRadius:999,background:"var(--dark)",color:"var(--white)",border:"none",fontSize:15,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"background 0.2s"}}>
+          {wt.welcomeGo}
+        </button>
+      </div>
+    );
+  }
+
+  // ── Connect WhatsApp screen (post-welcome, first time only) ──
+  if (screen === "connect-wa") {
+    const wDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
+    const wFont = wDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+    const wt = T[household?.lang || "en"] || T.en;
+    return (
+      <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:wFont,textAlign:"center"}} dir={wDir}>
+        <div style={{fontSize:48,marginBottom:16}}>💬</div>
+        <div style={{fontSize:20,fontWeight:500,color:"var(--dark)",marginBottom:12}}>{wt.waTitle}</div>
+        <p style={{fontSize:14,color:"var(--muted)",fontWeight:400,lineHeight:1.65,maxWidth:300,marginBottom:24}}>{wt.waSub}</p>
+        <div style={{background:"var(--white)",border:"1.5px solid var(--border)",borderRadius:16,padding:"20px 24px",marginBottom:24,width:"100%",maxWidth:300}}>
+          <div style={{fontSize:13,color:"var(--muted)",marginBottom:8}}>{wt.waStep1}</div>
+          <div style={{fontSize:18,fontWeight:600,color:"var(--dark)",marginBottom:16,letterSpacing:"0.03em",fontFamily:"'DM Sans',sans-serif",direction:"ltr"}}>{SHELI_PHONE_DISPLAY}</div>
+          <div style={{fontSize:13,color:"var(--muted)"}}>{wt.waStep2}</div>
+        </div>
+        <a href={SHELI_WA_LINK} target="_blank" rel="noopener noreferrer"
+          style={{display:"block",padding:"14px 36px",borderRadius:999,background:"#25D366",color:"#fff",border:"none",fontSize:15,fontWeight:500,cursor:"pointer",fontFamily:"inherit",textDecoration:"none",marginBottom:16,transition:"opacity 0.2s"}}>
+          {wt.waBtn}
+        </a>
+        <button onClick={() => { lsSet("sheli-onboarded", true); setScreen("pick"); }}
+          style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:8}}>
+          {wt.waLater}
+        </button>
+      </div>
+    );
+  }
+
   // ── User picker screen ──
   if (screen === "pick") {
     const pickDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
@@ -626,6 +675,19 @@ export default function Sheli() {
                     {label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* WhatsApp */}
+            <div>
+              <div className="section-head" style={{marginBottom:8}}>{t.waSettingsTitle}</div>
+              <div style={{padding:"14px 16px",borderRadius:12,background:"var(--cream)",border:"1px solid var(--border)"}}>
+                <div style={{fontSize:15,fontWeight:600,color:"var(--dark)",marginBottom:4,letterSpacing:"0.02em",fontFamily:"'DM Sans',sans-serif",direction:"ltr",textAlign:dir==="rtl"?"end":"start"}}>{SHELI_PHONE_DISPLAY}</div>
+                <div style={{fontSize:12,color:"var(--muted)",marginBottom:12}}>{t.waSettingsSub}</div>
+                <a href={SHELI_WA_LINK} target="_blank" rel="noopener noreferrer"
+                  style={{display:"inline-block",padding:"8px 18px",borderRadius:999,background:"#25D366",color:"#fff",fontSize:13,fontWeight:500,textDecoration:"none",fontFamily:"inherit"}}>
+                  {t.waSettingsBtn}
+                </a>
               </div>
             </div>
 
