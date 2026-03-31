@@ -456,6 +456,7 @@ export default function Sheli() {
       setAllMsgs({ ...nextAll, [user.id]: [...updated, aMsg] });
     }
     setBusy(false);
+    setTimeout(() => inputRef.current?.focus(), 50);
   };
 
   const [listening, setListening] = useState(false);
