@@ -34,9 +34,9 @@ export default function Sheli() {
   const [showReset, setShowReset] = useState(false);
   const [showLang, setShowLang]   = useState(false);
   const [copied, setCopied]       = useState(false);
-  const [theme, setTheme]         = useState(() => lsGet("ours-theme") || "auto");
+  const [theme, setTheme]         = useState(() => lsGet("sheli-theme") || "auto");
   const [editName, setEditName]   = useState("");
-  const isFounder = !!lsGet("ours-founder");
+  const isFounder = !!lsGet("sheli-founder");
   const { session, user: authUser, profile, loading: authLoading, signOut } = useAuth();
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
@@ -88,7 +88,7 @@ export default function Sheli() {
 
         console.log("[Boot] oldData:", oldData ? JSON.stringify({tasks: oldData.tasks?.length, shop: oldData.shopping?.length, hhName: oldData.hh?.name}) : "null");
         console.log("[Boot] v2Data:", v2Data ? JSON.stringify({tasks: v2Data.tasks?.length, shop: v2Data.shopping?.length, hhName: v2Data.hh?.name}) : "null");
-        console.log("[Boot] hhId used:", lsGet("ours-hhid"));
+        console.log("[Boot] hhId used:", lsGet("sheli-hhid"));
 
         if (!oldData && !v2Data) return null;
 
@@ -150,22 +150,22 @@ export default function Sheli() {
         } catch (e) { console.error("[Boot] Join load error:", e); }
       }
       // Try to load household from localStorage
-      const hhId = lsGet("ours-hhid");
+      const hhId = lsGet("sheli-hhid");
       if (hhId) {
         try {
           const data = await loadData(hhId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
             setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
-            const msgs = lsGet("ours-msgs") || {};
+            const msgs = lsGet("sheli-msgs") || {};
             setAllMsgs(msgs);
-            const savedUser = lsGet("ours-user");
+            const savedUser = lsGet("sheli-user");
             if (savedUser) {
               const stillExists = data.hh.members.find(m => m.id === savedUser.id)
                 || data.hh.members.find(m => m.name === savedUser.name);
               if (stillExists) {
                 setUser(stillExists);
-                lsSet("ours-user", stillExists);
+                lsSet("sheli-user", stillExists);
                 setScreen("chat"); return;
               }
             }
@@ -181,7 +181,7 @@ export default function Sheli() {
         if (detected) {
           console.log("[Boot] Auto-detected household:", detected.name, detected.id);
           // Auto-join: load the detected household directly
-          lsSet("ours-hhid", detected.id);
+          lsSet("sheli-hhid", detected.id);
           const data = await loadData(detected.id);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
@@ -202,7 +202,7 @@ export default function Sheli() {
   // ── Theme ──
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    lsSet("ours-theme", theme);
+    lsSet("sheli-theme", theme);
   }, [theme]);
 
   // ── Scroll ──
@@ -226,7 +226,7 @@ export default function Sheli() {
 
   useEffect(() => {
     if (screen !== "chat") return;
-    const hhId = lsGet("ours-hhid");
+    const hhId = lsGet("sheli-hhid");
     if (!hhId) return;
 
     // Listen on OLD households table (backward compat)
@@ -284,7 +284,7 @@ export default function Sheli() {
 
   // ── Persist (writes to BOTH old JSON blob AND new normalized tables) ──
   const save = async (hh, m, tk, sh, ev) => {
-    const hhId = lsGet("ours-hhid");
+    const hhId = lsGet("sheli-hhid");
     if (!hhId) return;
     lastSaveRef.current = Date.now();
 
@@ -306,15 +306,15 @@ export default function Sheli() {
       console.error("[save] Normalized table write error:", err);
     }
 
-    if (m !== undefined) lsSet("ours-msgs", m);
+    if (m !== undefined) lsSet("sheli-msgs", m);
   };
 
   // ── Setup done ──
   const handleSetup = async (hh) => {
     const hhId = uid8();
     hh.id = hhId;
-    lsSet("ours-hhid", hhId);
-    lsSet("ours-founder", true);
+    lsSet("sheli-hhid", hhId);
+    lsSet("sheli-founder", true);
 
     // Write to old JSON blob
     await sbSet(hhId, { hh, tasks: [], shopping: [], events: [] });
@@ -343,7 +343,7 @@ export default function Sheli() {
   const SB_KEY = "sb_publishable_w5_9MXaM2XAZRk2b8rquoQ_kFpcUMTA";
 
   const doReset = async () => {
-    const hhId = lsGet("ours-hhid");
+    const hhId = lsGet("sheli-hhid");
     if (hhId) {
       try {
         await fetch(`${SB_URL}/rest/v1/households?id=eq.${hhId}`, {
@@ -352,9 +352,9 @@ export default function Sheli() {
         });
       } catch {}
     }
-    localStorage.removeItem("ours-hhid");
-    localStorage.removeItem("ours-msgs");
-    localStorage.removeItem("ours-user");
+    localStorage.removeItem("sheli-hhid");
+    localStorage.removeItem("sheli-msgs");
+    localStorage.removeItem("sheli-user");
     setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setInput("");
     setShowReset(false); setScreen("setup");
   };
@@ -372,14 +372,14 @@ export default function Sheli() {
     const updatedUser = { ...user, name: newName };
     setHouseholdS(updatedHh);
     setUser(updatedUser);
-    lsSet("ours-user", updatedUser);
+    lsSet("sheli-user", updatedUser);
     await save(updatedHh, undefined, undefined, undefined);
     setShowReset(false);
   };
 
   // ── Share join link ──
   const shareLink = () => {
-    const hhId = lsGet("ours-hhid") || household?.id;
+    const hhId = lsGet("sheli-hhid") || household?.id;
     if (!hhId) return;
     const url = `${window.location.origin}/?join=${hhId}`;
     setShareUrl(url);
@@ -520,7 +520,7 @@ export default function Sheli() {
       detectedHousehold={detectedHh}
       onJoinHousehold={async (hhId) => {
         const info = await joinByCode(hhId);
-        lsSet("ours-hhid", info.id);
+        lsSet("sheli-hhid", info.id);
         // Link auth user to this household
         try {
           await supabase.from("household_members").upsert({
@@ -561,14 +561,14 @@ export default function Sheli() {
               onMouseOver={e=>e.currentTarget.style.borderColor="var(--accent)"}
               onMouseOut={e=>e.currentTarget.style.borderColor="var(--border)"}
               onClick={() => {
-                if (!lsGet("ours-hhid") && household?.id) {
-                  lsSet("ours-hhid", household.id);
+                if (!lsGet("sheli-hhid") && household?.id) {
+                  lsSet("sheli-hhid", household.id);
                 }
                 // Data is already loaded and merged in state — no need to reload
                 // Just restore messages from localStorage and set the user
-                const msgs = lsGet("ours-msgs") || {};
+                const msgs = lsGet("sheli-msgs") || {};
                 setAllMsgs(msgs);
-                lsSet("ours-user", m);
+                lsSet("sheli-user", m);
                 setUser(m);
                 setScreen("chat");
               }}>

@@ -27,7 +27,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   ];
 
   const features = isHe ? [
-    { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Sheli מוסיף לרשימה בשנייה" },
+    { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Sheli מוסיפה לרשימה בשנייה" },
     { icon: <CalendarFeatureIcon size={28} />, title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
     { icon: <ChoresFeatureIcon size={28} />, title: "חלוקת מטלות", sub: "Sheli זוכרת מי צריך לעשות מה ומתי" },
   ] : [
@@ -155,7 +155,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           marginBottom: 20,
         }}>
           {isHe
-            ? "העוזר המשפחתי החכם שגר בקבוצת הוואטסאפ שלכם"
+            ? "העוזרת המשפחתית החכמה שגרה בקבוצת הוואטסאפ שלכם"
             : "The smart family assistant that lives in your WhatsApp group"}
         </p>
 
