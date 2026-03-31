@@ -37,11 +37,19 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
           setLoading(false);
           return;
         }
-        onAuthSuccess?.();
+        // Signup succeeded with session — reload
+        window.location.reload();
+        return;
       } else {
-        const { error } = await signIn(email, password);
+        const { data, error } = await signIn(email, password);
         if (error) throw error;
-        onAuthSuccess?.();
+        if (data?.session) {
+          // Sign-in succeeded — reload to trigger fresh boot with session
+          window.location.reload();
+          return; // Don't setLoading(false) — page is reloading
+        }
+        // No session returned (shouldn't happen for signIn, but be safe)
+        setError(isHe ? "ההתחברות נכשלה, נסו שוב" : "Sign-in failed, try again");
       }
     } catch (err) {
       const msg = err.message || "";
