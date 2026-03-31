@@ -677,7 +677,7 @@ export default function Sheli() {
         <div className="overlay" onClick={() => setShareUrl(null)}>
           <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{fontFamily:dir==="rtl"?"'Heebo',sans-serif":"'DM Sans',sans-serif"}}>
             <div className="modal-title">{dir === "rtl" ? "קישור הצטרפות" : "Join link"}</div>
-            <p className="modal-sub">{dir === "rtl" ? "שלחו את הקישור הזה לבני המשפחה. כשייכנסו דרכו — הבית כבר מוגדר." : "Send this to your family. When they open it, the household is already set up."}</p>
+            <p className="modal-sub">{dir === "rtl" ? "שלחו את הקישור הזה למי שגר בבית. כשייכנסו דרכו — הבית כבר מוגדר." : "Send this to everyone at home. When they open it, everything's set up."}</p>
             <div style={{background:"var(--cream)",borderRadius:10,padding:"11px 14px",fontSize:12,wordBreak:"break-all",color:"var(--warm)",marginBottom:16,userSelect:"all",border:"1px solid var(--border)"}}>
               {shareUrl}
             </div>
@@ -688,7 +688,7 @@ export default function Sheli() {
               <a className="modal-confirm" style={{textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center"}}
                 href={`https://wa.me/?text=${encodeURIComponent(shareUrl)}`} target="_blank" rel="noreferrer"
                 onClick={() => setShareUrl(null)}>
-                {dir === "rtl" ? "שתף בוואטסאפ ↗" : "Share on WhatsApp ↗"}
+                {dir === "rtl" ? "שתף בווטסאפ ↗" : "Share on WhatsApp ↗"}
               </a>
             </div>
           </div>

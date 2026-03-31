@@ -281,8 +281,8 @@ export default function JoinOrCreate({
       {/* Subtitle */}
       <p style={s.subtitle}>
         {isHe
-          ? "כבר יש לכם משפחה ב-Sheli?"
-          : "Already have a family on Sheli?"}
+          ? "הבית שלכם כבר ב-Sheli?"
+          : "Already set up on Sheli?"}
       </p>
 
       <div style={s.content}>
@@ -291,7 +291,7 @@ export default function JoinOrCreate({
           <div style={s.detectedCard}>
             <div style={s.detectedCardGlow} />
             <span style={s.detectedLabel}>
-              {isHe ? "מצאנו את המשפחה שלכם" : "We found your family"}
+              {isHe ? "מצאנו את הבית שלכם" : "We found your home"}
             </span>
             <div style={s.detectedName}>
               <span style={{ fontSize: 22, lineHeight: 1 }}>&#x1F3E0;</span>
@@ -340,7 +340,7 @@ export default function JoinOrCreate({
 
         {/* ── Path B: Join by code ── */}
         <p style={s.sectionLabel}>
-          {isHe ? "הצטרפו עם קוד משפחתי" : "Join with a family code"}
+          {isHe ? "הצטרפו עם הקוד של הבית" : "Join with a home code"}
         </p>
         <div style={s.codeRow}>
           <input
@@ -408,7 +408,7 @@ export default function JoinOrCreate({
             e.currentTarget.style.background = "transparent";
           }}
         >
-          {isHe ? "התחילו משפחה חדשה" : "Start a new family"}
+          {isHe ? "צרו בית חדש ב-Sheli" : "Set up a new home"}
         </button>
 
         {/* ── Hint text ── */}
@@ -425,8 +425,8 @@ export default function JoinOrCreate({
           }}
         >
           {isHe
-            ? "מי שיצר/ה את המשפחה יכול/ה לשתף את הקוד מתוך ההגדרות"
-            : "The family creator can share the code from Settings"}
+            ? "מי שהגדיר/ה את הבית יכול/ה לשתף את הקוד מההגדרות"
+            : "Whoever set up the home can share the code from Settings"}
         </p>
       </div>
 

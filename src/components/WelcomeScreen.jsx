@@ -28,11 +28,11 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
 
   const features = isHe ? [
     { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Sheli מוסיפה לרשימה בשנייה" },
-    { icon: <CalendarFeatureIcon size={28} />, title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
+    { icon: <CalendarFeatureIcon size={28} />, title: "הלו״ז שלנו", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
     { icon: <ChoresFeatureIcon size={28} />, title: "חלוקת מטלות", sub: "Sheli זוכרת מי צריך לעשות מה ומתי" },
   ] : [
     { icon: <ShoppingFeatureIcon size={28} />, title: "Smart shopping list", sub: "Say 'milk' in the group — it's on the list instantly" },
-    { icon: <CalendarFeatureIcon size={28} />, title: "Family calendar", sub: "Classes, pickups, events — organized by themselves" },
+    { icon: <CalendarFeatureIcon size={28} />, title: "Our schedule", sub: "Classes, pickups, events — organized by themselves" },
     { icon: <ChoresFeatureIcon size={28} />, title: "Task sharing", sub: "Sheli remembers who needs to do what, and when" },
   ];
 
@@ -155,8 +155,8 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           marginBottom: 20,
         }}>
           {isHe
-            ? "העוזרת המשפחתית החכמה שגרה בקבוצת הוואטסאפ שלכם"
-            : "The smart family assistant that lives in your WhatsApp group"}
+            ? "העוזרת החכמה של הבית בווטסאפ שלכם"
+            : "Your home's smart assistant, right in your WhatsApp"}
         </p>
 
         {/* Mock WhatsApp chat — styled like real WhatsApp */}
@@ -185,7 +185,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             }}>👨‍👩‍👧</div>
             <div style={{ direction: dir, textAlign: "start" }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: waText }}>
-                {isHe ? "קבוצת המשפחה" : "Family Group"}
+                {isHe ? "הקבוצה של הבית" : "Home Group"}
               </div>
               <div style={{ fontSize: 11, color: waTextMuted }}>
                 {isHe ? "אמא, אבא, Sheli 🏠, את/ה" : "Mom, Dad, Sheli 🏠, You"}
