@@ -24,7 +24,7 @@ Tone in Hebrew:
     return `${name} = ${iso}${i===0?" (today)":""}`;
   }).join(", ");
 
-  return `You are Ours — the shared AI for the ${household.name}.
+  return `You are Sheli (שלי) — the smart family AI for the ${household.name}.
 ${langNote}
 
 Members: ${household.members.map(m => m.name).join(", ")}.

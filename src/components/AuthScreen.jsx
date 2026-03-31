@@ -68,14 +68,14 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         letterSpacing: "0.22em",
         color: "var(--dark)",
         marginBottom: 4,
-      }}>Ours</div>
+      }}>Sheli</div>
       <p style={{
         fontSize: 13,
         color: "var(--muted)",
         fontWeight: 300,
         marginBottom: 36,
         letterSpacing: "0.03em",
-      }}>AI for the life you share together</p>
+      }}>Smart AI for your life together</p>
 
       {/* Auth form */}
       <form onSubmit={handleSubmit} style={{

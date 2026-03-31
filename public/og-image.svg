@@ -19,17 +19,17 @@
   <rect x="32" y="32" width="1136" height="566" rx="24" fill="none" stroke="#C4714A" stroke-opacity="0.2" stroke-width="1.5"/>
 
   <!-- Wordmark -->
-  <text x="600" y="230" font-family="Georgia, serif" font-size="112" font-weight="300" fill="#1C1A17" text-anchor="middle" letter-spacing="28">Ours</text>
+  <text x="600" y="230" font-family="Georgia, serif" font-size="112" font-weight="300" fill="#1C1A17" text-anchor="middle" letter-spacing="28">Sheli</text>
 
   <!-- Divider -->
-  <rect x="544" y="264" width="112" height="1.5" fill="#C4714A"/>
+  <rect x="530" y="264" width="140" height="1.5" fill="#C4714A"/>
 
   <!-- Tagline -->
-  <text x="600" y="332" font-family="Georgia, serif" font-size="30" fill="#3D3830" text-anchor="middle" font-style="italic">AI for the life you share together</text>
+  <text x="600" y="332" font-family="Georgia, serif" font-size="30" fill="#3D3830" text-anchor="middle" font-style="italic">Smart AI for your life together</text>
 
   <!-- Sub -->
   <text x="600" y="390" font-family="-apple-system, sans-serif" font-size="20" fill="#8A8070" text-anchor="middle" font-weight="300" letter-spacing="1">Tasks · Shopping · Calendar · Together</text>
 
   <!-- Bottom URL -->
-  <text x="600" y="556" font-family="-apple-system, sans-serif" font-size="16" fill="#8A8070" text-anchor="middle" letter-spacing="2">OURS-APP.VERCEL.APP</text>
+  <text x="600" y="556" font-family="-apple-system, sans-serif" font-size="16" fill="#8A8070" text-anchor="middle" letter-spacing="2">SHELI.AI</text>
 </svg>

@@ -1,0 +1,13 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark rounded background -->
+  <rect width="512" height="512" rx="96" fill="#1C1A17"/>
+
+  <!-- Large serif "S" -->
+  <text x="256" y="280" font-family="Georgia, 'Times New Roman', serif" font-size="240" font-weight="300" fill="#F5F0E8" text-anchor="middle">S</text>
+
+  <!-- Rust accent divider -->
+  <rect x="196" y="320" width="120" height="2" fill="#C4714A"/>
+
+  <!-- "SHELI" text -->
+  <text x="256" y="380" font-family="-apple-system, 'Helvetica Neue', sans-serif" font-size="48" fill="#C4714A" text-anchor="middle" letter-spacing="14" font-weight="300">SHELI</text>
+</svg>

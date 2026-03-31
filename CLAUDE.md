@@ -1,7 +1,7 @@
-# Ours App — AI Family Assistant
+# Sheli (שלי) — Smart AI for Your Life Together
 
 ## Architecture
-- **Frontend:** React 19 + Vite 8, deployed on Vercel (ours-app-eta.vercel.app)
+- **Frontend:** React 19 + Vite 8, deployed on Vercel (sheli.ai)
 - **Backend:** Supabase (project: wzwwtghtnkapdwlgnrxr, region: eu-central-2)
 - **AI:** Claude Sonnet 4 via Anthropic API, proxied through /api/chat (Vercel serverless)
 - **WhatsApp Bot:** Supabase Edge Function (whatsapp-webhook), Whapi.Cloud provider

@@ -18,7 +18,7 @@ import { detectHousehold, joinByCode } from "./lib/household-detect.js";
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────────────────
-export default function Ours() {
+export default function Sheli() {
   const [screen, setScreen]       = useState("loading");
   const [tab, setTab]             = useState("chat");
   const [household, setHousehold] = useState(null);
@@ -491,7 +491,7 @@ export default function Ours() {
   // ── Screens ──
   if (screen === "loading") return (
     <div style={{height:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--cream)",gap:8}}>
-      <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:28,letterSpacing:"0.22em",color:"var(--dark)",opacity:0.6}}>Ours</div>
+      <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:28,letterSpacing:"0.22em",color:"var(--dark)",opacity:0.6}}>Sheli</div>
       <div style={{fontSize:13,color:"var(--muted)",fontWeight:300}}>
         {T.en.loading}
       </div>
@@ -545,7 +545,7 @@ export default function Ours() {
     const pickFont = pickDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
     return (
       <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:pickFont}} dir={pickDir}>
-        <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:6}}>Ours</div>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:6}}>Sheli</div>
         <p style={{fontSize:15,color:"var(--dark)",fontWeight:400,marginBottom:4,textAlign:"center"}}>
           {pickDir === "rtl"
             ? `ברוכים הבאים, ${household.name}`
@@ -695,7 +695,7 @@ export default function Ours() {
             </button>
           </div>
           <div className="header-mid">
-            <div className="wordmark">Ours</div>
+            <div className="wordmark">Sheli</div>
           </div>
           <div className="header-side right">
             <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingInlineEnd:4}}>{user.name}</div>
@@ -727,14 +727,14 @@ export default function Ours() {
                 ) : (
                   msgs.map((m, i) => (
                     <div key={i} className={`msg-wrap ${m.role}`}>
-                      <div className="msg-label">{m.role==="user" ? userName : t.oursLabel}</div>
+                      <div className="msg-label">{m.role==="user" ? userName : t.sheliLabel}</div>
                       <div className="bubble">{m.content}</div>
                     </div>
                   ))
                 )}
                 {busy && (
                   <div className="msg-wrap thinking-wrap">
-                    <div className="msg-label">{t.oursLabel}</div>
+                    <div className="msg-label">{t.sheliLabel}</div>
                     <div className="dots"><span/><span/><span/></div>
                   </div>
                 )}

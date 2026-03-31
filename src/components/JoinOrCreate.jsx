@@ -276,13 +276,13 @@ export default function JoinOrCreate({
   return (
     <div style={s.wrap} dir={dir}>
       {/* Wordmark */}
-      <div style={s.wordmark}>Ours</div>
+      <div style={s.wordmark}>Sheli</div>
 
       {/* Subtitle */}
       <p style={s.subtitle}>
         {isHe
-          ? "כבר יש לכם משפחה ב-Ours?"
-          : "Already have a family on Ours?"}
+          ? "כבר יש לכם משפחה ב-Sheli?"
+          : "Already have a family on Sheli?"}
       </p>
 
       <div style={s.content}>

@@ -16,24 +16,24 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   // Mock WhatsApp conversation — styled like actual WhatsApp
   const mockChat = isHe ? [
     { sender: "אמא", text: "מישהו יכול לאסוף את נועה מבלט ב-5?", side: "other", time: "09:12" },
-    { sender: "Ours 🏠", text: "📅 הוספתי: לאסוף את נועה מבלט ב-17:00\nמי לוקח?", side: "bot", time: "09:12" },
+    { sender: "Sheli 🏠", text: "📅 הוספתי: לאסוף את נועה מבלט ב-17:00\nמי לוקח?", side: "bot", time: "09:12" },
     { sender: "אבא", text: "אני. תזכירו לי לקנות חלב", side: "me", time: "09:14" },
-    { sender: "Ours 🏠", text: "✅ האיסוף → אבא\n🛒 חלב נוסף לרשימה\n⏰ תזכורת ב-16:45", side: "bot", time: "09:14" },
+    { sender: "Sheli 🏠", text: "✅ האיסוף → אבא\n🛒 חלב נוסף לרשימה\n⏰ תזכורת ב-16:45", side: "bot", time: "09:14" },
   ] : [
     { sender: "Mom", text: "Can someone pick up Noa from ballet at 5?", side: "other", time: "9:12 AM" },
-    { sender: "Ours 🏠", text: "📅 Added: Pick up Noa from ballet at 5pm\nWho's taking this?", side: "bot", time: "9:12 AM" },
+    { sender: "Sheli 🏠", text: "📅 Added: Pick up Noa from ballet at 5pm\nWho's taking this?", side: "bot", time: "9:12 AM" },
     { sender: "Dad", text: "Me. Remind me to buy milk on the way", side: "me", time: "9:14 AM" },
-    { sender: "Ours 🏠", text: "✅ Pickup → Dad\n🛒 Milk added to list\n⏰ Reminder at 4:45pm", side: "bot", time: "9:14 AM" },
+    { sender: "Sheli 🏠", text: "✅ Pickup → Dad\n🛒 Milk added to list\n⏰ Reminder at 4:45pm", side: "bot", time: "9:14 AM" },
   ];
 
   const features = isHe ? [
-    { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Ours מוסיף לרשימה בשנייה" },
+    { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Sheli מוסיף לרשימה בשנייה" },
     { icon: <CalendarFeatureIcon size={28} />, title: "יומן משפחתי", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
-    { icon: <ChoresFeatureIcon size={28} />, title: "חלוקת מטלות", sub: "Ours זוכר מי צריך לעשות מה ומתי" },
+    { icon: <ChoresFeatureIcon size={28} />, title: "חלוקת מטלות", sub: "Sheli זוכרת מי צריך לעשות מה ומתי" },
   ] : [
     { icon: <ShoppingFeatureIcon size={28} />, title: "Smart shopping list", sub: "Say 'milk' in the group — it's on the list instantly" },
     { icon: <CalendarFeatureIcon size={28} />, title: "Family calendar", sub: "Classes, pickups, events — organized by themselves" },
-    { icon: <ChoresFeatureIcon size={28} />, title: "Task sharing", sub: "Ours remembers who needs to do what, and when" },
+    { icon: <ChoresFeatureIcon size={28} />, title: "Task sharing", sub: "Sheli remembers who needs to do what, and when" },
   ];
 
   const selectLang = (l) => {
@@ -61,7 +61,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           letterSpacing: "0.22em",
           color: "var(--dark)",
           marginBottom: 8,
-        }}>Ours</div>
+        }}>Sheli</div>
         <p style={{
           fontSize: 14,
           color: "var(--muted)",
@@ -143,7 +143,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           letterSpacing: "0.22em",
           color: "var(--dark)",
           marginBottom: 4,
-        }}>Ours</div>
+        }}>Sheli</div>
 
         <p style={{
           fontSize: 14,
@@ -188,7 +188,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
                 {isHe ? "קבוצת המשפחה" : "Family Group"}
               </div>
               <div style={{ fontSize: 11, color: waTextMuted }}>
-                {isHe ? "אמא, אבא, Ours 🏠, את/ה" : "Mom, Dad, Ours 🏠, You"}
+                {isHe ? "אמא, אבא, Sheli 🏠, את/ה" : "Mom, Dad, Sheli 🏠, You"}
               </div>
             </div>
           </div>
