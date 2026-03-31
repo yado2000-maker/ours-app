@@ -50,8 +50,9 @@ export default function Sheli() {
   const msgs = user ? (allMsgs[user.id] || []) : [];
   const isRtl = dir === "rtl";
 
-  // ── Boot (runs when auth resolves OR times out) ──
+  // ── Boot (runs when auth resolves, session changes, or times out) ──
   const bootedRef = useRef(false);
+  const prevSessionRef = useRef(null);
   const [authTimedOut, setAuthTimedOut] = useState(false);
 
   // Safety: if auth never resolves, force boot after 5 seconds
@@ -68,7 +69,12 @@ export default function Sheli() {
   useEffect(() => {
     // Wait for either auth to resolve OR timeout
     if (authLoading && !authTimedOut) return;
-    if (bootedRef.current) return;
+
+    // Allow re-boot when session appears (e.g., after email verification or sign-in)
+    const sessionChanged = !prevSessionRef.current && session;
+    prevSessionRef.current = session;
+
+    if (bootedRef.current && !sessionChanged) return;
     bootedRef.current = true;
 
     if (!session) {
@@ -523,7 +529,6 @@ export default function Sheli() {
 
   if (screen === "auth") return (
     <AuthScreen
-      onAuthSuccess={() => { window.location.reload(); }}
       onBack={() => setScreen("welcome")}
       lang={lang}
     />

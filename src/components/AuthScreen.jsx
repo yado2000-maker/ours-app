@@ -2,8 +2,8 @@ import { useState } from "react";
 import T from "../locales/index.js";
 import { useAuth } from "../hooks/useAuth.js";
 
-export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup"
+export default function AuthScreen({ onBack, lang = "en" }) {
+  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -24,45 +24,56 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
     try {
       if (mode === "signup") {
         if (!displayName.trim()) {
-          setError(isHe ? "\u05e0\u05d0 \u05dc\u05d4\u05d6\u05d9\u05df \u05e9\u05dd" : "Please enter your name");
+          setError(isHe ? "נא להזין שם" : "Please enter your name");
           setLoading(false);
           return;
         }
         const { data, error } = await signUp(email, password, displayName.trim());
         if (error) throw error;
-        // Supabase returns user but no session if email already exists (no error thrown!)
-        if (!data?.session) {
+
+        // With email confirmation enabled:
+        // - New user: data.user exists, data.session is null → show "check email"
+        // - Existing user: data.user may have identities=[] → already registered
+        if (data?.user && (!data.user.identities || data.user.identities.length === 0)) {
+          // Supabase returns empty identities for existing users
           setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in instead");
           setMode("signin");
           setLoading(false);
           return;
         }
-        // Signup succeeded with session — reload
-        window.location.reload();
+
+        // New user created — needs email confirmation
+        setMode("check-email");
+        setLoading(false);
         return;
+
       } else {
+        // Sign in
         const { data, error } = await signIn(email, password);
         if (error) throw error;
-        if (data?.session) {
-          // Sign-in succeeded — reload to trigger fresh boot with session
-          window.location.reload();
-          return; // Don't setLoading(false) — page is reloading
+        // Session is set — onAuthStateChange in useAuth will fire,
+        // boot effect will detect session and navigate forward.
+        // No reload needed!
+        if (!data?.session) {
+          setError(isHe ? "ההתחברות נכשלה, נסו שוב" : "Sign-in failed, try again");
         }
-        // No session returned (shouldn't happen for signIn, but be safe)
-        setError(isHe ? "ההתחברות נכשלה, נסו שוב" : "Sign-in failed, try again");
+        // If session exists, the auth state change will trigger boot.
+        // Keep loading state until the app navigates away.
       }
     } catch (err) {
       const msg = err.message || "";
       if (msg.includes("already registered") || msg.includes("already been registered")) {
         setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in instead");
         setMode("signin");
-      } else if (msg.includes("Invalid login")) {
+      } else if (msg.includes("Invalid login") || msg.includes("invalid_credentials")) {
         setError(isHe ? "אימייל או סיסמה לא נכונים" : "Wrong email or password");
+      } else if (msg.includes("Email not confirmed")) {
+        setMode("check-email");
       } else {
         setError(msg || (isHe ? "משהו השתבש" : "Something went wrong"));
       }
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleGoogle = async () => {
@@ -71,6 +82,98 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
     if (error) setError(error.message);
   };
 
+  // ── "Check your email" screen ──
+  if (mode === "check-email") {
+    return (
+      <div style={{
+        minHeight: "100dvh",
+        background: "var(--cream)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "40px 24px",
+        fontFamily: font,
+        textAlign: "center",
+      }} dir={dir}>
+        <div style={{ fontSize: 48, marginBottom: 20 }}>📬</div>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif",
+          fontWeight: 300,
+          fontSize: 28,
+          letterSpacing: "0.18em",
+          color: "var(--dark)",
+          marginBottom: 12,
+        }}>
+          {isHe ? "בדקו את האימייל" : "Check your email"}
+        </div>
+        <p style={{
+          fontSize: 15,
+          color: "var(--warm)",
+          lineHeight: 1.6,
+          maxWidth: 300,
+          marginBottom: 8,
+        }}>
+          {isHe
+            ? "שלחתי לכם קישור אימות ל:"
+            : "I sent a verification link to:"}
+        </p>
+        <p style={{
+          fontSize: 15,
+          fontWeight: 600,
+          color: "var(--dark)",
+          marginBottom: 24,
+          direction: "ltr",
+        }}>
+          {email}
+        </p>
+        <p style={{
+          fontSize: 13,
+          color: "var(--muted)",
+          lineHeight: 1.5,
+          maxWidth: 280,
+          marginBottom: 32,
+        }}>
+          {isHe
+            ? "לחצו על הקישור באימייל כדי להשלים את ההרשמה. אחרי זה — חזרו לכאן."
+            : "Click the link in the email to complete signup. Then come back here."}
+        </p>
+        <button
+          onClick={() => { setMode("signin"); setError(null); }}
+          style={{
+            padding: "12px 28px",
+            borderRadius: 999,
+            background: "var(--dark)",
+            color: "var(--white)",
+            border: "none",
+            fontSize: 14,
+            fontWeight: 500,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            marginBottom: 12,
+          }}
+        >
+          {isHe ? "אימתתי, קחו אותי פנימה" : "I verified, let me in"}
+        </button>
+        <button
+          onClick={() => { setMode("signup"); setError(null); }}
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--muted)",
+            fontSize: 13,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            padding: 6,
+          }}
+        >
+          {isHe ? "לא קיבלתי אימייל" : "Didn't get an email"}
+        </button>
+      </div>
+    );
+  }
+
+  // ── Sign in / Sign up form ──
   return (
     <div style={{
       minHeight: "100dvh",
@@ -130,8 +233,8 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
                 transition: "all 0.2s ease",
               }}>
               {m === "signin"
-                ? (isHe ? "\u05d4\u05ea\u05d7\u05d1\u05e8\u05d5\u05ea" : "Sign In")
-                : (isHe ? "\u05d4\u05e8\u05e9\u05de\u05d4" : "Sign Up")}
+                ? (isHe ? "התחברות" : "Sign In")
+                : (isHe ? "הרשמה" : "Sign Up")}
             </button>
           ))}
         </div>
@@ -140,7 +243,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         {mode === "signup" && (
           <input
             type="text"
-            placeholder={isHe ? "\u05d4\u05e9\u05dd \u05e9\u05dc\u05da" : "Your name"}
+            placeholder={isHe ? "השם שלך" : "Your name"}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             dir={dir}
@@ -161,11 +264,12 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         {/* Email */}
         <input
           type="email"
-          placeholder={isHe ? "\u05d0\u05d9\u05de\u05d9\u05d9\u05dc" : "Email"}
+          placeholder={isHe ? "אימייל" : "Email"}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           dir="ltr"
           required
+          autoComplete="email"
           style={{
             padding: "13px 15px",
             borderRadius: 12,
@@ -181,12 +285,13 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         {/* Password */}
         <input
           type="password"
-          placeholder={isHe ? "\u05e1\u05d9\u05e1\u05de\u05d4" : "Password"}
+          placeholder={isHe ? "סיסמה" : "Password"}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           dir="ltr"
           required
           minLength={6}
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
           style={{
             padding: "13px 15px",
             borderRadius: 12,
@@ -225,10 +330,10 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
             transition: "background 0.2s",
           }}>
           {loading
-            ? (isHe ? "\u05e8\u05d2\u05e2..." : "Loading...")
+            ? (isHe ? "רגע..." : "Loading...")
             : mode === "signin"
-              ? (isHe ? "\u05d4\u05ea\u05d7\u05d1\u05e8" : "Sign In")
-              : (isHe ? "\u05d4\u05d9\u05e8\u05e9\u05dd" : "Sign Up")}
+              ? (isHe ? "התחבר" : "Sign In")
+              : (isHe ? "היירשם" : "Sign Up")}
         </button>
 
         {/* Divider */}
@@ -240,7 +345,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         }}>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
           <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {isHe ? "\u05d0\u05d5" : "or"}
+            {isHe ? "או" : "or"}
           </span>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
         </div>
@@ -269,7 +374,7 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
           </svg>
-          {isHe ? "\u05d4\u05de\u05e9\u05da \u05e2\u05dd Google" : "Continue with Google"}
+          {isHe ? "המשך עם Google" : "Continue with Google"}
         </button>
       </form>
 

@@ -44,11 +44,15 @@ export function useAuth() {
   };
 
   const signUp = async (email, password, displayName) => {
+    const redirectUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+      ? window.location.origin
+      : "https://sheli.ai";
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { full_name: displayName },
+        emailRedirectTo: redirectUrl,
       },
     });
     return { data, error };
