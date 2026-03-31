@@ -121,7 +121,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
         margin: "0 auto",
       }}
     >
-      {/* Scrollable content */}
+      {/* Scrollable content — centers on tall screens, scrolls on short ones */}
       <div style={{
         flex: 1,
         overflowY: "auto",
@@ -129,6 +129,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
+        justifyContent: "center",
       }}>
         {/* Wordmark + tagline */}
         <div style={{
