@@ -135,8 +135,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           marginBottom: 32,
         }}>
           {isHe
-            ? "לחצו על הקישור באימייל כדי להשלים את ההרשמה. אחרי זה — חזרו לכאן."
-            : "Click the link in the email to complete signup. Then come back here."}
+            ? "לחצו על הקישור באימייל כדי להשלים את ההרשמה"
+            : "Click the link in the email to complete your signup"}
         </p>
         <button
           onClick={() => { setMode("signin"); setError(null); }}
@@ -153,7 +153,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             marginBottom: 12,
           }}
         >
-          {isHe ? "אימתתי, קחו אותי פנימה" : "I verified, let me in"}
+          {isHe ? "← חזרה להתחברות" : "← Back to sign in"}
         </button>
         <button
           onClick={() => { setMode("signup"); setError(null); }}
