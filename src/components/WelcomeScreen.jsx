@@ -1,9 +1,9 @@
 import { useState } from "react";
 import T from "../locales/index.js";
-import { ShoppingFeatureIcon, CalendarFeatureIcon, ChoresFeatureIcon, BackArrowIcon } from "./Icons.jsx";
+import { ShoppingFeatureIcon, CalendarFeatureIcon, ChoresFeatureIcon } from "./Icons.jsx";
 
 // Welcome screen — shows value before asking for auth
-// Flow: Language pick → Value prop with WhatsApp-style mock → CTA → Auth
+// Flow: Language pick → Value prop → CTA → Auth
 export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   const [lang, setLang] = useState(null);
   const [step, setStep] = useState(0); // 0=lang, 1=value
@@ -12,29 +12,6 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   const dir = lang === "he" ? "rtl" : "ltr";
   const isHe = lang === "he";
   const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
-
-  // Mock WhatsApp conversation — styled like actual WhatsApp
-  const mockChat = isHe ? [
-    { sender: "אמא", text: "מישהו יכול לאסוף את נועה מבלט ב-5?", side: "other", time: "09:12" },
-    { sender: "Sheli 🏠", text: "📅 הוספתי: לאסוף את נועה מבלט ב-17:00\nמי לוקח?", side: "bot", time: "09:12" },
-    { sender: "אבא", text: "אני. תזכירו לי לקנות חלב", side: "me", time: "09:14" },
-    { sender: "Sheli 🏠", text: "✅ האיסוף → אבא\n🛒 חלב נוסף לרשימה\n⏰ תזכורת ב-16:45", side: "bot", time: "09:14" },
-  ] : [
-    { sender: "Mom", text: "Can someone pick up Noa from ballet at 5?", side: "other", time: "9:12 AM" },
-    { sender: "Sheli 🏠", text: "📅 Added: Pick up Noa from ballet at 5pm\nWho's taking this?", side: "bot", time: "9:12 AM" },
-    { sender: "Dad", text: "Me. Remind me to buy milk on the way", side: "me", time: "9:14 AM" },
-    { sender: "Sheli 🏠", text: "✅ Pickup → Dad\n🛒 Milk added to list\n⏰ Reminder at 4:45pm", side: "bot", time: "9:14 AM" },
-  ];
-
-  const features = isHe ? [
-    { icon: <ShoppingFeatureIcon size={28} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — Sheli מוסיפה לרשימה בשנייה" },
-    { icon: <CalendarFeatureIcon size={28} />, title: "הלו״ז שלנו", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
-    { icon: <ChoresFeatureIcon size={28} />, title: "חלוקת מטלות", sub: "Sheli זוכרת מי צריך לעשות מה ומתי" },
-  ] : [
-    { icon: <ShoppingFeatureIcon size={28} />, title: "Smart shopping list", sub: "Say 'milk' in the group — it's on the list instantly" },
-    { icon: <CalendarFeatureIcon size={28} />, title: "Our schedule", sub: "Classes, pickups, events — organized by themselves" },
-    { icon: <ChoresFeatureIcon size={28} />, title: "Task sharing", sub: "Sheli remembers who needs to do what, and when" },
-  ];
 
   const selectLang = (l) => {
     setLang(l);
@@ -101,18 +78,36 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
     );
   }
 
-  // WhatsApp colors
-  const waBg = "#0b141a";        // WhatsApp dark background
-  const waHeader = "#1f2c34";    // WhatsApp header bar
-  const waBubbleOther = "#1f2c34"; // Incoming bubble
-  const waBubbleMe = "#005c4b";  // Outgoing bubble (green)
-  const waBubbleBot = "#103529"; // Bot bubble (slightly different green)
-  const waBotBorder = "#25D366"; // WhatsApp green accent for bot
-  const waText = "#e9edef";      // WhatsApp text color
-  const waTextMuted = "#8696a0"; // WhatsApp muted text
-  const waTime = "#8696a0";      // Timestamp color
+  // Mini WhatsApp mock — just 2 messages to show the concept
+  const mockChat = isHe ? [
+    { sender: "אמא", text: "מישהו יכול לאסוף את נועה מבלט ב-5?", side: "other", time: "09:12" },
+    { sender: "שלי", text: "📅 הוספתי: לאסוף את נועה ב-17:00\nמי לוקח?", side: "bot", time: "09:12" },
+  ] : [
+    { sender: "Mom", text: "Can someone pick up Noa from ballet at 5?", side: "other", time: "9:12 AM" },
+    { sender: "Sheli", text: "📅 Added: Pick up Noa at 5pm\nWho's taking this?", side: "bot", time: "9:12 AM" },
+  ];
 
-  // Step 1: Value proposition
+  const features = isHe ? [
+    { icon: <ShoppingFeatureIcon size={22} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — מוסיפה לרשימה בשנייה" },
+    { icon: <CalendarFeatureIcon size={22} />, title: "הלו״ז שלנו", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
+    { icon: <ChoresFeatureIcon size={22} />, title: "חלוקת מטלות", sub: "זוכרת מי צריך לעשות מה ומתי" },
+  ] : [
+    { icon: <ShoppingFeatureIcon size={22} />, title: "Smart shopping list", sub: "Say 'milk' in the group — on the list instantly" },
+    { icon: <CalendarFeatureIcon size={22} />, title: "Our schedule", sub: "Classes, pickups, events — organized automatically" },
+    { icon: <ChoresFeatureIcon size={22} />, title: "Task sharing", sub: "Remembers who does what and when" },
+  ];
+
+  // WhatsApp colors
+  const waBg = "#0b141a";
+  const waHeader = "#1f2c34";
+  const waBubbleOther = "#1f2c34";
+  const waBubbleBot = "#103529";
+  const waBotBorder = "#25D366";
+  const waText = "#e9edef";
+  const waTextMuted = "#8696a0";
+  const waTime = "#8696a0";
+
+  // Step 1: Value proposition — compact layout, everything above the fold
   return (
     <div
       dir={dir}
@@ -126,82 +121,81 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
         margin: "0 auto",
       }}
     >
-      {/* Scrollable content area */}
+      {/* Scrollable content */}
       <div style={{
         flex: 1,
         overflowY: "auto",
-        padding: "24px 20px 16px",
+        padding: "20px 20px 12px",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
       }}>
-        {/* Wordmark */}
+        {/* Wordmark + tagline */}
         <div style={{
           fontFamily: "'Cormorant Garamond',serif",
           fontWeight: 300,
-          fontSize: 30,
+          fontSize: 28,
           letterSpacing: "0.22em",
           color: "var(--dark)",
           marginBottom: 4,
         }}>Sheli</div>
 
         <p style={{
-          fontSize: 14,
+          fontSize: 15,
           color: "var(--dark)",
-          fontWeight: 400,
+          fontWeight: 500,
           textAlign: "center",
-          lineHeight: 1.55,
+          lineHeight: 1.5,
           maxWidth: 300,
-          marginBottom: 20,
+          marginBottom: 16,
         }}>
           {isHe
             ? "העוזרת החכמה של הבית בווטסאפ שלכם"
             : "Your home's smart assistant, right in your WhatsApp"}
         </p>
 
-        {/* Mock WhatsApp chat — styled like real WhatsApp */}
+        {/* Compact WhatsApp mock — just 2 messages */}
         <div style={{
           width: "100%",
-          maxWidth: 340,
-          borderRadius: 14,
+          maxWidth: 320,
+          borderRadius: 12,
           overflow: "hidden",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
+          boxShadow: "0 2px 16px rgba(0,0,0,0.12)",
           marginBottom: 20,
         }}>
-          {/* WhatsApp header bar */}
+          {/* Mini header */}
           <div style={{
             background: waHeader,
-            padding: "10px 14px",
+            padding: "7px 12px",
             display: "flex",
             alignItems: "center",
-            gap: 10,
+            gap: 8,
             direction: "ltr",
           }}>
             <div style={{
-              width: 32, height: 32, borderRadius: "50%",
+              width: 26, height: 26, borderRadius: "50%",
               background: "#2a3942",
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 14,
-            }}>👨‍👩‍👧</div>
+              fontSize: 12,
+            }}>👥</div>
             <div style={{ direction: dir, textAlign: "start" }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: waText }}>
+              <div style={{ fontSize: 12.5, fontWeight: 500, color: waText }}>
                 {isHe ? "הקבוצה של הבית" : "Home Group"}
               </div>
-              <div style={{ fontSize: 11, color: waTextMuted }}>
-                {isHe ? "אמא, אבא, Sheli 🏠, את/ה" : "Mom, Dad, Sheli 🏠, You"}
+              <div style={{ fontSize: 10, color: waTextMuted }}>
+                {isHe ? "אמא, אבא, שלי, את/ה" : "Mom, Dad, Sheli, You"}
               </div>
             </div>
           </div>
 
-          {/* Chat area with WhatsApp wallpaper */}
+          {/* Chat — compact */}
           <div style={{
             background: waBg,
             backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
-            padding: "12px 10px",
+            padding: "8px 8px",
             display: "flex",
             flexDirection: "column",
-            gap: 4,
-            minHeight: 220,
+            gap: 3,
           }}>
             {mockChat.map((msg, i) => (
               <div
@@ -211,54 +205,47 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
                   flexDirection: "column",
                   alignItems: msg.side === "me" ? "flex-end" : "flex-start",
                   animation: `msgIn 0.3s ease ${i * 0.15}s both`,
-                  marginBottom: 2,
                   direction: "ltr",
                 }}
               >
-                {/* Sender name (not for "me" messages) */}
                 {msg.side !== "me" && (
                   <span style={{
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: 500,
                     color: msg.side === "bot" ? "#25D366" : "#53bdeb",
                     marginBottom: 1,
-                    padding: "0 6px",
+                    padding: "0 5px",
                     direction: dir,
                   }}>
                     {msg.sender}
                   </span>
                 )}
                 <div style={{
-                  padding: "6px 8px 3px",
-                  borderRadius: 8,
-                  borderTopLeftRadius: msg.side === "me" ? 8 : 0,
-                  borderTopRightRadius: msg.side === "me" ? 0 : 8,
-                  background: msg.side === "bot"
-                    ? waBubbleBot
-                    : msg.side === "me"
-                      ? waBubbleMe
-                      : waBubbleOther,
+                  padding: "5px 7px 3px",
+                  borderRadius: 7,
+                  borderTopLeftRadius: msg.side === "me" ? 7 : 0,
+                  borderTopRightRadius: msg.side === "me" ? 0 : 7,
+                  background: msg.side === "bot" ? waBubbleBot : msg.side === "me" ? "#005c4b" : waBubbleOther,
                   maxWidth: "88%",
                   border: msg.side === "bot" ? `1px solid ${waBotBorder}33` : "none",
                   position: "relative",
                 }}>
                   <div style={{
-                    fontSize: 13,
-                    lineHeight: 1.45,
+                    fontSize: 12,
+                    lineHeight: 1.4,
                     whiteSpace: "pre-line",
                     color: waText,
-                    paddingBottom: 14,
+                    paddingBottom: 12,
                     direction: dir,
                     textAlign: "start",
                   }}>
                     {msg.text}
                   </div>
-                  {/* Timestamp — always bottom-right like real WhatsApp */}
                   <span style={{
                     position: "absolute",
-                    bottom: 3,
-                    right: 7,
-                    fontSize: 10,
+                    bottom: 2,
+                    right: 6,
+                    fontSize: 9,
                     color: waTime,
                   }}>
                     {msg.time}
@@ -269,14 +256,13 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           </div>
         </div>
 
-        {/* Feature pills */}
+        {/* Feature rows — compact */}
         <div style={{
           width: "100%",
-          maxWidth: 340,
+          maxWidth: 320,
           display: "flex",
           flexDirection: "column",
-          gap: 8,
-          paddingBottom: 8,
+          gap: 6,
         }}>
           {features.map((f, i) => (
             <div
@@ -284,27 +270,27 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 12,
-                padding: "10px 14px",
+                gap: 10,
+                padding: "8px 12px",
                 background: "var(--white)",
-                borderRadius: 13,
+                borderRadius: 12,
                 border: "1.5px solid var(--border)",
-                animation: `msgIn 0.3s ease ${0.6 + i * 0.1}s both`,
+                animation: `msgIn 0.25s ease ${0.3 + i * 0.08}s both`,
               }}
             >
               <span style={{ flexShrink: 0, color: "var(--accent)", display: "flex", alignItems: "center" }}>{f.icon}</span>
               <div>
-                <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--dark)", marginBottom: 1 }}>{f.title}</div>
-                <div style={{ fontSize: 11.5, color: "var(--muted)", fontWeight: 300, lineHeight: 1.4 }}>{f.sub}</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "var(--dark)" }}>{f.title}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 300, lineHeight: 1.35 }}>{f.sub}</div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Sticky bottom CTA — always visible */}
+      {/* Sticky bottom CTA */}
       <div style={{
-        padding: "12px 20px 20px",
+        padding: "10px 20px 16px",
         background: "var(--cream)",
         borderTop: "1px solid var(--border)",
         display: "flex",
@@ -316,9 +302,9 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           onClick={onGetStarted}
           style={{
             width: "100%",
-            maxWidth: 340,
-            padding: 15,
-            borderRadius: 14,
+            maxWidth: 320,
+            padding: 14,
+            borderRadius: 999,
             background: "var(--dark)",
             color: "var(--white)",
             border: "none",
@@ -327,7 +313,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             fontWeight: 500,
             fontFamily: "inherit",
             transition: "background 0.2s",
-            marginBottom: 8,
+            marginBottom: 6,
           }}
         >
           {isHe ? "בואו נתחיל ←" : "Get started →"}
@@ -339,10 +325,10 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             background: "none",
             border: "none",
             color: "var(--muted)",
-            fontSize: 12.5,
+            fontSize: 12,
             cursor: "pointer",
             fontFamily: "inherit",
-            padding: 6,
+            padding: 4,
           }}
         >
           {isHe ? "יש לי כבר חשבון — התחברות" : "Already have an account — Sign in"}
