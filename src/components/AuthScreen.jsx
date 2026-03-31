@@ -28,9 +28,15 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
           setLoading(false);
           return;
         }
-        const { error } = await signUp(email, password, displayName.trim());
+        const { data, error } = await signUp(email, password, displayName.trim());
         if (error) throw error;
-        // After signup, profile is auto-created by trigger
+        // Supabase returns user but no session if email already exists (no error thrown!)
+        if (!data?.session) {
+          setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in instead");
+          setMode("signin");
+          setLoading(false);
+          return;
+        }
         onAuthSuccess?.();
       } else {
         const { error } = await signIn(email, password);
