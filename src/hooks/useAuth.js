@@ -7,17 +7,30 @@ export function useAuth() {
   const [profile, setProfile] = useState(null);
 
   useEffect(() => {
-    // Get initial session
+    // Get initial session with 3s safety timeout
+    let resolved = false;
+    const resolve = (s) => {
+      if (resolved) return;
+      resolved = true;
+      setSession(s);
+      if (s) fetchProfile(s.user.id);
+      setLoading(false);
+    };
+
     supabase.auth.getSession()
-      .then(({ data: { session } }) => {
-        setSession(session);
-        if (session) fetchProfile(session.user.id);
-        setLoading(false);
-      })
+      .then(({ data: { session } }) => resolve(session))
       .catch((err) => {
         console.error("[Auth] getSession failed:", err);
-        setLoading(false); // Always resolve loading, even on error
+        resolve(null);
       });
+
+    // Safety: if getSession hangs, resolve with null after 3s
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        console.warn("[Auth] getSession timeout — resolving with null");
+        resolve(null);
+      }
+    }, 3000);
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -31,7 +44,7 @@ export function useAuth() {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => { clearTimeout(timeout); subscription.unsubscribe(); };
   }, []);
 
   const fetchProfile = async (userId) => {

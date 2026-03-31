@@ -50,32 +50,22 @@ export default function Sheli() {
   const msgs = user ? (allMsgs[user.id] || []) : [];
   const isRtl = dir === "rtl";
 
-  // ── Boot (runs when auth resolves, session changes, or times out) ──
-  const bootedRef = useRef(false);
-  const prevSessionRef = useRef(null);
-  const [authTimedOut, setAuthTimedOut] = useState(false);
-
-  // Safety: if auth never resolves, force boot after 5 seconds
-  useEffect(() => {
-    const safety = setTimeout(() => {
-      if (!bootedRef.current) {
-        console.warn("[Boot] Auth timeout after 5s — forcing boot");
-        setAuthTimedOut(true);
-      }
-    }, 5000);
-    return () => clearTimeout(safety);
-  }, []);
+  // ── Boot ──
+  // Runs when auth resolves. Re-runs when session changes (null → valid).
+  const lastSessionId = useRef(null);
 
   useEffect(() => {
-    // Wait for either auth to resolve OR timeout
-    if (authLoading && !authTimedOut) return;
+    if (authLoading) return;
 
-    // Allow re-boot when session appears (e.g., after email verification or sign-in)
-    const sessionChanged = !prevSessionRef.current && session;
-    prevSessionRef.current = session;
+    const currentId = session?.user?.id || null;
+    const wasNull = lastSessionId.current === null;
+    const isNew = currentId && currentId !== lastSessionId.current;
+    lastSessionId.current = currentId;
 
-    if (bootedRef.current && !sessionChanged) return;
-    bootedRef.current = true;
+    // Skip if same session (prevents re-runs from token refreshes)
+    if (!wasNull && !isNew && currentId) return;
+
+    console.log("[Boot]", currentId ? `session: ${currentId}` : "no session");
 
     if (!session) {
       setScreen("welcome");
@@ -208,7 +198,7 @@ export default function Sheli() {
       setScreen("join-or-create");
     })();
 
-  }, [authLoading, session, authTimedOut]); // runs when auth resolves, session changes, or timeout fires
+  }, [authLoading, session]); // runs when auth resolves or session changes
 
   // ── Theme ──
   useEffect(() => {
