@@ -68,7 +68,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           fontWeight: 300,
           marginBottom: 48,
           letterSpacing: "0.03em",
-        }}>AI for the life you share together</p>
+        }}>Smart AI for your life together</p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, width: "100%", maxWidth: 300 }}>
           {[

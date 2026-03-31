@@ -59,7 +59,7 @@
 - CSS logical properties: use `padding-inline-end` not `padding-right`, `inset-inline-end` not `right`
 
 ## Git / Deploy Workflow
-- **GitHub repo:** yado2000-maker/ours-app (public)
+- **GitHub repo:** yado2000-maker/ours-app (public, brand name: Sheli)
 - **Vercel auto-deploys from `main`** — push to main triggers build
 - **Local git clone:** `C:\Users\yarond\Downloads\claude code\ours-app-git`
 - **PowerShell quirks:** `npm` not available in bash shell, use `mcp__Windows-MCP__PowerShell` or Vercel MCP

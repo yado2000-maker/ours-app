@@ -67,7 +67,7 @@ export function useAuth() {
     const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const redirectUrl = isLocal
       ? window.location.origin   // local dev: http://localhost:5173
-      : "https://ours-app-eta.vercel.app";  // production
+      : "https://sheli.ai";  // production
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",

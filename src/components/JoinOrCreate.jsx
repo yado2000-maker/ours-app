@@ -80,7 +80,7 @@ export default function JoinOrCreate({
       animation: "fadeIn 0.35s ease",
     },
 
-    // Ours wordmark
+    // Sheli wordmark
     wordmark: {
       fontFamily: "'Cormorant Garamond', serif",
       fontWeight: 300,
