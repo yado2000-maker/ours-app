@@ -522,7 +522,7 @@ export default function Sheli() {
 
   if (screen === "auth") return (
     <AuthScreen
-      onAuthSuccess={() => {}}
+      onAuthSuccess={() => { bootedRef.current = false; }}
       onBack={() => setScreen("welcome")}
       lang={lang}
     />

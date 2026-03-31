@@ -38,7 +38,15 @@ export default function AuthScreen({ onAuthSuccess, onBack, lang = "en" }) {
         onAuthSuccess?.();
       }
     } catch (err) {
-      setError(err.message || (isHe ? "\u05de\u05e9\u05d4\u05d5 \u05d4\u05e9\u05ea\u05d1\u05e9" : "Something went wrong"));
+      const msg = err.message || "";
+      if (msg.includes("already registered") || msg.includes("already been registered")) {
+        setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in instead");
+        setMode("signin");
+      } else if (msg.includes("Invalid login")) {
+        setError(isHe ? "אימייל או סיסמה לא נכונים" : "Wrong email or password");
+      } else {
+        setError(msg || (isHe ? "משהו השתבש" : "Something went wrong"));
+      }
     }
     setLoading(false);
   };
