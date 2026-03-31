@@ -175,10 +175,13 @@ export default function Sheli() {
         } catch (e) { console.error("[Boot] Household load error:", e); }
       }
 
-      // No household in localStorage — try auto-detect
+      // No household in localStorage — try auto-detect (with 3s timeout)
       console.log("[Boot] No hhId, running auto-detect...");
       try {
-        const detected = await detectHousehold(session.user.id, session.user.email);
+        const detected = await Promise.race([
+          detectHousehold(session.user.id, session.user.email),
+          new Promise(resolve => setTimeout(() => { console.warn("[Boot] Auto-detect timeout"); resolve(null); }, 3000)),
+        ]);
         if (detected) {
           console.log("[Boot] Auto-detected household:", detected.name, detected.id);
           // Auto-join: load the detected household directly
