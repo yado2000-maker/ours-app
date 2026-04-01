@@ -340,8 +340,7 @@ export default function MenuPanel({
               </div>
             ))}
           </div>
-          {isFounder && (
-            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
               <input
                 value={newMemberName}
                 onChange={(e) => setNewMemberName(e.target.value)}
@@ -388,7 +387,6 @@ export default function MenuPanel({
                 {t.menuAddMember}
               </button>
             </div>
-          )}
         </div>
 
         <div
