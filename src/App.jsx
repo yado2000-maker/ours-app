@@ -684,15 +684,16 @@ export default function Sheli() {
 
         {/* ── Header ── */}
         <div className="header">
+          <div className="header-side left">
+            <button className="icon-btn" onClick={() => setShowMenu(true)} title={t.menuProfile}
+              style={{fontSize:20,opacity:0.7}}>
+              ☰
+            </button>
+          </div>
           <div className="header-mid">
             <div className="wordmark">Sheli</div>
           </div>
-          <div className="header-side right">
-            <button onClick={() => setShowMenu(true)} title={t.menuProfile}
-              style={{width:32,height:32,borderRadius:"50%",background:"var(--accent)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:600,border:"none",cursor:"pointer",flexShrink:0}}>
-              {user.name?.[0]?.toUpperCase() || "?"}
-            </button>
-          </div>
+          <div className="header-side right" />
         </div>
 
         {/* ── Tab body ── */}
