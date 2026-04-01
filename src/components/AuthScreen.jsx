@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import T from "../locales/index.js";
 import { supabase } from "../lib/supabase.js";
 
 export default function AuthScreen({ onBack, lang = "en" }) {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email"
+  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email" | "forgot" | "forgot-sent" | "reset-password"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const pollRef = useRef(null);
 
   const t = T[lang] || T.en;
   const dir = t.dir;
@@ -17,6 +20,39 @@ export default function AuthScreen({ onBack, lang = "en" }) {
 
   const redirectUrl = window.location.hostname === "localhost"
     ? window.location.origin : "https://sheli.ai";
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
+
+  // Auto-poll for email verification completion
+  useEffect(() => {
+    if (mode !== "check-email") {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+    pollRef.current = setInterval(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        clearInterval(pollRef.current);
+        // Session appeared — boot effect will navigate
+      }
+    }, 3000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [mode]);
+
+  // Detect password recovery URL (from reset email link)
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.includes("type=recovery")) {
+      setMode("reset-password");
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -30,12 +66,16 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           setLoading(false);
           return;
         }
+        if (password !== confirmPassword) {
+          setError(isHe ? "הסיסמאות לא תואמות" : "Passwords don't match");
+          setLoading(false);
+          return;
+        }
         const { data, error } = await supabase.auth.signUp({
           email, password,
           options: { data: { full_name: displayName.trim() }, emailRedirectTo: redirectUrl },
         });
         if (error) throw error;
-        // No session = needs email confirmation (or already registered with empty identities)
         if (!data?.session) {
           if (data?.user && (!data.user.identities || data.user.identities.length === 0)) {
             setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in");
@@ -46,16 +86,31 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           setLoading(false);
           return;
         }
-        // Session exists = auto-confirmed. Boot effect will pick it up via onAuthStateChange.
-        // Just wait — don't setLoading(false), the screen will unmount when boot navigates.
+        return; // auto-confirmed, boot effect will navigate
+
+      } else if (mode === "reset-password") {
+        if (password !== confirmPassword) {
+          setError(isHe ? "הסיסמאות לא תואמות" : "Passwords don't match");
+          setLoading(false);
+          return;
+        }
+        if (password.length < 6) {
+          setError(isHe ? "הסיסמה חייבת להכיל לפחות 6 תווים" : "Password must be at least 6 characters");
+          setLoading(false);
+          return;
+        }
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) throw error;
+        setMode("signin");
+        setError(isHe ? "✓ הסיסמה שונתה בהצלחה. התחברו" : "✓ Password updated. Sign in now");
+        setLoading(false);
         return;
 
       } else {
         // Sign in
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        // Success — onAuthStateChange fires, boot effect navigates. Just wait.
-        return;
+        return; // boot effect navigates
       }
     } catch (err) {
       const msg = err.message || "";
@@ -70,12 +125,42 @@ export default function AuthScreen({ onBack, lang = "en" }) {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      setError(isHe ? "נא להזין אימייל" : "Please enter your email");
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl });
+      if (error) throw error;
+      setMode("forgot-sent");
+    } catch (err) {
+      setError(err.message || (isHe ? "משהו השתבש" : "Something went wrong"));
+    }
+    setLoading(false);
+  };
+
+  const handleResendEmail = async () => {
+    if (resendCooldown > 0) return;
+    try {
+      await supabase.auth.resend({ type: "signup", email });
+      setResendCooldown(60);
+    } catch {}
+  };
+
   const handleGoogle = async () => {
     setError(null);
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: redirectUrl },
     });
+  };
+
+  const inputStyle = {
+    padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)",
+    background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit",
   };
 
   // ── "Check your email" screen ──
@@ -100,16 +185,103 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           {email}
         </p>
         <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, maxWidth: 280, marginBottom: 32 }}>
-          {isHe ? "לחצו על הקישור באימייל כדי להשלים את ההרשמה" : "Click the link in the email to complete your signup"}
+          {isHe ? "לחצו על הקישור באימייל. אחרי האימות, חיזרו ללשונית הזו — שלי תזהה אתכם אוטומטית" : "Click the link in your email. After verifying, come back to this tab — Sheli will detect you automatically"}
         </p>
         <button onClick={() => { setMode("signin"); setError(null); }}
           style={{ padding: "12px 28px", borderRadius: 999, background: "var(--dark)", color: "var(--white)", border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", marginBottom: 12 }}>
           {isHe ? "← חזרה להתחברות" : "← Back to sign in"}
         </button>
-        <button onClick={() => { setMode("signup"); setError(null); }}
-          style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 6 }}>
-          {isHe ? "לא קיבלתי אימייל" : "Didn't get an email"}
+        <button onClick={handleResendEmail} disabled={resendCooldown > 0}
+          style={{ background: "none", border: "none", color: resendCooldown > 0 ? "var(--border)" : "var(--muted)", fontSize: 13, cursor: resendCooldown > 0 ? "default" : "pointer", fontFamily: "inherit", padding: 6 }}>
+          {resendCooldown > 0
+            ? (isHe ? `שליחה מחדש (${resendCooldown}s)` : `Resend (${resendCooldown}s)`)
+            : (isHe ? "שלחו שוב" : "Resend email")}
         </button>
+      </div>
+    );
+  }
+
+  // ── "Reset link sent" screen ──
+  if (mode === "forgot-sent") {
+    return (
+      <div style={{
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font, textAlign: "center",
+      }} dir={dir}>
+        <div style={{ fontSize: 48, marginBottom: 20 }}>✉️</div>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontWeight: 300,
+          fontSize: 28, letterSpacing: "0.18em", color: "var(--dark)", marginBottom: 12,
+        }}>
+          {isHe ? "בדקו את האימייל" : "Check your email"}
+        </div>
+        <p style={{ fontSize: 15, color: "var(--warm)", lineHeight: 1.6, maxWidth: 300, marginBottom: 24 }}>
+          {isHe ? "אם יש חשבון עם האימייל הזה, שלחתי קישור לאיפוס סיסמה" : "If there's an account with this email, I sent a password reset link"}
+        </p>
+        <button onClick={() => { setMode("signin"); setError(null); setPassword(""); setConfirmPassword(""); }}
+          style={{ padding: "12px 28px", borderRadius: 999, background: "var(--dark)", color: "var(--white)", border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}>
+          {isHe ? "← חזרה להתחברות" : "← Back to sign in"}
+        </button>
+      </div>
+    );
+  }
+
+  // ── "Reset password" screen (from email link) ──
+  if (mode === "reset-password") {
+    return (
+      <div style={{
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font,
+      }} dir={dir}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+        <p style={{ fontSize: 15, color: "var(--warm)", fontWeight: 400, marginBottom: 36 }}>
+          {isHe ? "בחרו סיסמה חדשה" : "Choose a new password"}
+        </p>
+        <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
+          <input type="password" placeholder={isHe ? "סיסמה חדשה" : "New password"} value={password}
+            onChange={(e) => setPassword(e.target.value)} dir="ltr" required minLength={6}
+            autoComplete="new-password" style={inputStyle} />
+          <input type="password" placeholder={isHe ? "אימות סיסמה" : "Confirm password"} value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)} dir="ltr" required minLength={6}
+            autoComplete="new-password" style={inputStyle} />
+          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          <button type="submit" disabled={loading}
+            style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
+            {loading ? (isHe ? "רגע..." : "Loading...") : (isHe ? "עדכנו סיסמה" : "Update Password")}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // ── "Forgot password" screen ──
+  if (mode === "forgot") {
+    return (
+      <div style={{
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font,
+      }} dir={dir}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+        <p style={{ fontSize: 15, color: "var(--warm)", fontWeight: 400, marginBottom: 36 }}>
+          {isHe ? "איפוס סיסמה" : "Reset password"}
+        </p>
+        <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
+          <input type="email" placeholder={isHe ? "אימייל" : "Email"} value={email}
+            onChange={(e) => setEmail(e.target.value)} dir="ltr" required autoComplete="email"
+            style={inputStyle} />
+          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          <button onClick={handleForgotPassword} disabled={loading}
+            style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
+            {loading ? (isHe ? "רגע..." : "Loading...") : (isHe ? "שלחו קישור איפוס" : "Send reset link")}
+          </button>
+          <button onClick={() => { setMode("signin"); setError(null); }}
+            style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8 }}>
+            {isHe ? "→ חזרה להתחברות" : "← Back to sign in"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -128,7 +300,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         {/* Mode toggle */}
         <div style={{ display: "flex", borderRadius: 12, overflow: "hidden", border: "1.5px solid var(--border)" }}>
           {["signin", "signup"].map((m) => (
-            <button key={m} type="button" onClick={() => { setMode(m); setError(null); setLoading(false); }}
+            <button key={m} type="button" onClick={() => { setMode(m); setError(null); setLoading(false); setPassword(""); setConfirmPassword(""); }}
               style={{
                 flex: 1, padding: "10px 0", border: "none",
                 background: mode === m ? "var(--dark)" : "transparent",
@@ -143,17 +315,23 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         {mode === "signup" && (
           <input type="text" placeholder={isHe ? "השם שלך" : "Your name"} value={displayName}
             onChange={(e) => setDisplayName(e.target.value)} dir={dir}
-            style={{ padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit", textAlign: "start" }} />
+            style={{ ...inputStyle, textAlign: "start" }} />
         )}
 
         <input type="email" placeholder={isHe ? "אימייל" : "Email"} value={email}
           onChange={(e) => setEmail(e.target.value)} dir="ltr" required autoComplete="email"
-          style={{ padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit" }} />
+          style={inputStyle} />
 
         <input type="password" placeholder={isHe ? "סיסמה" : "Password"} value={password}
           onChange={(e) => setPassword(e.target.value)} dir="ltr" required minLength={6}
           autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          style={{ padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit" }} />
+          style={inputStyle} />
+
+        {mode === "signup" && (
+          <input type="password" placeholder={isHe ? "אימות סיסמה" : "Confirm password"} value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)} dir="ltr" required minLength={6}
+            autoComplete="new-password" style={inputStyle} />
+        )}
 
         {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
 
@@ -161,6 +339,14 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1, transition: "background 0.2s" }}>
           {loading ? (isHe ? "רגע..." : "Loading...") : mode === "signin" ? (isHe ? "התחבר" : "Sign In") : (isHe ? "היירשם" : "Sign Up")}
         </button>
+
+        {/* Forgot password link (signin only) */}
+        {mode === "signin" && (
+          <button type="button" onClick={() => { setMode("forgot"); setError(null); }}
+            style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", padding: 2, textAlign: "center" }}>
+            {isHe ? "שכחתם סיסמה?" : "Forgot password?"}
+          </button>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "4px 0" }}>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />

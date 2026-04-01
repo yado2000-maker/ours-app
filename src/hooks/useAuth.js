@@ -24,13 +24,15 @@ export function useAuth() {
         resolve(null);
       });
 
-    // Safety: if getSession hangs, resolve with null after 3s
+    // Safety: if getSession hangs, resolve with null after 1.5s
+    // Switching from publishable key to JWT anon key should make this faster,
+    // but incognito/fresh browsers still need a safety net
     const timeout = setTimeout(() => {
       if (!resolved) {
         console.warn("[Auth] getSession timeout — resolving with null");
         resolve(null);
       }
-    }, 3000);
+    }, 1500);
 
     // Listen for auth changes (also resolves loading if getSession timed out)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(

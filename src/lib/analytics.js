@@ -9,7 +9,7 @@ export const initAnalytics = () => {
 
   const POSTHOG_KEY = import.meta.env.VITE_POSTHOG_KEY;
   if (!POSTHOG_KEY) {
-    console.warn("[Analytics] No VITE_POSTHOG_KEY set — analytics disabled");
+    if (import.meta.env.DEV) console.info("[Analytics] No VITE_POSTHOG_KEY — disabled");
     return;
   }
 

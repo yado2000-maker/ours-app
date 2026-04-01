@@ -340,7 +340,13 @@ export default function Sheli() {
     // Navigate immediately — don't wait for DB writes
     setHouseholdS(hh); setLang(hh.lang || "en");
     setTasksS([]); setShoppingS([]); setEventsS([]);
-    setScreen("welcome-sheli");
+    // Auto-select founder as current user (skip picker)
+    const founder = hh.members[0];
+    if (founder) {
+      lsSet("sheli-user", founder);
+      setUser(founder);
+    }
+    setScreen("connect-wa");
 
     // Write to DB in background (non-blocking)
     sbSet(hhId, { hh, tasks: [], shopping: [], events: [] }).catch(e => console.warn("[Setup] blob:", e));
@@ -351,22 +357,19 @@ export default function Sheli() {
   };
 
   // ── Reset ──
-  const SB_URL = "https://wzwwtghtnkapdwlgnrxr.supabase.co";
-  const SB_KEY = "sb_publishable_w5_9MXaM2XAZRk2b8rquoQ_kFpcUMTA";
-
   const doReset = async () => {
     const hhId = lsGet("sheli-hhid");
     if (hhId) {
       try {
-        await fetch(`${SB_URL}/rest/v1/households?id=eq.${hhId}`, {
-          method: "DELETE",
-          headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}` }
-        });
+        await supabase.from("households").delete().eq("id", hhId);
+        await supabase.from("households_v2").delete().eq("id", hhId);
       } catch {}
     }
     localStorage.removeItem("sheli-hhid");
     localStorage.removeItem("sheli-msgs");
     localStorage.removeItem("sheli-user");
+    localStorage.removeItem("sheli-founder");
+    localStorage.removeItem("sheli-onboarded");
     setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setInput("");
     setShowMenu(false); setScreen("setup");
   };
@@ -406,6 +409,8 @@ export default function Sheli() {
     const updatedHh = { ...household, members: household.members.filter(m => m.id !== memberId) };
     setHouseholdS(updatedHh);
     save(updatedHh, undefined, undefined, undefined).catch(() => {});
+    // Also delete from normalized table
+    supabase.from("household_members").delete().eq("id", memberId).eq("household_id", household.id).catch(() => {});
   };
 
   // ── Language switch ──
@@ -571,25 +576,7 @@ export default function Sheli() {
 
   if (screen === "setup") return <Setup onDone={handleSetup} initialLang={lang !== "en" ? lang : null} />;
 
-  // ── Welcome Sheli screen (post-setup, first time only) ──
-  if (screen === "welcome-sheli") {
-    const wDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
-    const wFont = wDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
-    const wt = T[household?.lang || "en"] || T.en;
-    return (
-      <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:wFont,textAlign:"center"}} dir={wDir}>
-        <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:24}}>Sheli</div>
-        <div style={{fontSize:22,fontWeight:500,color:"var(--dark)",marginBottom:12,lineHeight:1.4}}>{wt.welcomeHi(household?.name || "")}</div>
-        <p style={{fontSize:15,color:"var(--muted)",fontWeight:400,lineHeight:1.65,maxWidth:300,marginBottom:40}}>{wt.welcomeSub}</p>
-        <button onClick={() => setScreen("connect-wa")}
-          style={{padding:"15px 40px",borderRadius:999,background:"var(--dark)",color:"var(--white)",border:"none",fontSize:15,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"background 0.2s"}}>
-          {wt.welcomeGo}
-        </button>
-      </div>
-    );
-  }
-
-  // ── Connect WhatsApp screen (post-welcome, first time only) ──
+  // ── Connect WhatsApp screen (post-setup onboarding) ──
   if (screen === "connect-wa") {
     const wDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
     const wFont = wDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
@@ -608,7 +595,7 @@ export default function Sheli() {
           style={{display:"block",padding:"14px 36px",borderRadius:999,background:"#25D366",color:"#fff",border:"none",fontSize:15,fontWeight:500,cursor:"pointer",fontFamily:"inherit",textDecoration:"none",marginBottom:16,transition:"opacity 0.2s"}}>
           {wt.waBtn}
         </a>
-        <button onClick={() => { lsSet("sheli-onboarded", true); setScreen("pick"); }}
+        <button onClick={() => { lsSet("sheli-onboarded", true); setScreen(user ? "chat" : "pick"); }}
           style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:8}}>
           {wt.waLater}
         </button>

@@ -8,7 +8,7 @@ export const initSentry = () => {
 
   const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
   if (!SENTRY_DSN) {
-    console.warn("[Sentry] No VITE_SENTRY_DSN set — error tracking disabled");
+    if (import.meta.env.DEV) console.info("[Sentry] No VITE_SENTRY_DSN — disabled");
     return;
   }
 
@@ -26,7 +26,6 @@ export const initSentry = () => {
     }
   }).catch(() => {
     // Sentry CDN failed to load — silently continue
-    console.warn("[Sentry] CDN failed to load");
   });
 };
 

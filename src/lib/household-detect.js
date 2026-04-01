@@ -8,34 +8,32 @@ import { supabase } from "./supabase.js";
  *   3) Old blob households table (solo founder / testing)
  *   4) If only ONE household exists, suggest it (for early testing phase)
  */
+const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
+
 export async function detectHousehold(userId, userEmail) {
-  // Method 1: Check household_members for this user_id
+  // Method 1: Check household_members for this user_id (3s timeout)
   try {
-    const { data: membership } = await supabase
-      .from("household_members")
-      .select("household_id")
-      .eq("user_id", userId)
-      .limit(1)
-      .single();
+    const { data: membership } = await withTimeout(
+      supabase.from("household_members").select("household_id").eq("user_id", userId).limit(1).single(),
+      3000
+    ) || {};
 
     if (membership?.household_id) {
-      return await loadHouseholdInfo(membership.household_id);
+      return await withTimeout(loadHouseholdInfo(membership.household_id), 3000);
     }
   } catch {
     // No membership found — continue
   }
 
-  // Method 2: Check households_v2 created_by
+  // Method 2: Check households_v2 created_by (3s timeout)
   try {
-    const { data: created } = await supabase
-      .from("households_v2")
-      .select("id, name")
-      .eq("created_by", userId)
-      .limit(1)
-      .single();
+    const { data: created } = await withTimeout(
+      supabase.from("households_v2").select("id, name").eq("created_by", userId).limit(1).single(),
+      3000
+    ) || {};
 
     if (created) {
-      return await loadHouseholdInfo(created.id);
+      return await withTimeout(loadHouseholdInfo(created.id), 3000);
     }
   } catch {
     // Not a creator — continue
