@@ -85,8 +85,9 @@ export default function Sheli() {
         let oldData = null;
         let v2Data = null;
 
-        try { oldData = await sbGet(id); } catch (e) { console.warn("[Boot] sbGet:", e); }
-        try { v2Data = await loadHousehold(id); } catch (e) { console.warn("[Boot] loadHousehold:", e); }
+        const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
+        try { oldData = await withTimeout(sbGet(id), 4000); } catch (e) { console.warn("[Boot] sbGet:", e.message); }
+        try { v2Data = await withTimeout(loadHousehold(id), 4000); } catch (e) { console.warn("[Boot] loadHousehold:", e.message); }
 
         console.log("[Boot] oldData:", oldData ? JSON.stringify({tasks: oldData.tasks?.length, shop: oldData.shopping?.length, hhName: oldData.hh?.name}) : "null");
         console.log("[Boot] v2Data:", v2Data ? JSON.stringify({tasks: v2Data.tasks?.length, shop: v2Data.shopping?.length, hhName: v2Data.hh?.name}) : "null");
@@ -181,7 +182,7 @@ export default function Sheli() {
       try {
         const detected = await Promise.race([
           detectHousehold(session.user.id, session.user.email),
-          new Promise(resolve => setTimeout(() => { console.warn("[Boot] Auto-detect timeout"); resolve(null); }, 3000)),
+          new Promise(resolve => setTimeout(() => { console.warn("[Boot] Auto-detect timeout"); resolve(null); }, 5000)),
         ]);
         if (detected) {
           console.log("[Boot] Auto-detected household:", detected.name, detected.id);
@@ -202,15 +203,15 @@ export default function Sheli() {
       setScreen("join-or-create");
     };
 
-    // Race boot against 8s timeout — if Supabase hangs, go to join-or-create
-    Promise.race([
-      bootAsync(),
-      new Promise(resolve => setTimeout(() => {
+    // Run boot with 8s safety net — but only override if still on "loading"
+    let bootDone = false;
+    bootAsync().then(() => { bootDone = true; });
+    setTimeout(() => {
+      if (!bootDone) {
         console.warn("[Boot] Global timeout — forcing join-or-create");
-        setScreen("join-or-create");
-        resolve();
-      }, 8000)),
-    ]);
+        setScreen(prev => prev === "loading" ? "join-or-create" : prev);
+      }
+    }, 8000);
 
   }, [authLoading, session]); // runs when auth resolves or session changes
 
