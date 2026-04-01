@@ -2,9 +2,9 @@ import { useState } from "react";
 import { uid } from "../lib/supabase.js";
 import T from "../locales/index.js";
 
-export default function Setup({ onDone }) {
-  const [step, setStep]       = useState(0);
-  const [lang, setLang]       = useState(null);
+export default function Setup({ onDone, initialLang }) {
+  const [step, setStep]       = useState(initialLang ? 1 : 0);
+  const [lang, setLang]       = useState(initialLang || null);
   const [hhName, setHhName]   = useState("");
   const [members, setMembers] = useState([]);
   const [newM, setNewM]       = useState("");

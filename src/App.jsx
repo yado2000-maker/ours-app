@@ -561,7 +561,7 @@ export default function Sheli() {
     />
   );
 
-  if (screen === "setup") return <Setup onDone={handleSetup} />;
+  if (screen === "setup") return <Setup onDone={handleSetup} initialLang={lang !== "en" ? lang : null} />;
 
   // ── Welcome Sheli screen (post-setup, first time only) ──
   if (screen === "welcome-sheli") {

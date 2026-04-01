@@ -281,8 +281,8 @@ export default function JoinOrCreate({
       {/* Subtitle */}
       <p style={s.subtitle}>
         {isHe
-          ? "הבית שלכם כבר ב-Sheli?"
-          : "Already set up on Sheli?"}
+          ? "בואו נתחיל"
+          : "Let's get started"}
       </p>
 
       <div style={s.content}>
@@ -338,7 +338,24 @@ export default function JoinOrCreate({
           </div>
         )}
 
-        {/* ── Path B: Join by code ── */}
+        {/* ── Path C: Create new (PRIMARY CTA) ── */}
+        <button
+          style={{...s.createBtn, background: "var(--dark)", color: "var(--white)", border: "1.5px solid var(--dark)", fontWeight: 500}}
+          onClick={onCreateNew}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--dark)"; e.currentTarget.style.borderColor = "var(--dark)"; }}
+        >
+          {isHe ? "צרו בית חדש ב-Sheli" : "Set up a new home"}
+        </button>
+
+        {/* ── Divider ── */}
+        <div style={s.divider}>
+          <div style={s.dividerLine} />
+          <span style={s.dividerText}>{isHe ? "או" : "or"}</span>
+          <div style={s.dividerLine} />
+        </div>
+
+        {/* ── Path B: Join by code (SECONDARY) ── */}
         <p style={s.sectionLabel}>
           {isHe ? "הצטרפו עם הקוד של הבית" : "Join with a home code"}
         </p>
@@ -377,39 +394,12 @@ export default function JoinOrCreate({
             }}
           >
             {loading
-              ? isHe
-                ? "..."
-                : "..."
+              ? "..."
               : isHe
               ? "הצטרפו"
               : "Join"}
           </button>
         </div>
-
-        {/* ── Divider ── */}
-        <div style={s.divider}>
-          <div style={s.dividerLine} />
-          <span style={s.dividerText}>{isHe ? "או" : "or"}</span>
-          <div style={s.dividerLine} />
-        </div>
-
-        {/* ── Path C: Create new ── */}
-        <button
-          style={s.createBtn}
-          onClick={onCreateNew}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "var(--accent)";
-            e.currentTarget.style.color = "var(--dark)";
-            e.currentTarget.style.background = "var(--accent-soft)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "var(--border)";
-            e.currentTarget.style.color = "var(--warm)";
-            e.currentTarget.style.background = "transparent";
-          }}
-        >
-          {isHe ? "צרו בית חדש ב-Sheli" : "Set up a new home"}
-        </button>
 
         {/* ── Hint text ── */}
         <p
@@ -418,7 +408,7 @@ export default function JoinOrCreate({
             color: "var(--muted)",
             fontWeight: 300,
             textAlign: "center",
-            marginTop: 20,
+            marginTop: 16,
             lineHeight: 1.6,
             maxWidth: 280,
             alignSelf: "center",

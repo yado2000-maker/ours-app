@@ -317,7 +317,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
             marginBottom: 6,
           }}
         >
-          {isHe ? "בואו נתחיל ←" : "Get started →"}
+          {isHe ? "← בואו נתחיל" : "Get started →"}
         </button>
 
         <button
