@@ -29,18 +29,23 @@
 - **RLS blocks everything when auth.uid() is NULL** — Supabase client with publishable key + auth session sends JWT. If JWT is stale/expired, auth.uid() returns NULL and all RLS policies fail silently.
 - **Clock skew warning** (`Session as retrieved from URL was issued in the future`) — indicates JWT timestamp mismatch. Can cause auth.uid() to be NULL. Fix: clear localStorage and re-authenticate.
 - **RLS is currently RELAXED for development** — most tables use `auth.uid() IS NOT NULL` instead of membership checks. Tighten before launch.
-- **Edge Functions use service_role key** (bypasses RLS). Web app uses publishable key (goes through RLS).
+- **Use JWT anon key, NOT publishable key** — `sb_publishable_...` format causes 406 errors on raw REST calls (PostgREST rejects non-JWT tokens). Always use the legacy `eyJhbG...` anon JWT. Both are available in the project.
+- **Edge Functions use service_role key** (bypasses RLS). Web app uses anon JWT key (goes through RLS).
 - **Realtime must be explicitly enabled** per table: `ALTER PUBLICATION supabase_realtime ADD TABLE public.tablename;`
 - **`household_members` has `USING (true)` fallback policy** — needed because clock skew made auth-based policies unreliable
 
 ## React / Boot Flow Gotchas
-- **Boot useEffect runs ONCE via `bootedRef`** — prevents re-runs when Supabase auth fires multiple state changes (TOKEN_REFRESHED, etc.)
-- **3-second safety timeout** — if authLoading never resolves, forces welcome screen
+- **Boot useEffect tracks by `lastSessionId` ref** — re-runs when session changes (null → valid), skips token refreshes
+- **1.5-second auth timeout** — if getSession hangs (incognito/fresh), resolves with null after 1.5s → welcome screen
 - **Functional setState for screen transitions** — `setScreen(prev => prev === "loading" ? "welcome" : prev)` prevents overwriting active screens
 - **Modals render OUTSIDE `.app` div** (in React fragment) — they DON'T inherit font-family from `.app[dir="rtl"]`. Must set fontFamily explicitly on `.modal` class.
 - **StrictMode double-renders in dev** but not production — don't debug prod issues assuming double-render
 
 ## WhatsApp Bot Gotchas
+- **1-on-1 AND group support (v8)** — Bot accepts both `@g.us` (group) and `@s.whatsapp.net` (direct). Different AI behavior per chat type:
+  - **Direct (1-on-1):** Respond to EVERY message — personal assistant mode. Resolve household via `whatsapp_member_mapping` phone lookup.
+  - **Group:** Only respond when mentioned by name ("שלי"), message is actionable (task/shopping/event), or question directed at bot. Skip social noise.
+  - **Unknown direct user:** Gets welcome message explaining how to connect via group or app.
 - **Whapi.Cloud sends outgoing messages back as webhooks** — must skip bot's own phone number early in handler
 - **Bot phone: 972555175553** — set as `BOT_PHONE_NUMBER` env var in Edge Function secrets
 - **Edge Function deployment: single inlined file** — Supabase Edge Functions don't support cross-function shared imports. The `_shared/` files are for development reference; the deployed `index.ts` has everything inlined.
@@ -49,6 +54,7 @@
 - **"NOT A TASK" distinction** — requests for info ("שלח קוד", "מה הסיסמא") are NOT tasks. Only household chores/to-dos.
 - **Duplicate handling** — bot asks "כבר ברשימה, להוסיף עוד?" instead of silently adding or ignoring
 - **Whapi trial: 4 days, 5 chats, 150 msgs/day** — upgrade to $29/mo or migrate to Meta Cloud API
+- **Bot identity: "Sheli" (שלי)** — feminine Hebrew verbs (הוספתי, בדקתי). Classifier prompt updated from "Ours" to "Sheli".
 
 ## RTL / Hebrew Design Rules
 - `dir="rtl"` on parent flips flexbox automatically — most layouts "just work"
@@ -58,13 +64,22 @@
 - WhatsApp mock on welcome screen: force `direction: ltr` on bubble layout (WhatsApp always shows your msgs on right), inner text gets `direction: rtl` for Hebrew
 - CSS logical properties: use `padding-inline-end` not `padding-right`, `inset-inline-end` not `right`
 
+## User Flow (7 screens)
+```
+Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/forgot/check-email/reset) → JoinOrCreate (auto-detect/code/create) → Setup (members, skip lang if known) → ConnectWhatsApp → Chat
+```
+- **Founder auto-selected** — after setup, founder is set as current user (no picker)
+- **Picker only for joiners** — returning users or code-join users see the member picker
+- **Auth modes:** signin, signup (with password confirm), check-email (auto-poll), forgot, forgot-sent, reset-password (with confirm)
+
 ## Git / Deploy Workflow
 - **GitHub repo:** yado2000-maker/ours-app (public, brand name: Sheli)
 - **Vercel auto-deploys from `main`** — push to main triggers build
-- **Local git clone:** `C:\Users\yarond\Downloads\claude code\ours-app-git`
-- **PowerShell quirks:** `npm` not available in bash shell, use `mcp__Windows-MCP__PowerShell` or Vercel MCP
+- **Deploy clone:** `C:\Users\yarond\Downloads\claude code\ours-app-deploy\` — working copy with all changes
+- **Git clone:** `C:\Users\yarond\Downloads\claude code\ours-app-git\` — clean git repo for commits
+- **Deploy process:** Edit files in deploy clone → copy changed files to git clone → commit → push → Vercel auto-deploys
+- **PowerShell quirks:** `npm`/`git` not available in bash shell, use `mcp__Windows-MCP__PowerShell`
 - **Browser cache aggressive** — always `Ctrl+Shift+R` after deploy, or `localStorage.clear(); location.reload()` for clean state
-- **`gh` CLI not available** — create PRs manually or merge directly
 
 ## Commands
 - `npm run dev` — Vite dev server (port 5173)
