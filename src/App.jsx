@@ -324,44 +324,27 @@ export default function Sheli() {
   };
 
   // ── Setup done ──
+  const setupRunning = useRef(false);
   const handleSetup = async (hh) => {
+    if (setupRunning.current) return; // prevent double-click
+    setupRunning.current = true;
     console.log("[Setup] Starting...", hh.name, hh.members.length, "members");
-    try {
-      const hhId = uid8();
-      hh.id = hhId;
-      lsSet("sheli-hhid", hhId);
-      lsSet("sheli-founder", true);
 
-      // Write to old JSON blob
-      console.log("[Setup] Writing old blob...");
-      await sbSet(hhId, { hh, tasks: [], shopping: [], events: [] });
-      console.log("[Setup] Old blob done");
+    const hhId = uid8();
+    hh.id = hhId;
+    lsSet("sheli-hhid", hhId);
+    lsSet("sheli-founder", true);
 
-      // Also create in normalized tables
-      try {
-        console.log("[Setup] Writing v2 tables...");
-        await supabase.from("households_v2").upsert({ id: hhId, name: hh.name, lang: hh.lang || "he" });
-        for (const member of hh.members) {
-          await supabase.from("household_members").insert({
-            household_id: hhId,
-            display_name: member.name,
-            role: "member",
-          });
-        }
-        console.log("[Setup] v2 tables done");
-      } catch (err) {
-        console.error("[Setup] Normalized table error:", err);
-      }
+    // Navigate immediately — don't wait for DB writes
+    setHouseholdS(hh); setLang(hh.lang || "en");
+    setTasksS([]); setShoppingS([]); setEventsS([]);
+    setScreen("welcome-sheli");
 
-      setHouseholdS(hh); setLang(hh.lang || "en");
-      setTasksS([]); setShoppingS([]); setEventsS([]);
-      setScreen("welcome-sheli");
-    } catch (err) {
-      console.error("[Setup] FAILED:", err);
-      // Don't leave user stuck — proceed anyway with local data
-      setHouseholdS(hh); setLang(hh.lang || "en");
-      setTasksS([]); setShoppingS([]); setEventsS([]);
-      setScreen("welcome-sheli");
+    // Write to DB in background (non-blocking)
+    sbSet(hhId, { hh, tasks: [], shopping: [], events: [] }).catch(e => console.warn("[Setup] blob:", e));
+    supabase.from("households_v2").upsert({ id: hhId, name: hh.name, lang: hh.lang || "he" }).catch(e => console.warn("[Setup] v2:", e));
+    for (const member of hh.members) {
+      supabase.from("household_members").insert({ household_id: hhId, display_name: member.name, role: "member" }).catch(e => console.warn("[Setup] member:", e));
     }
   };
 

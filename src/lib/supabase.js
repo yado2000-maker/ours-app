@@ -14,9 +14,10 @@ export const sbGet = async (hhId) => {
 };
 
 export const sbSet = async (hhId, data) => {
-  await supabase
-    .from("households")
-    .upsert({ id: hhId, data, updated_at: new Date().toISOString() });
+  await Promise.race([
+    supabase.from("households").upsert({ id: hhId, data, updated_at: new Date().toISOString() }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("sbSet timeout")), 5000)),
+  ]).catch(err => console.warn("[sbSet]", err.message));
 };
 
 export const lsGet = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
