@@ -1,6 +1,6 @@
 import { useState } from "react";
 import T from "../locales/index.js";
-import { useAuth } from "../hooks/useAuth.js";
+import { supabase } from "../lib/supabase.js";
 
 export default function AuthScreen({ onBack, lang = "en" }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email"
@@ -9,12 +9,14 @@ export default function AuthScreen({ onBack, lang = "en" }) {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp, signInWithGoogle } = useAuth();
 
   const t = T[lang] || T.en;
   const dir = t.dir;
   const isHe = lang === "he";
   const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+
+  const redirectUrl = window.location.hostname === "localhost"
+    ? window.location.origin : "https://sheli.ai";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,44 +30,36 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           setLoading(false);
           return;
         }
-        const { data, error } = await signUp(email, password, displayName.trim());
+        const { data, error } = await supabase.auth.signUp({
+          email, password,
+          options: { data: { full_name: displayName.trim() }, emailRedirectTo: redirectUrl },
+        });
         if (error) throw error;
-
-        // With email confirmation enabled:
-        // - New user: data.user exists, data.session is null → show "check email"
-        // - Existing user: data.user may have identities=[] → already registered
-        if (data?.user && (!data.user.identities || data.user.identities.length === 0)) {
-          // Supabase returns empty identities for existing users
-          setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in instead");
-          setMode("signin");
+        // No session = needs email confirmation (or already registered with empty identities)
+        if (!data?.session) {
+          if (data?.user && (!data.user.identities || data.user.identities.length === 0)) {
+            setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in");
+            setMode("signin");
+          } else {
+            setMode("check-email");
+          }
           setLoading(false);
           return;
         }
-
-        // New user created — needs email confirmation
-        setMode("check-email");
-        setLoading(false);
+        // Session exists = auto-confirmed. Boot effect will pick it up via onAuthStateChange.
+        // Just wait — don't setLoading(false), the screen will unmount when boot navigates.
         return;
 
       } else {
         // Sign in
-        const { data, error } = await signIn(email, password);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        // Session is set — onAuthStateChange in useAuth will fire,
-        // boot effect will detect session and navigate forward.
-        // No reload needed!
-        if (!data?.session) {
-          setError(isHe ? "ההתחברות נכשלה, נסו שוב" : "Sign-in failed, try again");
-        }
-        // If session exists, the auth state change will trigger boot.
-        // Keep loading state until the app navigates away.
+        // Success — onAuthStateChange fires, boot effect navigates. Just wait.
+        return;
       }
     } catch (err) {
       const msg = err.message || "";
-      if (msg.includes("already registered") || msg.includes("already been registered")) {
-        setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in instead");
-        setMode("signin");
-      } else if (msg.includes("Invalid login") || msg.includes("invalid_credentials")) {
+      if (msg.includes("Invalid login") || msg.includes("invalid_credentials")) {
         setError(isHe ? "אימייל או סיסמה לא נכונים" : "Wrong email or password");
       } else if (msg.includes("Email not confirmed")) {
         setMode("check-email");
@@ -78,95 +72,42 @@ export default function AuthScreen({ onBack, lang = "en" }) {
 
   const handleGoogle = async () => {
     setError(null);
-    const { error } = await signInWithGoogle();
-    if (error) setError(error.message);
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: redirectUrl },
+    });
   };
 
   // ── "Check your email" screen ──
   if (mode === "check-email") {
     return (
       <div style={{
-        minHeight: "100dvh",
-        background: "var(--cream)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "40px 24px",
-        fontFamily: font,
-        textAlign: "center",
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font, textAlign: "center",
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>📬</div>
         <div style={{
-          fontFamily: "'Cormorant Garamond', serif",
-          fontWeight: 300,
-          fontSize: 28,
-          letterSpacing: "0.18em",
-          color: "var(--dark)",
-          marginBottom: 12,
+          fontFamily: "'Cormorant Garamond', serif", fontWeight: 300,
+          fontSize: 28, letterSpacing: "0.18em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "בדקו את האימייל" : "Check your email"}
         </div>
-        <p style={{
-          fontSize: 15,
-          color: "var(--warm)",
-          lineHeight: 1.6,
-          maxWidth: 300,
-          marginBottom: 8,
-        }}>
-          {isHe
-            ? "שלחתי לכם קישור אימות ל:"
-            : "I sent a verification link to:"}
+        <p style={{ fontSize: 15, color: "var(--warm)", lineHeight: 1.6, maxWidth: 300, marginBottom: 8 }}>
+          {isHe ? "שלחתי לכם קישור אימות ל:" : "I sent a verification link to:"}
         </p>
-        <p style={{
-          fontSize: 15,
-          fontWeight: 600,
-          color: "var(--dark)",
-          marginBottom: 24,
-          direction: "ltr",
-        }}>
+        <p style={{ fontSize: 15, fontWeight: 600, color: "var(--dark)", marginBottom: 24, direction: "ltr" }}>
           {email}
         </p>
-        <p style={{
-          fontSize: 13,
-          color: "var(--muted)",
-          lineHeight: 1.5,
-          maxWidth: 280,
-          marginBottom: 32,
-        }}>
-          {isHe
-            ? "לחצו על הקישור באימייל כדי להשלים את ההרשמה"
-            : "Click the link in the email to complete your signup"}
+        <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5, maxWidth: 280, marginBottom: 32 }}>
+          {isHe ? "לחצו על הקישור באימייל כדי להשלים את ההרשמה" : "Click the link in the email to complete your signup"}
         </p>
-        <button
-          onClick={() => { setMode("signin"); setError(null); }}
-          style={{
-            padding: "12px 28px",
-            borderRadius: 999,
-            background: "var(--dark)",
-            color: "var(--white)",
-            border: "none",
-            fontSize: 14,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            marginBottom: 12,
-          }}
-        >
+        <button onClick={() => { setMode("signin"); setError(null); }}
+          style={{ padding: "12px 28px", borderRadius: 999, background: "var(--dark)", color: "var(--white)", border: "none", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", marginBottom: 12 }}>
           {isHe ? "← חזרה להתחברות" : "← Back to sign in"}
         </button>
-        <button
-          onClick={() => { setMode("signup"); setError(null); }}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--muted)",
-            fontSize: 13,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            padding: 6,
-          }}
-        >
+        <button onClick={() => { setMode("signup"); setError(null); }}
+          style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 6 }}>
           {isHe ? "לא קיבלתי אימייל" : "Didn't get an email"}
         </button>
       </div>
@@ -176,198 +117,59 @@ export default function AuthScreen({ onBack, lang = "en" }) {
   // ── Sign in / Sign up form ──
   return (
     <div style={{
-      minHeight: "100dvh",
-      background: "var(--cream)",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "40px 24px",
-      fontFamily: font,
+      minHeight: "100dvh", background: "var(--cream)", display: "flex",
+      flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "40px 24px", fontFamily: font,
     }} dir={dir}>
-      {/* Wordmark */}
-      <div style={{
-        fontFamily: "'Cormorant Garamond', serif",
-        fontWeight: 300,
-        fontSize: 38,
-        letterSpacing: "0.22em",
-        color: "var(--dark)",
-        marginBottom: 4,
-      }}>Sheli</div>
-      <p style={{
-        fontSize: 13,
-        color: "var(--muted)",
-        fontWeight: 300,
-        marginBottom: 36,
-        letterSpacing: "0.03em",
-      }}>Smart AI for your life together</p>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+      <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: 300, marginBottom: 36, letterSpacing: "0.03em" }}>Smart AI for your life together</p>
 
-      {/* Auth form */}
-      <form onSubmit={handleSubmit} style={{
-        width: "100%",
-        maxWidth: 340,
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-      }}>
+      <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Mode toggle */}
-        <div style={{
-          display: "flex",
-          gap: 0,
-          borderRadius: 12,
-          overflow: "hidden",
-          border: "1.5px solid var(--border)",
-        }}>
+        <div style={{ display: "flex", borderRadius: 12, overflow: "hidden", border: "1.5px solid var(--border)" }}>
           {["signin", "signup"].map((m) => (
-            <button key={m} type="button" onClick={() => { setMode(m); setError(null); }}
+            <button key={m} type="button" onClick={() => { setMode(m); setError(null); setLoading(false); }}
               style={{
-                flex: 1,
-                padding: "10px 0",
-                border: "none",
+                flex: 1, padding: "10px 0", border: "none",
                 background: mode === m ? "var(--dark)" : "transparent",
                 color: mode === m ? "var(--white)" : "var(--warm)",
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                transition: "all 0.2s ease",
+                fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s",
               }}>
-              {m === "signin"
-                ? (isHe ? "התחברות" : "Sign In")
-                : (isHe ? "הרשמה" : "Sign Up")}
+              {m === "signin" ? (isHe ? "התחברות" : "Sign In") : (isHe ? "הרשמה" : "Sign Up")}
             </button>
           ))}
         </div>
 
-        {/* Display name (signup only) */}
         {mode === "signup" && (
-          <input
-            type="text"
-            placeholder={isHe ? "השם שלך" : "Your name"}
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            dir={dir}
-            style={{
-              padding: "13px 15px",
-              borderRadius: 12,
-              border: "1.5px solid var(--border)",
-              background: "var(--white)",
-              fontSize: 15,
-              color: "var(--dark)",
-              outline: "none",
-              fontFamily: "inherit",
-              textAlign: "start",
-            }}
-          />
+          <input type="text" placeholder={isHe ? "השם שלך" : "Your name"} value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)} dir={dir}
+            style={{ padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit", textAlign: "start" }} />
         )}
 
-        {/* Email */}
-        <input
-          type="email"
-          placeholder={isHe ? "אימייל" : "Email"}
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          dir="ltr"
-          required
-          autoComplete="email"
-          style={{
-            padding: "13px 15px",
-            borderRadius: 12,
-            border: "1.5px solid var(--border)",
-            background: "var(--white)",
-            fontSize: 15,
-            color: "var(--dark)",
-            outline: "none",
-            fontFamily: "inherit",
-          }}
-        />
+        <input type="email" placeholder={isHe ? "אימייל" : "Email"} value={email}
+          onChange={(e) => setEmail(e.target.value)} dir="ltr" required autoComplete="email"
+          style={{ padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit" }} />
 
-        {/* Password */}
-        <input
-          type="password"
-          placeholder={isHe ? "סיסמה" : "Password"}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          dir="ltr"
-          required
-          minLength={6}
+        <input type="password" placeholder={isHe ? "סיסמה" : "Password"} value={password}
+          onChange={(e) => setPassword(e.target.value)} dir="ltr" required minLength={6}
           autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          style={{
-            padding: "13px 15px",
-            borderRadius: 12,
-            border: "1.5px solid var(--border)",
-            background: "var(--white)",
-            fontSize: 15,
-            color: "var(--dark)",
-            outline: "none",
-            fontFamily: "inherit",
-          }}
-        />
+          style={{ padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit" }} />
 
-        {/* Error */}
-        {error && (
-          <p style={{
-            fontSize: 13,
-            color: "var(--accent)",
-            textAlign: "center",
-            margin: 0,
-          }}>{error}</p>
-        )}
+        {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
 
-        {/* Submit */}
         <button type="submit" disabled={loading}
-          style={{
-            padding: 15,
-            borderRadius: 14,
-            background: "var(--dark)",
-            color: "var(--white)",
-            border: "none",
-            cursor: loading ? "not-allowed" : "pointer",
-            fontSize: 15,
-            fontWeight: 500,
-            fontFamily: "inherit",
-            opacity: loading ? 0.5 : 1,
-            transition: "background 0.2s",
-          }}>
-          {loading
-            ? (isHe ? "רגע..." : "Loading...")
-            : mode === "signin"
-              ? (isHe ? "התחבר" : "Sign In")
-              : (isHe ? "היירשם" : "Sign Up")}
+          style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1, transition: "background 0.2s" }}>
+          {loading ? (isHe ? "רגע..." : "Loading...") : mode === "signin" ? (isHe ? "התחבר" : "Sign In") : (isHe ? "היירשם" : "Sign Up")}
         </button>
 
-        {/* Divider */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          margin: "4px 0",
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "4px 0" }}>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {isHe ? "או" : "or"}
-          </span>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>{isHe ? "או" : "or"}</span>
           <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
         </div>
 
-        {/* Google OAuth */}
         <button type="button" onClick={handleGoogle}
-          style={{
-            padding: "13px 15px",
-            borderRadius: 14,
-            background: "var(--white)",
-            border: "1.5px solid var(--border)",
-            color: "var(--warm)",
-            fontSize: 14,
-            fontWeight: 500,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            transition: "all 0.15s",
-          }}>
+          style={{ padding: "13px 15px", borderRadius: 14, background: "var(--white)", border: "1.5px solid var(--border)", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s" }}>
           <svg width="18" height="18" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -378,21 +180,9 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         </button>
       </form>
 
-      {/* Back button */}
       {onBack && (
-        <button
-          onClick={onBack}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--muted)",
-            fontSize: 13,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            padding: 8,
-            marginTop: 8,
-          }}
-        >
+        <button onClick={onBack}
+          style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8, marginTop: 8 }}>
           {isHe ? "→ חזרה" : "← Back"}
         </button>
       )}
