@@ -32,12 +32,14 @@ export function useAuth() {
       }
     }, 3000);
 
-    // Listen for auth changes
+    // Listen for auth changes (also resolves loading if getSession timed out)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        console.log("[Auth] onAuthStateChange:", _event, session ? session.user.id : "null");
+        resolve(session); // resolves loading if not already resolved
         setSession(session);
         if (session) {
-          await fetchProfile(session.user.id);
+          fetchProfile(session.user.id).catch(() => {}); // non-blocking
         } else {
           setProfile(null);
         }

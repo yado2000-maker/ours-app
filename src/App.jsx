@@ -76,6 +76,7 @@ export default function Sheli() {
     const bootAsync = async () => {
       const params = new URLSearchParams(window.location.search);
       const joinId = params.get("join");
+      console.log("[Boot] Starting async boot. joinId:", joinId, "hhId:", lsGet("sheli-hhid"));
 
       // Helper: load from BOTH old blob AND new tables, merge results
       // WhatsApp bot writes to new tables; web app chat writes to old blob
