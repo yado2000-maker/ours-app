@@ -45,6 +45,7 @@ export default function MenuPanel({
           fontFamily: font,
           maxHeight: "85dvh",
           overflowY: "auto",
+          position: "relative",
         }}
       >
         {/* Close button */}
