@@ -186,16 +186,19 @@ export default function Sheli() {
         ]);
         if (detected) {
           console.log("[Boot] Auto-detected household:", detected.name, detected.id);
-          // Auto-join: load the detected household directly
           lsSet("sheli-hhid", detected.id);
-          const data = await loadData(detected.id);
-          if (data) {
-            setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
-            setScreen("pick"); return;
-          }
-          // If load failed, still show join-or-create with detected info
-          setDetectedHh(detected);
+          // Navigate immediately with detected info, load full data in background
+          setHouseholdS({ name: detected.name, lang: detected.lang || "he", members: detected.members || [], id: detected.id });
+          setLang(detected.lang || "he");
+          setScreen("pick");
+          // Load full data in background
+          loadData(detected.id).then(data => {
+            if (data) {
+              setHouseholdS(data.hh); setLang(data.hh.lang || "en");
+              setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+            }
+          }).catch(e => console.warn("[Boot] Background load:", e));
+          return;
         }
       } catch (e) { console.warn("[Boot] Auto-detect error:", e); }
 
