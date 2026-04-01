@@ -10,8 +10,8 @@ import { useAuth } from "./hooks/useAuth.js";
 import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
 import WeekView from "./components/WeekView.jsx";
-import LangModal from "./components/modals/LangModal.jsx";
-import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, SettingsIcon, ShareIcon, CheckmarkIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
+import MenuPanel from "./components/modals/MenuPanel.jsx";
+import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
 import JoinOrCreate from "./components/JoinOrCreate.jsx";
 import { detectHousehold, joinByCode } from "./lib/household-detect.js";
 
@@ -35,11 +35,8 @@ export default function Sheli() {
   const [events, setEvents]       = useState([]);
   const [input, setInput]         = useState("");
   const [busy, setBusy]           = useState(false);
-  const [showReset, setShowReset] = useState(false);
-  const [showLang, setShowLang]   = useState(false);
-  const [copied, setCopied]       = useState(false);
+  const [showMenu, setShowMenu]   = useState(false);
   const [theme, setTheme]         = useState(() => lsGet("sheli-theme") || "auto");
-  const [editName, setEditName]   = useState("");
   const isFounder = !!lsGet("sheli-founder");
   const { session, user: authUser, profile, loading: authLoading, signOut } = useAuth();
   const bottomRef = useRef(null);
@@ -371,42 +368,53 @@ export default function Sheli() {
     localStorage.removeItem("sheli-msgs");
     localStorage.removeItem("sheli-user");
     setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setInput("");
-    setShowReset(false); setScreen("setup");
+    setShowMenu(false); setScreen("setup");
   };
 
-  const [shareUrl, setShareUrl] = useState(null);
-
-  // ── Rename user ──
-  const renameUser = async () => {
-    const newName = editName.trim();
-    if (!newName || newName === user.name) { setShowReset(false); return; }
+  // ── Menu handlers ──
+  const handleRenameUser = async (newName) => {
+    if (!newName || newName === user.name) return;
     const updatedMembers = household.members.map(m =>
       m.id === user.id ? { ...m, name: newName } : m
     );
     const updatedHh = { ...household, members: updatedMembers };
     const updatedUser = { ...user, name: newName };
-    setHouseholdS(updatedHh);
-    setUser(updatedUser);
+    setHouseholdS(updatedHh); setUser(updatedUser);
     lsSet("sheli-user", updatedUser);
-    await save(updatedHh, undefined, undefined, undefined);
-    setShowReset(false);
+    save(updatedHh, undefined, undefined, undefined).catch(() => {});
   };
 
-  // ── Share join link ──
-  const shareLink = () => {
-    const hhId = lsGet("sheli-hhid") || household?.id;
-    if (!hhId) return;
-    const url = `${window.location.origin}/?join=${hhId}`;
-    setShareUrl(url);
+  const handleRenameHousehold = async (newName) => {
+    if (!newName || !household) return;
+    const updatedHh = { ...household, name: newName };
+    setHouseholdS(updatedHh);
+    save(updatedHh, undefined, undefined, undefined).catch(() => {});
+    supabase.from("households_v2").update({ name: newName }).eq("id", household.id).catch(() => {});
+  };
+
+  const handleAddMember = async (name) => {
+    if (!name || !household) return;
+    const newMember = { id: uid8(), name };
+    const updatedHh = { ...household, members: [...household.members, newMember] };
+    setHouseholdS(updatedHh);
+    save(updatedHh, undefined, undefined, undefined).catch(() => {});
+    supabase.from("household_members").insert({ household_id: household.id, display_name: name, role: "member" }).catch(() => {});
+  };
+
+  const handleRemoveMember = async (memberId) => {
+    if (!household) return;
+    const updatedHh = { ...household, members: household.members.filter(m => m.id !== memberId) };
+    setHouseholdS(updatedHh);
+    save(updatedHh, undefined, undefined, undefined).catch(() => {});
   };
 
   // ── Language switch ──
   const switchLang = async (l) => {
-    setLang(l); setShowLang(false);
+    setLang(l);
     if (household) {
       const updated = { ...household, lang: l };
       setHouseholdS(updated);
-      await save(updated, undefined, undefined, undefined);
+      save(updated, undefined, undefined, undefined).catch(() => {});
     }
   };
 
@@ -651,141 +659,38 @@ export default function Sheli() {
 
   return (
     <>
-      {/* Settings modal */}
-      {showReset && (
-        <div className="overlay" onClick={() => setShowReset(false)}>
-          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:20,maxHeight:"85dvh",overflowY:"auto",fontFamily:dir==="rtl"?"'Heebo',sans-serif":"'DM Sans',sans-serif"}}>
-            <div className="modal-title">{t.settingsTitle}</div>
-
-            {/* Rename */}
-            <div>
-              <div className="section-head" style={{marginBottom:8}}>{t.settingsName}</div>
-              <div style={{display:"flex",gap:8,flexDirection:dir==="rtl"?"row-reverse":"row"}}>
-                <input
-                  style={{flex:1,padding:"10px 13px",borderRadius:10,border:"1.5px solid var(--border)",background:"var(--cream)",fontFamily:"inherit",fontSize:14,color:"var(--dark)",outline:"none",textAlign:"start"}}
-                  defaultValue={user.name}
-                  onChange={e => setEditName(e.target.value)}
-                  onFocus={e => setEditName(e.target.value)}
-                  dir={dir}
-                />
-                <button onClick={renameUser}
-                  style={{padding:"10px 16px",borderRadius:10,background:"var(--dark)",color:"var(--white)",border:"none",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                  {t.settingsSave}
-                </button>
-              </div>
-            </div>
-
-            {/* Theme */}
-            <div>
-              <div className="section-head" style={{marginBottom:8}}>{t.settingsTheme}</div>
-              <div style={{display:"flex",gap:7}}>
-                {[["light", t.themeLight], ["dark", t.themeDark], ["auto", t.themeAuto]].map(([val, label]) => (
-                  <button key={val} onClick={() => setTheme(val)}
-                    style={{flex:1,padding:"10px 6px",borderRadius:10,border:`1.5px solid ${theme===val?"var(--dark)":"var(--border)"}`,background:theme===val?"var(--dark)":"transparent",color:theme===val?"var(--white)":"var(--warm)",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* WhatsApp */}
-            <div>
-              <div className="section-head" style={{marginBottom:8}}>{t.waSettingsTitle}</div>
-              <div style={{padding:"14px 16px",borderRadius:12,background:"var(--cream)",border:"1px solid var(--border)"}}>
-                <div style={{fontSize:15,fontWeight:600,color:"var(--dark)",marginBottom:4,letterSpacing:"0.02em",fontFamily:"'DM Sans',sans-serif",direction:"ltr",textAlign:dir==="rtl"?"end":"start"}}>{SHELI_PHONE_DISPLAY}</div>
-                <div style={{fontSize:12,color:"var(--muted)",marginBottom:12}}>{t.waSettingsSub}</div>
-                <a href={SHELI_WA_LINK} target="_blank" rel="noopener noreferrer"
-                  style={{display:"inline-block",padding:"8px 18px",borderRadius:999,background:"#25D366",color:"#fff",fontSize:13,fontWeight:500,textDecoration:"none",fontFamily:"inherit"}}>
-                  {t.waSettingsBtn}
-                </a>
-              </div>
-            </div>
-
-            {/* Household info */}
-            <div>
-              <div className="section-head" style={{marginBottom:8}}>{dir === "rtl" ? "משק בית" : "Household"}</div>
-              <div style={{padding:"10px 14px",borderRadius:10,background:"var(--cream)",border:"1px solid var(--border)",fontSize:13,color:"var(--warm)"}}>
-                <div style={{fontWeight:500,color:"var(--dark)",marginBottom:2}}>{household?.name || ""}</div>
-                <div style={{fontSize:12,color:"var(--muted)"}}>
-                  {household?.members?.length || 0} {dir === "rtl" ? "חברים" : "members"}
-                </div>
-              </div>
-            </div>
-
-            {/* Sign out */}
-            <button onClick={async () => { await signOut(); setShowReset(false); setScreen("welcome"); }}
-              style={{padding:"11px 16px",borderRadius:10,background:"transparent",border:"1.5px solid var(--border)",color:"var(--warm)",fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s",textAlign:"center"}}>
-              {dir === "rtl" ? "התנתקות" : "Sign out"}
-            </button>
-
-            {/* Reset — founder only, small and understated */}
-            {isFounder && (
-              <div style={{paddingTop:8,borderTop:"1px solid var(--border)"}}>
-                <button onClick={doReset}
-                  style={{background:"none",border:"none",color:"var(--muted)",fontSize:12,cursor:"pointer",fontFamily:"inherit",padding:4,opacity:0.6,transition:"opacity 0.15s"}}
-                  onMouseOver={e => e.currentTarget.style.opacity = 1}
-                  onMouseOut={e => e.currentTarget.style.opacity = 0.6}>
-                  {dir === "rtl" ? "מחיקת כל הנתונים ואיפוס" : "Delete all data and reset"}
-                </button>
-              </div>
-            )}
-
-            {/* Close */}
-            <button onClick={() => setShowReset(false)}
-              style={{padding:"12px",borderRadius:10,background:"var(--cream)",border:"1.5px solid var(--border)",color:"var(--warm)",fontSize:14,fontWeight:500,cursor:"pointer",fontFamily:"inherit",textAlign:"center"}}>
-              {dir === "rtl" ? "סגור" : "Close"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Lang switch modal */}
-      {showLang && (
-        <LangModal lang={lang} onSelect={switchLang} onClose={() => setShowLang(false)} />
-      )}
-
-      {/* Share modal */}
-      {shareUrl && (
-        <div className="overlay" onClick={() => setShareUrl(null)}>
-          <div className="modal" dir={dir} onClick={e => e.stopPropagation()} style={{fontFamily:dir==="rtl"?"'Heebo',sans-serif":"'DM Sans',sans-serif"}}>
-            <div className="modal-title">{dir === "rtl" ? "קישור הצטרפות" : "Join link"}</div>
-            <p className="modal-sub">{dir === "rtl" ? "שלחו את הקישור הזה למי שגר בבית. כשייכנסו דרכו — הבית כבר מוגדר." : "Send this to everyone at home. When they open it, everything's set up."}</p>
-            <div style={{background:"var(--cream)",borderRadius:10,padding:"11px 14px",fontSize:12,wordBreak:"break-all",color:"var(--warm)",marginBottom:16,userSelect:"all",border:"1px solid var(--border)"}}>
-              {shareUrl}
-            </div>
-            <div className="modal-btns">
-              <button className="modal-cancel" onClick={() => setShareUrl(null)}>
-                {dir === "rtl" ? "סגור" : "Close"}
-              </button>
-              <a className="modal-confirm" style={{textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center"}}
-                href={`https://wa.me/?text=${encodeURIComponent(shareUrl)}`} target="_blank" rel="noreferrer"
-                onClick={() => setShareUrl(null)}>
-                {dir === "rtl" ? "שתף בווטסאפ ↗" : "Share on WhatsApp ↗"}
-              </a>
-            </div>
-          </div>
-        </div>
+      {/* Menu panel */}
+      {showMenu && (
+        <MenuPanel
+          user={user}
+          household={household}
+          lang={lang}
+          theme={theme}
+          isFounder={isFounder}
+          onClose={() => setShowMenu(false)}
+          onRenameUser={handleRenameUser}
+          onRenameHousehold={handleRenameHousehold}
+          onAddMember={handleAddMember}
+          onRemoveMember={handleRemoveMember}
+          onSwitchLang={switchLang}
+          onSetTheme={setTheme}
+          onSwitchUser={() => { setShowMenu(false); setUser(null); lsSet("sheli-user", null); setScreen("pick"); }}
+          onSignOut={async () => { await signOut(); setShowMenu(false); setScreen("welcome"); }}
+          onReset={doReset}
+        />
       )}
 
       <div className="app" dir={dir}>
 
         {/* ── Header ── */}
         <div className="header">
-          <div className="header-side left">
-            <button className="lang-chip" onClick={() => setShowLang(true)}>
-              {lang === "he" ? "HE" : "EN"}
-            </button>
-          </div>
           <div className="header-mid">
             <div className="wordmark">Sheli</div>
           </div>
           <div className="header-side right">
-            <div style={{fontSize:13,fontWeight:500,color:"var(--warm)",paddingInlineEnd:4}}>{user.name}</div>
-            <button className="icon-btn" onClick={() => setShowReset(true)} title={t.settingsTitle}><SettingsIcon size={18} /></button>
-            <button className={`icon-btn`} onClick={shareLink}
-              title={dir==="rtl" ? "שתפו קישור הצטרפות" : "Share join link"}
-              style={copied ? {color:"var(--green)",opacity:1} : {}}>
-              {copied ? <CheckmarkIcon size={16} /> : <ShareIcon size={18} />}
+            <button onClick={() => setShowMenu(true)} title={t.menuProfile}
+              style={{width:32,height:32,borderRadius:"50%",background:"var(--accent)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:600,border:"none",cursor:"pointer",flexShrink:0}}>
+              {user.name?.[0]?.toUpperCase() || "?"}
             </button>
           </div>
         </div>
