@@ -1,5 +1,5 @@
 import { useState } from "react";
-import T from "../locales/index.js";
+import T from "../../locales/index.js";
 
 export default function MenuPanel({
   user,
