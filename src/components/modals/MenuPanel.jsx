@@ -206,7 +206,7 @@ export default function MenuPanel({
           <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
             {t.menuHhName}
           </div>
-          {editingHhName && isFounder ? (
+          {editingHhName ? (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input
                 value={newHhName}
@@ -258,8 +258,7 @@ export default function MenuPanel({
               >
                 {household?.name || ""}
               </span>
-              {isFounder && (
-                <button
+              <button
                   onClick={() => {
                     setNewHhName(household?.name || "");
                     setEditingHhName(true);
@@ -276,7 +275,6 @@ export default function MenuPanel({
                 >
                   ✏️
                 </button>
-              )}
             </div>
           )}
         </div>
