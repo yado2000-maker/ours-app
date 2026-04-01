@@ -72,8 +72,8 @@ export default function Sheli() {
       return;
     }
 
-    // Authenticated → proceed with household loading
-    (async () => {
+    // Authenticated → proceed with household loading (with 8s global timeout)
+    const bootAsync = async () => {
       const params = new URLSearchParams(window.location.search);
       const joinId = params.get("join");
 
@@ -199,7 +199,17 @@ export default function Sheli() {
 
       // Show join-or-create screen (with or without detected household)
       setScreen("join-or-create");
-    })();
+    };
+
+    // Race boot against 8s timeout — if Supabase hangs, go to join-or-create
+    Promise.race([
+      bootAsync(),
+      new Promise(resolve => setTimeout(() => {
+        console.warn("[Boot] Global timeout — forcing join-or-create");
+        setScreen("join-or-create");
+        resolve();
+      }, 8000)),
+    ]);
 
   }, [authLoading, session]); // runs when auth resolves or session changes
 
