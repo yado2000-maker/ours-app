@@ -41,34 +41,8 @@ export async function detectHousehold(userId, userEmail) {
     // Not a creator — continue
   }
 
-  // Method 3: Check old blob households table
-  try {
-    const { data: oldHh } = await supabase
-      .from("households")
-      .select("id, data")
-      .limit(5);
-
-    if (oldHh?.length === 1 && oldHh[0].data?.hh) {
-      // Single household exists — likely the founder's
-      return await loadHouseholdInfo(oldHh[0].id);
-    }
-  } catch {
-    // No old data — continue
-  }
-
-  // Method 4: If only ONE household_v2 exists, suggest it (early testing)
-  try {
-    const { data: all } = await supabase
-      .from("households_v2")
-      .select("id, name")
-      .limit(5);
-
-    if (all?.length === 1) {
-      return await loadHouseholdInfo(all[0].id);
-    }
-  } catch {
-    // Query failed — give up
-  }
+  // Methods 3-4 removed: they grabbed ANY household without ownership check.
+  // Only Methods 1-2 (membership + created_by) are safe.
 
   return null;
 }
