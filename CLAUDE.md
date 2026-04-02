@@ -10,20 +10,23 @@
 
 ## Key Files
 - `src/App.jsx` — Main app (refactored from 1,435-line monolith)
-- `src/lib/supabase.js` — Supabase client + data functions (sbGet/sbSet for old blob, loadHousehold for normalized tables)
+- `src/lib/supabase.js` — Supabase client + V2 data functions (loadHousehold, saveTask, saveAllTasks, loadMessages, insertMessage, etc.) + toDb/fromDb field mappers
 - `src/lib/household-detect.js` — Auto-detect household for returning users
 - `src/lib/prompt.js` — Claude AI system prompt for web app chat
 - `src/components/Icons.jsx` — 27 custom SVG icons (stroke-based, currentColor)
 - `supabase/functions/whatsapp-webhook/index.ts` — WhatsApp bot Edge Function (deployed separately via Supabase MCP)
 - `supabase/functions/_shared/` — Source files for provider/classifier/executor (reference only — deployed version is single inlined file)
 
-## Database: Dual Data Layer (Migration Period)
-- **Old:** `households` table with JSON blob (`data` column containing {hh, tasks, shopping, events})
-- **New:** Normalized tables (`households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, etc.)
-- **WhatsApp bot writes to NEW tables only**
-- **Web app reads from BOTH and merges by ID** (loadData function in boot useEffect)
-- **Web app writes to BOTH** (dual-write in save function)
-- **CRITICAL:** The user picker's onClick must NOT reload data from sbGet — data is already merged in state
+## Database: Normalized V2 Tables (migration completed 2026-04-02)
+- **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`
+- **All FKs cascade** from `households_v2` — deleting a household clears all child data
+- **Web app + WhatsApp bot both read/write V2 tables only** — no blob, no dual-write
+- **Old `households` blob table still exists** (not dropped) but is unused — safe to drop when confident
+- **Field mapping:** DB uses snake_case (`assigned_to`), JS uses camelCase (`assignedTo`). `toDb`/`fromDb` mappers in supabase.js handle the boundary.
+- **Messages** stored in Supabase `messages` table (moved from localStorage 2026-04-02)
+- **Bulk AI writes** use delete+insert (not upsert) — AI returns full arrays, so replace-all is simpler
+- **Realtime:** 5 channels (tasks, shopping_items, events, households_v2, messages) with 3s echo debounce
+- **CRITICAL — silent upsert RLS failure:** Supabase `.upsert()` checks INSERT policy first, even for existing rows. If INSERT policy is stricter than UPDATE, upserts fail silently. All INSERT policies currently relaxed to `auth.uid() IS NOT NULL` (tighten before launch).
 
 ## Supabase Gotchas
 - **RLS blocks everything when auth.uid() is NULL** — Supabase client with publishable key + auth session sends JWT. If JWT is stale/expired, auth.uid() returns NULL and all RLS policies fail silently.
@@ -75,10 +78,11 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 ## Git / Deploy Workflow
 - **GitHub repo:** yado2000-maker/ours-app (public, brand name: Sheli)
 - **Vercel auto-deploys from `main`** — push to main triggers build
-- **Deploy clone:** `C:\Users\yarond\Downloads\claude code\ours-app-deploy\` — working copy with all changes
-- **Git clone:** `C:\Users\yarond\Downloads\claude code\ours-app-git\` — clean git repo for commits
-- **Deploy process:** Edit files in deploy clone → copy changed files to git clone → commit → push → Vercel auto-deploys
-- **PowerShell quirks:** `npm`/`git` not available in bash shell, use `mcp__Windows-MCP__PowerShell`
+- **Canonical codebase:** `C:\Users\yarond\Downloads\claude code\ours-app\` — all editing happens here
+- **Git repo for commits:** `C:\Users\yarond\Downloads\claude code\ours-app-git\` — copy changed files here, commit, push
+- **Deploy process:** Edit in `ours-app` → copy changed files to `ours-app-git` → commit → push → Vercel auto-deploys
+- **Note:** `ours-app` has `.git` init'd but `ours-app-git` is the one connected to GitHub with full history. `ours-app-deploy` folder is superseded (merged into `ours-app` on 2026-04-02).
+- **PowerShell quirks:** `npm`/`git` not available in bash shell
 - **Browser cache aggressive** — always `Ctrl+Shift+R` after deploy, or `localStorage.clear(); location.reload()` for clean state
 
 ## Commands
