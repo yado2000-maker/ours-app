@@ -2,11 +2,9 @@ import { supabase } from "./supabase.js";
 
 /**
  * Try to find an existing household for the authenticated user.
- * Checks multiple strategies in order:
+ * Checks in order:
  *   1) household_members by user_id
  *   2) households_v2 created_by
- *   3) Old blob households table (solo founder / testing)
- *   4) If only ONE household exists, suggest it (for early testing phase)
  */
 const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
 
@@ -46,8 +44,7 @@ export async function detectHousehold(userId, userEmail) {
 }
 
 /**
- * Load full household info (name, lang, members) from both v2 tables
- * and old blob as fallback.
+ * Load full household info (name, lang, members) from v2 tables.
  */
 async function loadHouseholdInfo(hhId) {
   try {
@@ -62,22 +59,6 @@ async function loadHouseholdInfo(hhId) {
         name: hhRes.data.name,
         lang: hhRes.data.lang || "he",
         members: (membersRes.data || []).map((m) => ({ name: m.display_name })),
-      };
-    }
-
-    // Fallback: try old blob table
-    const { data: old } = await supabase
-      .from("households")
-      .select("id, data")
-      .eq("id", hhId)
-      .single();
-
-    if (old?.data?.hh) {
-      return {
-        id: hhId,
-        name: old.data.hh.name,
-        lang: old.data.hh.lang || "he",
-        members: (old.data.hh.members || []).map((m) => ({ name: m.name })),
       };
     }
 

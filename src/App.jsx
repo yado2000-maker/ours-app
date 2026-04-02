@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import T from "./locales/index.js";
 import "./styles/app.css";
-import { supabase, sbGet, sbSet, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents } from "./lib/supabase.js";
+import { supabase, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents, loadMessages, insertMessage } from "./lib/supabase.js";
 import buildPrompt from "./lib/prompt.js";
 import Setup from "./components/Setup.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
@@ -44,7 +44,7 @@ export default function Sheli() {
 
   const t   = T[lang] || T.en;
   const dir = t.dir;
-  const msgs = user ? (allMsgs[user.id] || []) : [];
+  const msgs = session?.user?.id ? (allMsgs[session.user.id] || []) : [];
   const isRtl = dir === "rtl";
 
   // ── Boot ──
@@ -75,67 +75,12 @@ export default function Sheli() {
       const joinId = params.get("join");
       console.log("[Boot] Starting async boot. joinId:", joinId, "hhId:", lsGet("sheli-hhid"));
 
-      // Helper: load from BOTH old blob AND new tables, merge results
-      // WhatsApp bot writes to new tables; web app chat writes to old blob
-      // We need data from both sources until fully migrated
       const loadData = async (id) => {
-        let oldData = null;
-        let v2Data = null;
-
-        const withTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error("timeout")), ms))]);
-        try { oldData = await withTimeout(sbGet(id), 4000); } catch (e) { console.warn("[Boot] sbGet:", e.message); }
-        try { v2Data = await withTimeout(loadHousehold(id), 4000); } catch (e) { console.warn("[Boot] loadHousehold:", e.message); }
-
-        console.log("[Boot] oldData:", oldData ? JSON.stringify({tasks: oldData.tasks?.length, shop: oldData.shopping?.length, hhName: oldData.hh?.name}) : "null");
-        console.log("[Boot] v2Data:", v2Data ? JSON.stringify({tasks: v2Data.tasks?.length, shop: v2Data.shopping?.length, hhName: v2Data.hh?.name}) : "null");
-        console.log("[Boot] hhId used:", lsGet("sheli-hhid"));
-
-        if (!oldData && !v2Data) return null;
-
-        // Merge: use old blob for household info (has members with old IDs),
-        // but combine tasks/shopping/events from BOTH sources (deduplicate by ID)
-        const hh = oldData?.hh || v2Data?.hh;
-        if (!hh) return null;
-
-        // If v2 has members, prefer those (auto-learned from WhatsApp)
-        if (v2Data?.hh?.members?.length > 0) {
-          hh.members = v2Data.hh.members;
-        }
-
-        // Merge arrays by ID (deduplicate)
-        const mergeById = (arr1, arr2) => {
-          const map = new Map();
-          for (const item of (arr1 || [])) map.set(item.id, item);
-          for (const item of (arr2 || [])) map.set(item.id, item);
-          return Array.from(map.values());
-        };
-
-        // Normalize v2 tasks from snake_case to camelCase (DB uses assigned_to, app uses assignedTo)
-        const normalizeTask = (t) => ({
-          id: t.id, title: t.title, done: t.done,
-          assignedTo: t.assignedTo || t.assigned_to || null,
-          completedBy: t.completedBy || t.completed_by || null,
-          completedAt: t.completedAt || t.completed_at || null,
-        });
-        const normalizeEvent = (e) => ({
-          id: e.id, title: e.title,
-          assignedTo: e.assignedTo || e.assigned_to || null,
-          scheduledFor: e.scheduledFor || e.scheduled_for || null,
-        });
-
-        const oldTasks = (oldData?.tasks || []).map(normalizeTask);
-        const v2Tasks = (v2Data?.tasks || []).map(normalizeTask);
-        const oldEvents = (oldData?.events || []).map(normalizeEvent);
-        const v2Events = (v2Data?.events || []).map(normalizeEvent);
-
-        const merged = {
-          hh,
-          tasks: mergeById(oldTasks, v2Tasks),
-          shopping: mergeById(oldData?.shopping, v2Data?.shopping),
-          events: mergeById(oldEvents, v2Events),
-        };
-        console.log("[Boot] Merged:", `tasks:${merged.tasks.length} shop:${merged.shopping.length} events:${merged.events.length}`);
-        return merged;
+        const v2 = await loadHousehold(id);
+        if (!v2) return null;
+        let msgs = [];
+        try { msgs = await loadMessages(id, session.user.id); } catch (e) { console.warn("[Boot] loadMessages:", e.message); }
+        return { ...v2, msgs };
       };
 
       if (joinId) {
@@ -144,6 +89,7 @@ export default function Sheli() {
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
             setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+            if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             window.history.replaceState({}, "", window.location.pathname);
             setScreen("pick"); return;
           }
@@ -157,8 +103,7 @@ export default function Sheli() {
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
             setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
-            const msgs = lsGet("sheli-msgs") || {};
-            setAllMsgs(msgs);
+            if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             const savedUser = lsGet("sheli-user");
             if (savedUser) {
               const stillExists = data.hh.members.find(m => m.id === savedUser.id)
@@ -193,6 +138,7 @@ export default function Sheli() {
             if (data) {
               setHouseholdS(data.hh); setLang(data.hh.lang || "en");
               setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+              if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             }
           }).catch(e => console.warn("[Boot] Background load:", e));
           return;
@@ -240,107 +186,77 @@ export default function Sheli() {
   // ── Realtime sync ──
   const lastSaveRef = useRef(0);
 
+  // ── Realtime sync (V2 tables only) ──
   useEffect(() => {
     if (screen !== "chat") return;
     const hhId = lsGet("sheli-hhid");
     if (!hhId) return;
+    const authUserId = session?.user?.id;
 
-    // Listen on OLD households table (backward compat)
-    const oldChannel = supabase
-      .channel(`household-old-${hhId}`)
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "households",
-        filter: `id=eq.${hhId}`,
-      }, (payload) => {
-        if (Date.now() - lastSaveRef.current < 3000) return;
-        const d = payload.new?.data;
-        if (!d) return;
-        if (d.tasks)    setTasksS(d.tasks);
-        if (d.shopping) setShoppingS(d.shopping);
-        if (d.events)   setEventsS(d.events);
-        if (d.hh)       setHouseholdS(d.hh);
-      })
-      .subscribe();
-
-    // Listen on NEW normalized tables (WhatsApp bot writes here)
-    const reloadFromTables = async () => {
+    const reloadTasks = async () => {
       if (Date.now() - lastSaveRef.current < 3000) return;
       const v2 = await loadHousehold(hhId);
-      if (v2) {
-        setTasksS(v2.tasks);
-        setShoppingS(v2.shopping);
-        setEventsS(v2.events);
-      }
+      if (v2) setTasksS(v2.tasks);
+    };
+    const reloadShopping = async () => {
+      if (Date.now() - lastSaveRef.current < 3000) return;
+      const v2 = await loadHousehold(hhId);
+      if (v2) setShoppingS(v2.shopping);
+    };
+    const reloadEvents = async () => {
+      if (Date.now() - lastSaveRef.current < 3000) return;
+      const v2 = await loadHousehold(hhId);
+      if (v2) setEventsS(v2.events);
+    };
+    const reloadHousehold = async () => {
+      if (Date.now() - lastSaveRef.current < 3000) return;
+      const v2 = await loadHousehold(hhId);
+      if (v2) setHouseholdS(v2.hh);
+    };
+    const reloadMessages = async () => {
+      if (!authUserId || Date.now() - lastSaveRef.current < 3000) return;
+      const msgs = await loadMessages(hhId, authUserId);
+      if (msgs) setAllMsgs(prev => ({ ...prev, [authUserId]: msgs }));
     };
 
-    const tasksChannel = supabase
-      .channel(`tasks-${hhId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks", filter: `household_id=eq.${hhId}` }, reloadFromTables)
+    const ch1 = supabase.channel(`tasks-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks", filter: `household_id=eq.${hhId}` }, reloadTasks)
       .subscribe();
-
-    const shoppingChannel = supabase
-      .channel(`shopping-${hhId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "shopping_items", filter: `household_id=eq.${hhId}` }, reloadFromTables)
+    const ch2 = supabase.channel(`shopping-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "shopping_items", filter: `household_id=eq.${hhId}` }, reloadShopping)
       .subscribe();
-
-    const eventsChannel = supabase
-      .channel(`events-${hhId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `household_id=eq.${hhId}` }, reloadFromTables)
+    const ch3 = supabase.channel(`events-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `household_id=eq.${hhId}` }, reloadEvents)
+      .subscribe();
+    const ch4 = supabase.channel(`household-${hhId}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "households_v2", filter: `id=eq.${hhId}` }, reloadHousehold)
+      .subscribe();
+    const ch5 = supabase.channel(`messages-${hhId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `household_id=eq.${hhId}` }, reloadMessages)
       .subscribe();
 
     return () => {
-      supabase.removeChannel(oldChannel);
-      supabase.removeChannel(tasksChannel);
-      supabase.removeChannel(shoppingChannel);
-      supabase.removeChannel(eventsChannel);
+      supabase.removeChannel(ch1);
+      supabase.removeChannel(ch2);
+      supabase.removeChannel(ch3);
+      supabase.removeChannel(ch4);
+      supabase.removeChannel(ch5);
     };
   }, [screen]);
-
-  // ── Persist (writes to BOTH old JSON blob AND new normalized tables) ──
-  const save = async (hh, m, tk, sh, ev) => {
-    const hhId = lsGet("sheli-hhid");
-    if (!hhId) return;
-    lastSaveRef.current = Date.now();
-
-    // Write to old JSON blob (backward compat for existing households)
-    const current = {
-      hh:       hh !== undefined ? hh : householdRef.current,
-      tasks:    tk !== undefined ? tk : tasksRef.current,
-      shopping: sh !== undefined ? sh : shoppingRef.current,
-      events:   ev !== undefined ? ev : eventsRef.current,
-    };
-    await sbSet(hhId, current);
-
-    // Also write to normalized tables (so WhatsApp bot sees changes)
-    try {
-      if (tk !== undefined) await saveAllTasks(hhId, tk);
-      if (sh !== undefined) await saveAllShopping(hhId, sh);
-      if (ev !== undefined) await saveAllEvents(hhId, ev);
-    } catch (err) {
-      console.error("[save] Normalized table write error:", err);
-    }
-
-    if (m !== undefined) lsSet("sheli-msgs", m);
-  };
 
   // ── Setup done ──
   const setupRunning = useRef(false);
   const handleSetup = async (hh) => {
-    if (setupRunning.current) return; // prevent double-click
+    if (setupRunning.current) return;
     setupRunning.current = true;
-    console.log("[Setup] Starting...", hh.name, hh.members.length, "members");
 
     const hhId = uid8();
     hh.id = hhId;
     lsSet("sheli-hhid", hhId);
     lsSet("sheli-founder", true);
 
-    // Navigate immediately — don't wait for DB writes
     setHouseholdS(hh); setLang(hh.lang || "en");
     setTasksS([]); setShoppingS([]); setEventsS([]);
-    // Auto-select founder as current user (skip picker)
     const founder = hh.members[0];
     if (founder) {
       lsSet("sheli-user", founder);
@@ -348,11 +264,20 @@ export default function Sheli() {
     }
     setScreen("connect-wa");
 
-    // Write to DB in background (non-blocking)
-    sbSet(hhId, { hh, tasks: [], shopping: [], events: [] }).catch(e => console.warn("[Setup] blob:", e));
-    supabase.from("households_v2").upsert({ id: hhId, name: hh.name, lang: hh.lang || "he" }).catch(e => console.warn("[Setup] v2:", e));
-    for (const member of hh.members) {
-      supabase.from("household_members").insert({ household_id: hhId, display_name: member.name, role: "member" }).catch(e => console.warn("[Setup] member:", e));
+    const authUserId = session?.user?.id;
+    supabase.from("households_v2").insert({
+      id: hhId, name: hh.name, lang: hh.lang || "he", created_by: authUserId,
+    }).catch(e => console.warn("[Setup] v2:", e));
+
+    if (founder) {
+      await supabase.from("household_members").insert({
+        household_id: hhId, display_name: founder.name, role: "founder", user_id: authUserId,
+      }).catch(e => console.warn("[Setup] founder:", e));
+    }
+    for (const member of hh.members.slice(1)) {
+      supabase.from("household_members").insert({
+        household_id: hhId, display_name: member.name, role: "member",
+      }).catch(e => console.warn("[Setup] member:", e));
     }
   };
 
@@ -361,9 +286,8 @@ export default function Sheli() {
     const hhId = lsGet("sheli-hhid");
     if (hhId) {
       try {
-        await supabase.from("households").delete().eq("id", hhId);
         await supabase.from("households_v2").delete().eq("id", hhId);
-      } catch {}
+      } catch (e) { console.warn("[Reset]", e); }
     }
     localStorage.removeItem("sheli-hhid");
     localStorage.removeItem("sheli-msgs");
@@ -384,15 +308,16 @@ export default function Sheli() {
     const updatedUser = { ...user, name: newName };
     setHouseholdS(updatedHh); setUser(updatedUser);
     lsSet("sheli-user", updatedUser);
-    save(updatedHh, undefined, undefined, undefined).catch(() => {});
+    lastSaveRef.current = Date.now();
+    supabase.from("household_members").update({ display_name: newName }).eq("id", user.id).catch(e => console.error("[renameUser]", e));
   };
 
   const handleRenameHousehold = async (newName) => {
     if (!newName || !household) return;
     const updatedHh = { ...household, name: newName };
     setHouseholdS(updatedHh);
-    save(updatedHh, undefined, undefined, undefined).catch(() => {});
-    supabase.from("households_v2").update({ name: newName }).eq("id", household.id).catch(() => {});
+    lastSaveRef.current = Date.now();
+    supabase.from("households_v2").update({ name: newName }).eq("id", household.id).catch(e => console.error("[renameHH]", e));
   };
 
   const handleAddMember = async (name) => {
@@ -400,17 +325,16 @@ export default function Sheli() {
     const newMember = { id: uid8(), name };
     const updatedHh = { ...household, members: [...household.members, newMember] };
     setHouseholdS(updatedHh);
-    save(updatedHh, undefined, undefined, undefined).catch(() => {});
-    supabase.from("household_members").insert({ household_id: household.id, display_name: name, role: "member" }).catch(() => {});
+    lastSaveRef.current = Date.now();
+    supabase.from("household_members").insert({ household_id: household.id, display_name: name, role: "member" }).catch(e => console.error("[addMember]", e));
   };
 
   const handleRemoveMember = async (memberId) => {
     if (!household) return;
     const updatedHh = { ...household, members: household.members.filter(m => m.id !== memberId) };
     setHouseholdS(updatedHh);
-    save(updatedHh, undefined, undefined, undefined).catch(() => {});
-    // Also delete from normalized table
-    supabase.from("household_members").delete().eq("id", memberId).eq("household_id", household.id).catch(() => {});
+    lastSaveRef.current = Date.now();
+    supabase.from("household_members").delete().eq("id", memberId).eq("household_id", household.id).catch(e => console.error("[removeMember]", e));
   };
 
   // ── Language switch ──
@@ -419,7 +343,8 @@ export default function Sheli() {
     if (household) {
       const updated = { ...household, lang: l };
       setHouseholdS(updated);
-      save(updated, undefined, undefined, undefined).catch(() => {});
+      lastSaveRef.current = Date.now();
+      supabase.from("households_v2").update({ lang: l }).eq("id", household.id).catch(e => console.error("[switchLang]", e));
     }
   };
 
@@ -430,30 +355,71 @@ export default function Sheli() {
       const nowDone = !x.done;
       return { ...x, done: nowDone, completedBy: nowDone ? user.name : null, completedAt: nowDone ? new Date().toISOString() : null };
     });
-    setTasksS(n); await save(undefined, undefined, n, undefined);
+    setTasksS(n);
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    const updated = n.find(x => x.id === id);
+    if (hhId && updated) saveTask(hhId, updated);
   };
   const claimTask = async (id, name) => {
     const n = tasks.map(x => x.id === id ? { ...x, assignedTo: name } : x);
-    setTasksS(n); await save(undefined, undefined, n, undefined);
+    setTasksS(n);
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    const updated = n.find(x => x.id === id);
+    if (hhId && updated) saveTask(hhId, updated);
   };
-  const toggleShop = async (id) => { const n = shopping.map(x => x.id===id ? {...x,got:!x.got} : x); setShoppingS(n); await save(undefined,undefined,undefined,n); };
+  const toggleShop = async (id) => {
+    const n = shopping.map(x => x.id === id ? { ...x, got: !x.got } : x);
+    setShoppingS(n);
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    const updated = n.find(x => x.id === id);
+    if (hhId && updated) saveShoppingItem(hhId, updated);
+  };
   const deleteItem = async (type, id) => {
-    if (type === "task") { const n = tasks.filter(x => x.id!==id); setTasksS(n); await save(undefined,undefined,n,undefined); }
-    else { const n = shopping.filter(x => x.id!==id); setShoppingS(n); await save(undefined,undefined,undefined,n); }
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    if (type === "task") {
+      setTasksS(tasks.filter(x => x.id !== id));
+      if (hhId) deleteTask(hhId, id);
+    } else {
+      setShoppingS(shopping.filter(x => x.id !== id));
+      if (hhId) deleteShoppingItem(hhId, id);
+    }
   };
-  const clearDone = async () => { const n = tasks.filter(x => !x.done); setTasksS(n); await save(undefined,undefined,n,undefined,undefined); };
-  const clearGot  = async () => { const n = shopping.filter(x => !x.got); setShoppingS(n); await save(undefined,undefined,undefined,n,undefined); };
-  const deleteEvent = async (id) => { const n = events.filter(x => x.id !== id); setEventsS(n); await save(undefined,undefined,undefined,undefined,n); };
+  const clearDone = async () => {
+    setTasksS(tasks.filter(x => !x.done));
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    if (hhId) clearDoneTasks(hhId);
+  };
+  const clearGot = async () => {
+    setShoppingS(shopping.filter(x => !x.got));
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    if (hhId) clearGotShopping(hhId);
+  };
+  const deleteEventHandler = async (id) => {
+    setEventsS(events.filter(x => x.id !== id));
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    if (hhId) deleteEvent(hhId, id);
+  };
 
   // ── Send ──
   const send = async (text) => {
     const content = (text || input).trim();
     if (!content || busy || !user) return;
-    const uMsg = { role:"user", content, ts: Date.now() };
-    const prev = allMsgs[user.id] || [];
+    const authUserId = session?.user?.id;
+    const hhId = lsGet("sheli-hhid");
+    const uMsg = { role: "user", content, ts: Date.now() };
+    const prev = allMsgs[authUserId] || [];
     const updated = [...prev, uMsg];
-    const nextAll = { ...allMsgs, [user.id]: updated };
+    const nextAll = { ...allMsgs, [authUserId]: updated };
     setAllMsgs(nextAll); setInput(""); setBusy(true); setTab("chat");
+
+    if (hhId && authUserId) insertMessage(hhId, authUserId, uMsg).catch(e => console.warn("[send] msg:", e));
 
     try {
       const res = await fetch("/api/chat", {
@@ -467,30 +433,36 @@ export default function Sheli() {
         })
       });
       const data = await res.json();
-      const raw = (data.content?.[0]?.text || "{}").replace(/```json\n?|```/g,"").trim();
+      const raw = (data.content?.[0]?.text || "{}").replace(/```json\n?|```/g, "").trim();
       let parsed = { message: t.genericError, tasks, shopping };
       try { parsed = JSON.parse(raw); } catch { parsed.message = raw || parsed.message; }
 
-      const aMsg = { role:"assistant", content: parsed.message, ts: Date.now() };
+      const aMsg = { role: "assistant", content: parsed.message, ts: Date.now() };
       const finalMsgs = [...updated, aMsg];
-      const finalAll  = { ...nextAll, [user.id]: finalMsgs };
-      // Merge AI response with current state — don't let empty arrays wipe existing data
+      const finalAll = { ...nextAll, [authUserId]: finalMsgs };
+
       const mergeLists = (aiList, current) => {
         if (!Array.isArray(aiList)) return current;
-        if (aiList.length === 0 && current.length > 0) return current; // AI didn't touch this list
-        // Merge by ID: AI items win, keep any current items the AI didn't mention
+        if (aiList.length === 0 && current.length > 0) return current;
         const aiIds = new Set(aiList.map(x => x.id));
         const kept = current.filter(x => !aiIds.has(x.id) && x.id);
         return [...aiList, ...kept];
       };
-      const newTasks  = mergeLists(parsed.tasks, tasks);
-      const newShop   = mergeLists(parsed.shopping, shopping);
+      const newTasks = mergeLists(parsed.tasks, tasks);
+      const newShop = mergeLists(parsed.shopping, shopping);
       const newEvents = mergeLists(parsed.events, events);
       setAllMsgs(finalAll); setTasksS(newTasks); setShoppingS(newShop); setEventsS(newEvents);
-      await save(undefined, finalAll, newTasks, newShop, newEvents);
+
+      lastSaveRef.current = Date.now();
+      if (hhId && authUserId) insertMessage(hhId, authUserId, aMsg).catch(e => console.warn("[send] aMsg:", e));
+      if (hhId) {
+        if (Array.isArray(parsed.tasks)) saveAllTasks(hhId, newTasks).catch(e => console.warn("[send] tasks:", e));
+        if (Array.isArray(parsed.shopping)) saveAllShopping(hhId, newShop).catch(e => console.warn("[send] shop:", e));
+        if (Array.isArray(parsed.events)) saveAllEvents(hhId, newEvents).catch(e => console.warn("[send] events:", e));
+      }
     } catch {
-      const aMsg = { role:"assistant", content: t.networkError, ts: Date.now() };
-      setAllMsgs({ ...nextAll, [user.id]: [...updated, aMsg] });
+      const aMsg = { role: "assistant", content: t.networkError, ts: Date.now() };
+      setAllMsgs({ ...nextAll, [authUserId]: [...updated, aMsg] });
     }
     setBusy(false);
     setTimeout(() => inputRef.current?.focus(), 50);
@@ -628,10 +600,7 @@ export default function Sheli() {
                 if (!lsGet("sheli-hhid") && household?.id) {
                   lsSet("sheli-hhid", household.id);
                 }
-                // Data is already loaded and merged in state — no need to reload
-                // Just restore messages from localStorage and set the user
-                const msgs = lsGet("sheli-msgs") || {};
-                setAllMsgs(msgs);
+                // Messages already loaded from Supabase during boot
                 lsSet("sheli-user", m);
                 setUser(m);
                 setScreen("chat");
@@ -741,7 +710,7 @@ export default function Sheli() {
           )}
 
           {tab === "week" && (
-            <WeekView tasks={tasks} events={events} t={t} lang={lang} onDeleteEvent={deleteEvent} />
+            <WeekView tasks={tasks} events={events} t={t} lang={lang} onDeleteEvent={deleteEventHandler} />
           )}
 
         </div>
