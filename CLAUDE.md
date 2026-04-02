@@ -3,7 +3,7 @@
 ## Architecture
 - **Frontend:** React 19 + Vite 8, deployed on Vercel (sheli.ai)
 - **Backend:** Supabase (project: wzwwtghtnkapdwlgnrxr, region: eu-central-2)
-- **AI:** Claude Sonnet 4 via Anthropic API, proxied through /api/chat (Vercel serverless)
+- **AI:** Two-stage pipeline for WhatsApp bot (Haiku 4.5 classifier → Sonnet 4 reply generator); Sonnet 4 via /api/chat (web app)
 - **WhatsApp Bot:** Supabase Edge Function (whatsapp-webhook), Whapi.Cloud provider
 - **Auth:** Supabase Auth (Google OAuth + email/password)
 - **Bot phone:** +972 55-517-5553 (eSIM Plus virtual number, WhatsApp Business)
@@ -14,8 +14,15 @@
 - `src/lib/household-detect.js` — Auto-detect household for returning users
 - `src/lib/prompt.js` — Claude AI system prompt for web app chat
 - `src/components/Icons.jsx` — 27 custom SVG icons (stroke-based, currentColor)
-- `supabase/functions/whatsapp-webhook/index.ts` — WhatsApp bot Edge Function (deployed separately via Supabase MCP)
-- `supabase/functions/_shared/` — Source files for provider/classifier/executor (reference only — deployed version is single inlined file)
+- `supabase/functions/whatsapp-webhook/index.ts` — WhatsApp bot Edge Function (modular source, not deployed directly)
+- `supabase/functions/whatsapp-webhook/index.inlined.ts` — **Production deployment file** (1,362 lines, all 6 modules inlined)
+- `supabase/functions/_shared/haiku-classifier.ts` — Stage 1: Haiku intent classifier (9 intents, ~$0.0003/call)
+- `supabase/functions/_shared/reply-generator.ts` — Stage 2: Sonnet reply generator (Sheli personality)
+- `supabase/functions/_shared/ai-classifier.ts` — Old monolithic Sonnet classifier (kept as fallback for medium-confidence escalation)
+- `supabase/functions/_shared/action-executor.ts` — DB action executor (6 action types incl. assign_task)
+- `supabase/functions/_shared/whatsapp-provider.ts` — Provider abstraction (Whapi.Cloud + Meta Cloud API)
+- `tests/classifier_eval.py` — Classifier eval runner (120 cases, Python, batch-of-5 for Tier 1 rate limits)
+- `tests/classifier-test-cases.ts` — 120 test fixtures for intent classifier (TypeScript reference)
 
 ## Database: Normalized V2 Tables (migration completed 2026-04-02)
 - **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`
@@ -58,6 +65,43 @@
 - **Duplicate handling** — bot asks "כבר ברשימה, להוסיף עוד?" instead of silently adding or ignoring
 - **Whapi trial: 4 days, 5 chats, 150 msgs/day** — upgrade to $29/mo or migrate to Meta Cloud API
 - **Bot identity: "Sheli" (שלי)** — feminine Hebrew verbs (הוספתי, בדקתי). Classifier prompt updated from "Ours" to "Sheli".
+- **Anthropic API Tier 1: 5 req/min** — Batch eval runner uses 5-at-a-time with 65s pause between batches. 120 cases take ~26 min. Add $5 credits to get Tier 2 (50 req/min).
+- **Only Python available in bash** — No Node.js/Deno in Git Bash on this machine. Test runners must be Python. `npm`/`node` only work from PowerShell.
+- **Inlined file is what's deployed** — Always edit `index.inlined.ts` for production changes. The modular `_shared/` files are dev reference. Must regenerate inlined file after any modular change.
+
+## WhatsApp Bot — Two-Stage Pipeline (deployed 2026-04-03)
+
+### Architecture
+```
+Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → Route:
+  intent=ignore + conf≥0.70     → STOP (no Sonnet, 80% of messages)
+  actionable + conf≥0.70        → Execute actions + Sonnet reply ($0.01)
+  conf 0.50-0.69                → Escalate to full Sonnet classification (fallback)
+  conf<0.50                     → Treat as ignore, log for review
+```
+- **Models:** `claude-haiku-4-5-20251001` (classifier), `claude-sonnet-4-20250514` (reply generator + fallback)
+- **Cost:** ~$0.50/household/month (down from ~$1.62 all-Sonnet). ~70% reduction.
+- **Accuracy:** 91.7% on 120 test cases (target was 85%). `ignore` 100%, `add_event` 100%, `question` 100%.
+
+### 9 Intent Types
+| Intent | Action | DB Operation |
+|--------|--------|-------------|
+| `ignore` | No action, no reply | — |
+| `add_task` | Create task | INSERT tasks |
+| `add_shopping` | Add to shopping list | INSERT shopping_items |
+| `add_event` | Schedule event | INSERT events |
+| `complete_task` | Mark task done | UPDATE tasks.done=true |
+| `complete_shopping` | Mark item purchased | UPDATE shopping_items.got=true |
+| `claim_task` | Self-assign task | UPDATE tasks.assigned_to (via assign_task action) |
+| `question` | Reply with household state | Sonnet reply only, no DB write |
+| `info_request` | Reply "I don't have that info" | Sonnet reply only, no DB write |
+
+### Classification values in `whatsapp_messages.classification`
+`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`
+
+### Known weaknesses
+- **`complete_task` at 60%** — implicit Hebrew completions ("בוצע", "טיפלתי בזה") without conversational context are genuinely ambiguous. Caught by Sonnet escalation in production.
+- **Full English in Hebrew group** — "pasta and cheese" classified as ignore. Rare edge case.
 
 ## RTL / Hebrew Design Rules
 - `dir="rtl"` on parent flips flexbox automatically — most layouts "just work"
@@ -88,7 +132,8 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 ## Commands
 - `npm run dev` — Vite dev server (port 5173)
 - `npm run build` — Production build
-- Edge Function deploy: use `mcp__f5337598__deploy_edge_function` MCP tool (not CLI)
+- `python tests/classifier_eval.py` — Run 120-case Haiku classifier eval (~26 min Tier 1, ~4 min Tier 2, needs ANTHROPIC_API_KEY)
+- Edge Function deploy: use `mcp__f5337598__deploy_edge_function` MCP tool (not CLI), deploy `index.inlined.ts` not `index.ts`
 - DB migrations: use `mcp__f5337598__apply_migration` MCP tool
 
 ## Agent Skills
