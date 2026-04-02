@@ -95,6 +95,18 @@ export async function executeActions(
           break;
         }
 
+        case "assign_task": {
+          const { id, assigned_to } = action.data as { id: string; assigned_to: string };
+          const { error } = await supabase
+            .from("tasks")
+            .update({ assigned_to })
+            .eq("id", id)
+            .eq("household_id", householdId);
+          if (error) throw error;
+          summary.push(`Assigned task ${id} → ${assigned_to}`);
+          break;
+        }
+
         default:
           console.warn(`[ActionExecutor] Unknown action type: ${action.type}`);
       }

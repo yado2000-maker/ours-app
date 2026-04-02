@@ -1,11 +1,13 @@
-// WhatsApp Webhook Handler — The main entry point for all incoming messages
-// Receives webhooks from Whapi.Cloud (or Meta Cloud API), classifies messages
-// via Claude AI, executes actions, and sends replies.
+// WhatsApp Webhook Handler — Two-stage pipeline (Haiku classify → Sonnet reply)
+// Stage 1: Every message → Haiku classifier (cheap, fast)
+// Stage 2: Actionable messages only → Sonnet reply generator (personality-accurate)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createProvider } from "../_shared/whatsapp-provider.ts";
-import { classifyMessages } from "../_shared/ai-classifier.ts";
+import { classifyIntent, type ClassificationOutput, type ClassifierContext } from "../_shared/haiku-classifier.ts";
+import { generateReply, type ReplyContext } from "../_shared/reply-generator.ts";
+import { classifyMessages } from "../_shared/ai-classifier.ts"; // Sonnet fallback for low-confidence
 import { executeActions } from "../_shared/action-executor.ts";
 
 const supabase = createClient(
@@ -89,53 +91,101 @@ Deno.serve(async (req: Request) => {
     // 7. Check usage limits (free tier: 30 actions/month)
     const usageOk = await checkUsageLimit(householdId);
 
-    // 8. Classify with AI
-    const classification = await classifyMessages(householdId, [
-      {
-        sender: message.senderName,
-        text: message.text,
-        timestamp: message.timestamp,
-      },
-    ]);
+    // ─── STAGE 1: Haiku Classification (fast, cheap) ───
+    const haikuCtx = await buildClassifierContext(householdId);
+    const classification = await classifyIntent(
+      message.text,
+      message.senderName,
+      haikuCtx
+    );
 
-    // 9. If not actionable, skip
-    if (!classification.respond || classification.actions.length === 0) {
-      console.log(`[Webhook] Social message from ${message.senderName}, skipping`);
-      await logMessage(message, "classified_social", householdId);
+    console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} from ${message.senderName}`);
+
+    // 8. Route based on intent + confidence
+    const CONFIDENCE_HIGH = 0.70;
+    const CONFIDENCE_LOW = 0.50;
+    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request";
+
+    // If ignore with high confidence → stop (no Sonnet call)
+    if (classification.intent === "ignore" && classification.confidence >= CONFIDENCE_HIGH) {
+      await logMessage(message, "haiku_ignore", householdId);
       return new Response("OK", { status: 200 });
     }
 
-    // 10. Check if usage limit exceeded (only count actionable messages)
-    if (!usageOk) {
-      // Send upgrade prompt instead of acting
-      const lang = config.language || "he";
-      const upgradeMsg = lang === "he"
-        ? `היי ${getHouseholdNameCached(householdId) || "משפחה"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 19.90 ₪ לחודש.\n🔗 ours-app-eta.vercel.app/upgrade`
-        : `Hey ${getHouseholdNameCached(householdId) || "family"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping — $5.50/month.\n🔗 ours-app-eta.vercel.app/upgrade`;
+    // Low confidence → escalate to Sonnet for full re-classification (fallback)
+    if (classification.confidence < CONFIDENCE_LOW) {
+      console.log(`[Webhook] Low confidence (${classification.confidence.toFixed(2)}), treating as ignore`);
+      await logMessage(message, "haiku_low_confidence", householdId);
+      return new Response("OK", { status: 200 });
+    }
 
-      await provider.sendMessage({ groupId: message.groupId, text: upgradeMsg });
+    // Medium confidence (0.50-0.69) → escalate to Sonnet full classification
+    if (classification.confidence < CONFIDENCE_HIGH && isActionable) {
+      console.log(`[Webhook] Medium confidence, escalating to Sonnet`);
+      const sonnetResult = await classifyMessages(householdId, [
+        { sender: message.senderName, text: message.text, timestamp: message.timestamp },
+      ]);
+
+      if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
+        await logMessage(message, "sonnet_escalated_social", householdId);
+        return new Response("OK", { status: 200 });
+      }
+
+      // Sonnet says actionable — check usage, execute, reply
+      if (!usageOk) {
+        await sendUpgradePrompt(message.groupId, householdId, config.language);
+        await logMessage(message, "usage_limit_reached", householdId);
+        return new Response("OK", { status: 200 });
+      }
+
+      const { summary } = await executeActions(householdId, sonnetResult.actions);
+      console.log(`[Webhook] Sonnet escalation executed ${summary.length} actions:`, summary);
+      await incrementUsage(householdId);
+      if (sonnetResult.reply) {
+        await provider.sendMessage({ groupId: message.groupId, text: sonnetResult.reply });
+      }
+      await logMessage(message, "sonnet_escalated", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
+    // Non-actionable intents (question, info_request) — generate reply only, no DB writes
+    if (!isActionable && classification.intent !== "ignore") {
+      const replyCtx = await buildReplyContext(householdId);
+      const { reply } = await generateReply(classification, message.senderName, replyCtx);
+      if (reply) {
+        await provider.sendMessage({ groupId: message.groupId, text: reply });
+      }
+      await logMessage(message, "haiku_reply_only", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
+    // ─── High confidence actionable → execute via Haiku entities ───
+
+    // 9. Check usage limit
+    if (!usageOk) {
+      await sendUpgradePrompt(message.groupId, householdId, config.language);
       await logMessage(message, "usage_limit_reached", householdId);
       return new Response("OK", { status: 200 });
     }
 
-    // 11. Execute actions (create tasks, shopping items, events)
-    const { summary } = await executeActions(householdId, classification.actions);
-    console.log(`[Webhook] Executed ${summary.length} actions:`, summary);
+    // 10. Convert Haiku entities to ClassifiedAction format and execute
+    const actions = haikuEntitiesToActions(classification);
+    const { summary } = await executeActions(householdId, actions);
+    console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
 
-    // 12. Increment usage counter
+    // 11. Increment usage counter
     await incrementUsage(householdId);
 
-    // 13. Send reply to group
-    if (classification.reply) {
-      const sent = await provider.sendMessage({
-        groupId: message.groupId,
-        text: classification.reply,
-      });
-      console.log(`[Webhook] Reply sent: ${sent}`);
+    // 12. Generate personality reply via Sonnet (Stage 2)
+    const replyCtx = await buildReplyContext(householdId);
+    const { reply } = await generateReply(classification, message.senderName, replyCtx);
+    if (reply) {
+      await provider.sendMessage({ groupId: message.groupId, text: reply });
+      console.log(`[Webhook] Reply sent`);
     }
 
-    // 14. Log completion
-    await logMessage(message, "processed", householdId);
+    // 13. Log completion
+    await logMessage(message, "haiku_actionable", householdId);
 
     return new Response("OK", { status: 200 });
   } catch (err) {
@@ -245,4 +295,116 @@ async function incrementUsage(householdId: string) {
 const householdNameCache: Record<string, string> = {};
 function getHouseholdNameCached(householdId: string): string | null {
   return householdNameCache[householdId] || null;
+}
+
+// ─── Two-Stage Pipeline Helpers ───
+
+async function buildClassifierContext(householdId: string): Promise<ClassifierContext> {
+  const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  const today = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  const [membersRes, tasksRes, shoppingRes] = await Promise.all([
+    supabase.from("household_members").select("display_name").eq("household_id", householdId),
+    supabase.from("tasks").select("id, title, assigned_to").eq("household_id", householdId).eq("done", false),
+    supabase.from("shopping_items").select("id, name, qty").eq("household_id", householdId).eq("got", false),
+  ]);
+
+  return {
+    members: (membersRes.data || []).map((m) => m.display_name),
+    openTasks: (tasksRes.data || []).map((t) => ({ id: t.id, title: t.title, assigned_to: t.assigned_to })),
+    openShopping: (shoppingRes.data || []).map((s) => ({ id: s.id, name: s.name, qty: s.qty })),
+    today: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
+    dayOfWeek: hebrewDays[today.getDay()],
+  };
+}
+
+async function buildReplyContext(householdId: string): Promise<ReplyContext> {
+  const { data: household } = await supabase
+    .from("households_v2").select("name, lang").eq("id", householdId).single();
+
+  const [membersRes, tasksRes, shoppingRes, eventsRes] = await Promise.all([
+    supabase.from("household_members").select("display_name").eq("household_id", householdId),
+    supabase.from("tasks").select("id, title, assigned_to, done").eq("household_id", householdId),
+    supabase.from("shopping_items").select("id, name, qty, got").eq("household_id", householdId),
+    supabase.from("events").select("id, title, assigned_to, scheduled_for").eq("household_id", householdId)
+      .gte("scheduled_for", new Date().toISOString()),
+  ]);
+
+  return {
+    householdName: household?.name || "משפחה",
+    members: (membersRes.data || []).map((m) => m.display_name),
+    language: household?.lang || "he",
+    currentTasks: tasksRes.data || [],
+    currentShopping: shoppingRes.data || [],
+    currentEvents: eventsRes.data || [],
+  };
+}
+
+function haikuEntitiesToActions(classification: ClassificationOutput) {
+  const e = classification.entities;
+  const actions: Array<{ type: string; data: Record<string, unknown> }> = [];
+
+  switch (classification.intent) {
+    case "add_task":
+      actions.push({
+        type: "add_task",
+        data: { title: e.title || e.raw_text, assigned_to: e.person || null },
+      });
+      break;
+
+    case "add_shopping":
+      if (e.items && Array.isArray(e.items)) {
+        actions.push({
+          type: "add_shopping",
+          data: { items: e.items },
+        });
+      } else {
+        actions.push({
+          type: "add_shopping",
+          data: { items: [{ name: e.raw_text, qty: "1", category: "אחר" }] },
+        });
+      }
+      break;
+
+    case "add_event":
+      actions.push({
+        type: "add_event",
+        data: {
+          title: e.title || e.raw_text,
+          assigned_to: e.person || null,
+          scheduled_for: e.time_iso || new Date().toISOString(),
+        },
+      });
+      break;
+
+    case "complete_task":
+      if (e.task_id) {
+        actions.push({ type: "complete_task", data: { id: e.task_id } });
+      }
+      break;
+
+    case "complete_shopping":
+      if (e.item_id) {
+        actions.push({ type: "complete_shopping", data: { id: e.item_id } });
+      }
+      break;
+
+    case "claim_task":
+      if (e.task_id && e.person) {
+        actions.push({ type: "assign_task", data: { id: e.task_id, assigned_to: e.person } });
+      }
+      break;
+  }
+
+  return actions;
+}
+
+async function sendUpgradePrompt(groupId: string, householdId: string, language?: string) {
+  const lang = language || "he";
+  const upgradeMsg = lang === "he"
+    ? `היי ${getHouseholdNameCached(householdId) || "משפחה"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 19.90 ₪ לחודש.\n🔗 sheli.ai/upgrade`
+    : `Hey ${getHouseholdNameCached(householdId) || "family"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping — $5.50/month.\n🔗 sheli.ai/upgrade`;
+
+  await provider.sendMessage({ groupId, text: upgradeMsg });
 }
