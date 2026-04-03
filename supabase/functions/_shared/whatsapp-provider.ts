@@ -16,10 +16,20 @@ export interface OutgoingMessage {
   text: string;
 }
 
+export interface GroupEvent {
+  type: "group_event";
+  groupId: string;
+  subtype: "add" | "remove" | "promote" | "demote";
+  participants: string[]; // phone numbers (without @s.whatsapp.net)
+  actorPhone: string;     // who performed the action
+  timestamp: number;
+}
+
 export interface WhatsAppProvider {
   name: string;
   verifyWebhook(req: Request): Promise<boolean>;
   parseIncoming(body: unknown): IncomingMessage | null;
+  parseGroupEvent?(body: unknown): GroupEvent | null;
   sendMessage(msg: OutgoingMessage): Promise<boolean>;
   sendTemplate?(groupId: string, template: string, params: Record<string, string>): Promise<boolean>;
 }
@@ -88,6 +98,46 @@ export class WhapiProvider implements WhatsAppProvider {
       };
     } catch (err) {
       console.error("[WhapiProvider] Parse error:", err);
+      return null;
+    }
+  }
+
+  parseGroupEvent(body: unknown): GroupEvent | null {
+    try {
+      const data = body as Record<string, unknown>;
+      const messages = (data.messages || []) as Array<Record<string, unknown>>;
+      if (messages.length === 0) return null;
+
+      const msg = messages[0];
+      const type = msg.type as string || "";
+
+      // Whapi sends group events as type "action" with subtypes: add, remove, promote, demote
+      if (type !== "action") return null;
+
+      const chatId = msg.chat_id as string || "";
+      if (!chatId.endsWith("@g.us")) return null;
+
+      const subtype = msg.subtype as string || "";
+      const validSubtypes = ["add", "remove", "promote", "demote"];
+      if (!validSubtypes.includes(subtype)) return null;
+
+      const action = msg.action as Record<string, unknown> || {};
+      const rawParticipants = (action.participants || []) as string[];
+      const participants = rawParticipants.map((p: string) => p.replace("@s.whatsapp.net", ""));
+
+      const from = msg.from as string || "";
+      const timestamp = (msg.timestamp as number) || Math.floor(Date.now() / 1000);
+
+      return {
+        type: "group_event",
+        groupId: chatId,
+        subtype: subtype as GroupEvent["subtype"],
+        participants,
+        actorPhone: from.replace("@s.whatsapp.net", ""),
+        timestamp,
+      };
+    } catch (err) {
+      console.error("[WhapiProvider] parseGroupEvent error:", err);
       return null;
     }
   }

@@ -15,8 +15,10 @@
 - `src/lib/prompt.js` — Claude AI system prompt for web app chat
 - `src/components/Icons.jsx` — 27 custom SVG icons (stroke-based, currentColor)
 - `supabase/functions/whatsapp-webhook/index.ts` — WhatsApp bot Edge Function (modular source, not deployed directly)
-- `supabase/functions/whatsapp-webhook/index.inlined.ts` — **Production deployment file** (1,362 lines, all 6 modules inlined)
+- `supabase/functions/whatsapp-webhook/index.inlined.ts` — **Production deployment file** (~1,800 lines, all 6 modules inlined + group management + batching)
 - `supabase/functions/_shared/haiku-classifier.ts` — Stage 1: Haiku intent classifier (9 intents, ~$0.0003/call)
+- `docs/plans/2026-04-03-learning-system-design.md` — Two-stream learning system design (approved)
+- `docs/plans/2026-04-03-learning-system-plan.md` — Learning system implementation plan (10 tasks, 3 phases)
 - `supabase/functions/_shared/reply-generator.ts` — Stage 2: Sonnet reply generator (Sheli personality)
 - `supabase/functions/_shared/ai-classifier.ts` — Old monolithic Sonnet classifier (kept as fallback for medium-confidence escalation)
 - `supabase/functions/_shared/action-executor.ts` — DB action executor (6 action types incl. assign_task)
@@ -58,8 +60,14 @@
   - **Unknown direct user:** Gets welcome message explaining how to connect via group or app.
 - **Whapi.Cloud sends outgoing messages back as webhooks** — must skip bot's own phone number early in handler
 - **Bot phone: 972555175553** — set as `BOT_PHONE_NUMBER` env var in Edge Function secrets
-- **Edge Function deployment: single inlined file** — Supabase Edge Functions don't support cross-function shared imports. The `_shared/` files are for development reference; the deployed `index.ts` has everything inlined.
-- **Redeploying requires the FULL file content** via `deploy_edge_function` MCP tool
+- **Edge Function deployment: single inlined file** — Supabase Edge Functions don't support cross-function shared imports. The `_shared/` files are for development reference; the deployed `index.inlined.ts` has everything inlined (~1,800 lines).
+- **Deploying: Dashboard paste (not CLI)** — File is too large (65KB) for MCP `deploy_edge_function`. Supabase CLI blocked by Windows Security. Deploy via: Dashboard → Edge Functions → whatsapp-webhook → Code → select all → paste `index.inlined.ts` → Deploy updates. Ensure Settings → Verify JWT is OFF.
+- **Supabase Management API** — `curl -H "Authorization: Bearer sbp_..." https://api.supabase.com/v1/projects/wzwwtghtnkapdwlgnrxr/functions` works for listing/metadata but not source upload.
+- **Shopping message batching** — 5s window for rapid-fire shopping items. Uses `amILastPendingMessage()` (checks by messageId, NOT timestamp — avoids clock skew). 30s TTL prevents stale pending messages.
+- **Group lifecycle management** — Bot auto-setup on group join (intro message, create household, auto-link via phone mapping, pre-map participants). Member add/remove handlers. Bot remove = soft-disable.
+- **Quiet hours** — `isQuietHours()`: nightly 22:00-07:00 + Shabbat (Friday 15:00 – Saturday 19:00) Israel timezone. Suppresses proactive messages only, reactive replies always work.
+- **Compound Hebrew product names** — Classifier prompt includes examples (חלב אורז, שמן זית, נייר טואלט) to prevent splitting. Categories always assigned per item.
+- **Default shopping category: "אחר"** (Hebrew) not "Other" (English) — web app groups by Hebrew categories
 - **Hebrew NLP patterns in prompt** — iteratively improved. Each misclassification becomes a new pattern.
 - **"NOT A TASK" distinction** — requests for info ("שלח קוד", "מה הסיסמא") are NOT tasks. Only household chores/to-dos.
 - **Duplicate handling** — bot asks "כבר ברשימה, להוסיף עוד?" instead of silently adding or ignoring
@@ -97,11 +105,26 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 | `info_request` | Reply "I don't have that info" | Sonnet reply only, no DB write |
 
 ### Classification values in `whatsapp_messages.classification`
-`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`
+`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`
+
+### `whatsapp_messages` batch columns (added 2026-04-03)
+- `batch_id` (TEXT) — groups messages into shopping batches
+- `batch_status` (TEXT) — `pending` → `processing` → `processed` (or `superseded`)
+- `classification_data` (JSONB) — full Haiku output (planned, Phase 1 of learning system)
 
 ### Known weaknesses
 - **`complete_task` at 60%** — implicit Hebrew completions ("בוצע", "טיפלתי בזה") without conversational context are genuinely ambiguous. Caught by Sonnet escalation in production.
 - **Full English in Hebrew group** — "pasta and cheese" classified as ignore. Rare edge case.
+- **Compound Hebrew names** — mostly fixed with prompt examples, but novel compounds may still split. Each correction improves the prompt.
+
+### Learning System (designed, implementation pending)
+- **Design:** `docs/plans/2026-04-03-learning-system-design.md`
+- **Plan:** `docs/plans/2026-04-03-learning-system-plan.md` (10 tasks, 3 phases)
+- **Stream A (global):** Weekly Claude review of corrections → propose prompt improvements → founder approves
+- **Stream B (per-family):** `household_patterns` table → nicknames, time expressions, category preferences → injected into Haiku prompt (~200 extra tokens)
+- **Feedback signals:** Implicit (delete within 5 min), explicit ("תמחקי"), @שלי corrections ("@שלי התכוונתי לשמן זית")
+- **New intent planned:** `correct_bot` — undo wrong action + redo correctly + log for learning
+- **New tables planned:** `classification_corrections`, `household_patterns`, `global_prompt_proposals`
 
 ## RTL / Hebrew Design Rules
 - `dir="rtl"` on parent flips flexbox automatically — most layouts "just work"

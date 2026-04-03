@@ -47,10 +47,20 @@ interface OutgoingMessage {
   text: string;
 }
 
+interface GroupEvent {
+  type: "group_event";
+  groupId: string;
+  subtype: "add" | "remove" | "promote" | "demote";
+  participants: string[]; // phone numbers (without @s.whatsapp.net)
+  actorPhone: string;     // who performed the action
+  timestamp: number;
+}
+
 interface WhatsAppProvider {
   name: string;
   verifyWebhook(req: Request): Promise<boolean>;
   parseIncoming(body: unknown): IncomingMessage | null;
+  parseGroupEvent?(body: unknown): GroupEvent | null;
   sendMessage(msg: OutgoingMessage): Promise<boolean>;
   sendTemplate?(groupId: string, template: string, params: Record<string, string>): Promise<boolean>;
 }
@@ -195,6 +205,46 @@ class WhapiProvider implements WhatsAppProvider {
       };
     } catch (err) {
       console.error("[WhapiProvider] Parse error:", err);
+      return null;
+    }
+  }
+
+  parseGroupEvent(body: unknown): GroupEvent | null {
+    try {
+      const data = body as Record<string, unknown>;
+      const messages = (data.messages || []) as Array<Record<string, unknown>>;
+      if (messages.length === 0) return null;
+
+      const msg = messages[0];
+      const type = msg.type as string || "";
+
+      // Whapi sends group events as type "action" with subtypes: add, remove, promote, demote
+      if (type !== "action") return null;
+
+      const chatId = msg.chat_id as string || "";
+      if (!chatId.endsWith("@g.us")) return null;
+
+      const subtype = msg.subtype as string || "";
+      const validSubtypes = ["add", "remove", "promote", "demote"];
+      if (!validSubtypes.includes(subtype)) return null;
+
+      const action = msg.action as Record<string, unknown> || {};
+      const rawParticipants = (action.participants || []) as string[];
+      const participants = rawParticipants.map((p: string) => p.replace("@s.whatsapp.net", ""));
+
+      const from = msg.from as string || "";
+      const timestamp = (msg.timestamp as number) || Math.floor(Date.now() / 1000);
+
+      return {
+        type: "group_event",
+        groupId: chatId,
+        subtype: subtype as GroupEvent["subtype"],
+        participants,
+        actorPhone: from.replace("@s.whatsapp.net", ""),
+        timestamp,
+      };
+    } catch (err) {
+      console.error("[WhapiProvider] parseGroupEvent error:", err);
       return null;
     }
   }
@@ -402,11 +452,27 @@ HEBREW PATTERNS:
 - "מה הסיסמא?", "שלח קוד" = info_request (NOT add_task)
 - Hebrew time: "ב5" = 17:00, "בצהריים" = ~12:00, "אחרי הגן" = ~16:00, "לפני שבת" = Friday PM
 
+SHOPPING CATEGORIES (ALWAYS assign one):
+פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, טיפוח, אחר
+
+COMPOUND PRODUCT NAMES — keep as ONE item, do NOT split:
+- "חלב אורז" = rice milk (ONE item in חלב וביצים)
+- "חלב שקדים" = almond milk (ONE item in חלב וביצים)
+- "חלב סויה" = soy milk (ONE item in חלב וביצים)
+- "שמן זית" = olive oil (ONE item in מזווה)
+- "חמאת בוטנים" = peanut butter (ONE item in מזווה)
+- "נייר טואלט" = toilet paper (ONE item in ניקוי ובית)
+- "סבון כלים" = dish soap (ONE item in ניקוי ובית)
+- "קרם לחות" = moisturizer (ONE item in טיפוח)
+- Rule: if two+ words form a single product name, keep them together
+
 HEBREW DAYS: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday, שבת=Saturday
 
 EXAMPLES:
 [אמא]: "בוקר טוב!" → {"intent":"ignore","confidence":0.99,"entities":{"raw_text":"בוקר טוב!"}}
-[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב"}],"raw_text":"חלב"}}
+[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"חלב וביצים"}],"raw_text":"חלב"}}
+[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"חלב וביצים"}],"raw_text":"חלב אורז"}}
+[אבא]: "נייר טואלט וסבון כלים" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"נייר טואלט","category":"ניקוי ובית"},{"name":"סבון כלים","category":"ניקוי ובית"}],"raw_text":"נייר טואלט וסבון כלים"}}
 [אמא]: "נועה חוג 5" → {"intent":"add_task","confidence":0.90,"entities":{"person":"נועה","title":"חוג","time_raw":"5","raw_text":"נועה חוג 5"}}
 [אבא]: "שטפתי את הכלים" → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"t1a2","raw_text":"שטפתי את הכלים"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}
@@ -420,7 +486,7 @@ RULES:
 - Always include raw_text in entities.
 - For complete_task/complete_shopping/claim_task: match against open tasks/shopping IDs above.
 - For add_event: include time_raw (Hebrew expression) and time_iso (ISO 8601 with +03:00) if resolvable.
-- For add_shopping: extract individual items into the items array.
+- For add_shopping: extract items into the items array. ALWAYS include category per item. Keep compound product names as ONE item (e.g., "חלב אורז" is ONE item, not two).
 - Confidence: 0.95+ for clear cases, 0.70-0.90 for moderate, 0.50-0.69 for ambiguous.
 - When unsure between action and ignore, prefer ignore (false silence > false action).`;
 }
@@ -886,7 +952,7 @@ async function executeActions(
               household_id: householdId,
               name: item.name,
               qty: item.qty || null,
-              category: item.category || "Other",
+              category: item.category || "אחר",
               got: false,
             });
             if (error) throw error;
@@ -962,6 +1028,328 @@ async function executeActions(
 }
 
 // ============================================================================
+// GROUP MANAGEMENT (join/leave/intro)
+// ============================================================================
+
+const INTRO_MESSAGE = `היי! 👋 אני שלי, העוזרת החכמה של הבית.
+
+אני יכולה לעזור עם:
+✅ משימות - "צריך לאסוף את הילדים ב-4"
+🛒 קניות - "חלב, ביצים ולחם"
+📅 אירועים - "יום שישי ארוחה אצל סבא וסבתא"
+❓ שאלות - "מה צריך לעשות היום?"
+
+פשוט כתבו בקבוצה ואני אטפל בזה! 🏠`;
+
+interface GroupInfo {
+  name: string;
+  participants: Array<{ phone: string; name: string }>;
+}
+
+async function fetchGroupInfo(groupId: string): Promise<GroupInfo | null> {
+  try {
+    const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
+    const token = Deno.env.get("WHAPI_TOKEN") || "";
+
+    const res = await fetch(`${apiUrl}/groups/${groupId}`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error(`[fetchGroupInfo] HTTP ${res.status} for ${groupId}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const participants = ((data.participants || []) as Array<Record<string, string>>).map((p) => ({
+      phone: (p.id || "").replace("@s.whatsapp.net", ""),
+      name: p.name || p.id || "",
+    }));
+
+    return {
+      name: data.subject || data.name || "משפחה",
+      participants,
+    };
+  } catch (err) {
+    console.error("[fetchGroupInfo] Error:", err);
+    return null;
+  }
+}
+
+function generateHouseholdId(): string {
+  return "hh_" + Math.random().toString(36).slice(2, 10);
+}
+
+async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider) {
+  console.log(`[GroupMgmt] Bot added to group ${groupId}`);
+
+  // 1. Check if group already linked (re-add scenario)
+  const { data: existingConfig } = await supabase
+    .from("whatsapp_config")
+    .select("household_id, bot_active")
+    .eq("group_id", groupId)
+    .single();
+
+  if (existingConfig) {
+    // Re-activate if it was disabled
+    if (!existingConfig.bot_active) {
+      await supabase
+        .from("whatsapp_config")
+        .update({ bot_active: true })
+        .eq("group_id", groupId);
+      console.log(`[GroupMgmt] Re-activated bot for group ${groupId}`);
+    }
+    // Send intro message on re-add
+    await provider.sendMessage({ groupId, text: INTRO_MESSAGE });
+    return;
+  }
+
+  // 2. Fetch group info (name + participants)
+  const groupInfo = await fetchGroupInfo(groupId);
+  const groupName = groupInfo?.name || "משפחה";
+  const participants = groupInfo?.participants || [];
+
+  // 3. Auto-link: check if any participant's phone is already mapped to a household
+  let householdId: string | null = null;
+  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+  const humanParticipants = participants.filter((p) => p.phone !== botPhone);
+
+  if (humanParticipants.length > 0) {
+    const phones = humanParticipants.map((p) => p.phone);
+    const { data: existingMapping } = await supabase
+      .from("whatsapp_member_mapping")
+      .select("household_id")
+      .in("phone_number", phones)
+      .limit(1)
+      .single();
+
+    if (existingMapping) {
+      householdId = existingMapping.household_id;
+      console.log(`[GroupMgmt] Auto-linked to existing household ${householdId}`);
+    }
+  }
+
+  // 4. Create new household if no match
+  if (!householdId) {
+    householdId = generateHouseholdId();
+    const { error } = await supabase.from("households_v2").insert({
+      id: householdId,
+      name: groupName,
+      lang: "he",
+    });
+    if (error) {
+      console.error(`[GroupMgmt] Failed to create household:`, error);
+      // Still send intro even if household creation fails
+      await provider.sendMessage({ groupId, text: INTRO_MESSAGE });
+      return;
+    }
+    console.log(`[GroupMgmt] Created new household ${householdId} (${groupName})`);
+  }
+
+  // 5. Create whatsapp_config
+  const { error: configError } = await supabase.from("whatsapp_config").insert({
+    household_id: householdId,
+    group_id: groupId,
+    bot_active: true,
+    language: "he",
+  });
+  if (configError) {
+    console.error(`[GroupMgmt] Failed to create config:`, configError);
+  }
+
+  // 6. Pre-map all participants
+  for (const p of humanParticipants) {
+    await upsertMemberMapping(householdId, p.phone, p.name);
+  }
+  console.log(`[GroupMgmt] Pre-mapped ${humanParticipants.length} participants`);
+
+  // 7. Send introduction message
+  await provider.sendMessage({ groupId, text: INTRO_MESSAGE });
+  console.log(`[GroupMgmt] Intro message sent to ${groupId}`);
+}
+
+async function handleMemberAdded(groupId: string, phones: string[]) {
+  const { data: config } = await supabase
+    .from("whatsapp_config")
+    .select("household_id")
+    .eq("group_id", groupId)
+    .single();
+
+  if (!config) return;
+
+  // Fetch group info to get names for new members
+  const groupInfo = await fetchGroupInfo(groupId);
+  const participantMap = new Map(
+    (groupInfo?.participants || []).map((p) => [p.phone, p.name])
+  );
+
+  for (const phone of phones) {
+    const name = participantMap.get(phone) || phone;
+    await upsertMemberMapping(config.household_id, phone, name);
+  }
+  console.log(`[GroupMgmt] Added ${phones.length} member(s) to household ${config.household_id}`);
+}
+
+async function handleMemberRemoved(groupId: string, phones: string[]) {
+  const { data: config } = await supabase
+    .from("whatsapp_config")
+    .select("household_id")
+    .eq("group_id", groupId)
+    .single();
+
+  if (!config) return;
+
+  // Remove from whatsapp_member_mapping only (preserve household_members for task history)
+  for (const phone of phones) {
+    await supabase
+      .from("whatsapp_member_mapping")
+      .delete()
+      .eq("household_id", config.household_id)
+      .eq("phone_number", phone);
+  }
+  console.log(`[GroupMgmt] Removed ${phones.length} member mapping(s) from household ${config.household_id}`);
+}
+
+async function handleBotRemoved(groupId: string) {
+  console.log(`[GroupMgmt] Bot removed from group ${groupId}`);
+  await supabase
+    .from("whatsapp_config")
+    .update({ bot_active: false })
+    .eq("group_id", groupId);
+}
+
+async function handleGroupEvent(event: GroupEvent, provider: WhatsAppProvider) {
+  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+  const isBotEvent = event.participants.includes(botPhone);
+
+  switch (event.subtype) {
+    case "add":
+      if (isBotEvent) await handleBotAddedToGroup(event.groupId, provider);
+      else await handleMemberAdded(event.groupId, event.participants);
+      break;
+    case "remove":
+      if (isBotEvent) await handleBotRemoved(event.groupId);
+      else await handleMemberRemoved(event.groupId, event.participants);
+      break;
+    default:
+      console.log(`[GroupEvent] Ignoring ${event.subtype} event`);
+  }
+}
+
+// ============================================================================
+// MESSAGE BATCHING (shopping items, 5-second window)
+// ============================================================================
+
+const BATCH_WINDOW_MS = 5000; // 5 seconds
+
+async function storePendingBatch(
+  message: IncomingMessage,
+  classification: ClassificationOutput,
+  householdId: string,
+): Promise<string> {
+  const batchId = Math.random().toString(36).slice(2, 10);
+  await supabase.from("whatsapp_messages").insert({
+    household_id: householdId,
+    group_id: message.groupId,
+    sender_phone: message.senderPhone,
+    sender_name: message.senderName,
+    message_text: message.text,
+    message_type: message.type,
+    whatsapp_message_id: message.messageId,
+    classification: "batch_pending",
+    batch_id: batchId,
+    batch_status: "pending",
+  });
+  return batchId;
+}
+
+async function amILastPendingMessage(groupId: string, myMessageId: string): Promise<boolean> {
+  // Find the most recent pending message for this group
+  const { data } = await supabase
+    .from("whatsapp_messages")
+    .select("whatsapp_message_id")
+    .eq("group_id", groupId)
+    .eq("batch_status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+  // If I'm the newest pending message, I process the batch
+  return data?.whatsapp_message_id === myMessageId;
+}
+
+async function claimAndProcessBatch(
+  groupId: string,
+  householdId: string,
+  provider: WhatsAppProvider,
+  senderName: string,
+): Promise<void> {
+  // Atomically claim all pending messages for this group (max 30s old to skip stale)
+  const staleCutoff = new Date(Date.now() - 30000).toISOString();
+  const { data: pending, error: claimError } = await supabase
+    .from("whatsapp_messages")
+    .update({ batch_status: "processing" })
+    .eq("group_id", groupId)
+    .eq("batch_status", "pending")
+    .gte("created_at", staleCutoff)
+    .select("id, message_text, sender_name");
+
+  if (claimError || !pending || pending.length === 0) {
+    console.log(`[Batch] No pending messages to claim for ${groupId}`);
+    return;
+  }
+
+  console.log(`[Batch] Claimed ${pending.length} messages for group ${groupId}`);
+
+  // Extract shopping items from each message by re-classifying as a batch
+  const allItems: Array<{ name: string; qty?: string; category?: string }> = [];
+  for (const msg of pending) {
+    // Quick Haiku classify each message to extract items
+    const ctx = await buildClassifierCtx(householdId);
+    const cls = await classifyIntent(msg.message_text, msg.sender_name, ctx);
+    if (cls.entities.items) {
+      allItems.push(...cls.entities.items);
+    } else if (cls.entities.raw_text) {
+      // Fallback: treat the raw text as a single item name
+      allItems.push({ name: cls.entities.raw_text.trim() });
+    }
+  }
+
+  if (allItems.length === 0) {
+    console.log(`[Batch] No items extracted, skipping`);
+    await supabase
+      .from("whatsapp_messages")
+      .update({ batch_status: "processed", classification: "batch_empty" })
+      .eq("group_id", groupId)
+      .eq("batch_status", "processing");
+    return;
+  }
+
+  // Execute add_shopping for all items
+  const actions = [{
+    type: "add_shopping" as const,
+    data: { items: allItems },
+  }];
+  const { summary } = await executeActions(householdId, actions);
+  console.log(`[Batch] Executed:`, summary);
+  await incrementUsage(householdId);
+
+  // Generate a single reply covering all items
+  const itemNames = allItems.map((i) => i.name);
+  const itemList = itemNames.length <= 2
+    ? itemNames.join(" ו")
+    : itemNames.slice(0, -1).join(", ") + " ו" + itemNames[itemNames.length - 1];
+  const batchReply = `🛒 הוספתי ${itemList} לרשימה`;
+  await provider.sendMessage({ groupId, text: batchReply });
+
+  // Mark all batch messages as processed
+  await supabase
+    .from("whatsapp_messages")
+    .update({ batch_status: "processed", classification: "batch_actionable" })
+    .eq("group_id", groupId)
+    .eq("batch_status", "processing");
+}
+
+// ============================================================================
 // MAIN WEBHOOK HANDLER (from index.ts)
 // ============================================================================
 
@@ -996,8 +1384,17 @@ Deno.serve(async (req: Request) => {
       return new Response("Unauthorized", { status: 401 });
     }
 
-    // 2. Parse the incoming message
+    // 2. Parse the incoming webhook body
     const body = await req.json();
+
+    // 2a. Check for group events (join/leave/promote/demote) before message parsing
+    const groupEvent = provider.parseGroupEvent?.(body);
+    if (groupEvent) {
+      await handleGroupEvent(groupEvent, provider);
+      return new Response("OK", { status: 200 });
+    }
+
+    // 2b. Parse as regular message
     const message = provider.parseIncoming(body);
 
     if (!message) {
@@ -1032,6 +1429,12 @@ Deno.serve(async (req: Request) => {
 
     const householdId = config.household_id;
 
+    // 4b. Populate household name cache (for upgrade prompts)
+    if (!householdNameCache[householdId]) {
+      const { data: hh } = await supabase.from("households_v2").select("name").eq("id", householdId).single();
+      if (hh?.name) householdNameCache[householdId] = hh.name;
+    }
+
     // 5. Log the raw message
     await logMessage(message, "received", householdId);
 
@@ -1055,6 +1458,32 @@ Deno.serve(async (req: Request) => {
     const CONFIDENCE_HIGH = 0.70;
     const CONFIDENCE_LOW = 0.50;
     const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request";
+
+    // 8a. Shopping batch: collect rapid-fire shopping items into one reply
+    if (classification.intent === "add_shopping" && classification.confidence >= CONFIDENCE_HIGH) {
+      if (!usageOk) {
+        await sendUpgradePrompt(message.groupId, householdId, config.language);
+        await logMessage(message, "usage_limit_reached", householdId);
+        return new Response("OK", { status: 200 });
+      }
+
+      // Store as pending batch item
+      await storePendingBatch(message, classification, householdId);
+
+      // Wait for batch window
+      await new Promise((r) => setTimeout(r, BATCH_WINDOW_MS));
+
+      // Check if I'm the most recent pending message (last-message-wins)
+      if (!(await amILastPendingMessage(message.groupId, message.messageId))) {
+        // A newer invocation will handle the batch — exit silently
+        console.log(`[Batch] Not last message, deferring to newer invocation`);
+        return new Response("OK", { status: 200 });
+      }
+
+      // We ARE the last message — claim and process the full batch
+      await claimAndProcessBatch(message.groupId, householdId, provider, message.senderName);
+      return new Response("OK", { status: 200 });
+    }
 
     // If ignore with high confidence → stop (no Sonnet call)
     if (classification.intent === "ignore" && classification.confidence >= CONFIDENCE_HIGH) {
@@ -1227,7 +1656,7 @@ async function checkUsageLimit(householdId: string): Promise<boolean> {
     .from("whatsapp_messages")
     .select("id", { count: "exact", head: true })
     .eq("household_id", householdId)
-    .eq("classification", "processed")
+    .in("classification", ["haiku_actionable", "sonnet_escalated", "batch_actionable"])
     .gte("created_at", startOfMonth.toISOString());
 
   return (count || 0) < 30;
@@ -1245,6 +1674,27 @@ async function incrementUsage(householdId: string) {
 const householdNameCache: Record<string, string> = {};
 function getHouseholdNameCached(householdId: string): string | null {
   return householdNameCache[householdId] || null;
+}
+
+// ─── Quiet Hours (no proactive messages, only replies) ───
+// Nightly: 10 PM - 7 AM Israel time
+// Shabbat: Friday 15:00 - Saturday 19:00 Israel time
+// During quiet hours: bot still executes actions + replies to direct commands.
+// Suppresses ONLY proactive/unsolicited messages (morning briefings, reminders, summaries).
+function isQuietHours(): boolean {
+  const now = new Date();
+  const israelTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+  const hour = israelTime.getHours();
+  const day = israelTime.getDay(); // 0=Sun, 5=Fri, 6=Sat
+
+  // Nightly quiet hours: 10 PM - 7 AM
+  if (hour >= 22 || hour < 7) return true;
+
+  // Shabbat: Friday 15:00+ through Saturday before 19:00
+  if (day === 5 && hour >= 15) return true;  // Friday from 3 PM
+  if (day === 6 && hour < 19) return true;   // Saturday until 7 PM
+
+  return false;
 }
 
 // ─── Two-Stage Pipeline Helpers ───

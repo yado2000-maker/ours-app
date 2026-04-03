@@ -44,7 +44,7 @@ export async function executeActions(
               household_id: householdId,
               name: item.name,
               qty: item.qty || null,
-              category: item.category || "Other",
+              category: item.category || "אחר",
               got: false,
             });
             if (error) throw error;
