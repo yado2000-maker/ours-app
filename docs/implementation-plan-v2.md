@@ -1,3 +1,5 @@
+> ⚠️ **SUPERSEDED** by [V3 Implementation Plan](implementation-plan-v3.md) (2026-04-05)
+
 # Ours App v2: WhatsApp-First Implementation Plan
 
 ## Executive Summary

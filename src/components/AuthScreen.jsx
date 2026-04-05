@@ -3,11 +3,13 @@ import T from "../locales/index.js";
 import { supabase } from "../lib/supabase.js";
 
 export default function AuthScreen({ onBack, lang = "en" }) {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email" | "forgot" | "forgot-sent" | "reset-password"
+  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email" | "forgot" | "forgot-sent" | "reset-password" | "phone" | "phone-otp"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -158,6 +160,46 @@ export default function AuthScreen({ onBack, lang = "en" }) {
     });
   };
 
+  // ── Phone Auth ──
+  const formatPhoneForAuth = (raw) => {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.startsWith("972")) return "+" + digits;
+    if (digits.startsWith("0")) return "+972" + digits.slice(1);
+    return "+972" + digits;
+  };
+
+  const handlePhoneSend = async () => {
+    setError(null);
+    const formatted = formatPhoneForAuth(phone);
+    if (formatted.length < 13) {
+      setError(isHe ? "נא להזין מספר טלפון תקין" : "Please enter a valid phone number");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ phone: formatted });
+      if (error) throw error;
+      setMode("phone-otp");
+    } catch (err) {
+      setError(err.message || (isHe ? "משהו השתבש" : "Something went wrong"));
+    }
+    setLoading(false);
+  };
+
+  const handlePhoneVerify = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const formatted = formatPhoneForAuth(phone);
+      const { error } = await supabase.auth.verifyOtp({ phone: formatted, token: otpCode, type: "sms" });
+      if (error) throw error;
+      // Boot effect will navigate
+    } catch (err) {
+      setError(err.message || (isHe ? "קוד לא נכון" : "Invalid code"));
+      setLoading(false);
+    }
+  };
+
   const inputStyle = {
     padding: "13px 15px", borderRadius: 12, border: "1.5px solid var(--border)",
     background: "var(--white)", fontSize: 15, color: "var(--dark)", outline: "none", fontFamily: "inherit",
@@ -286,6 +328,73 @@ export default function AuthScreen({ onBack, lang = "en" }) {
     );
   }
 
+  // ── Phone: Enter number ──
+  if (mode === "phone") {
+    return (
+      <div style={{
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font,
+      }} dir={dir}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+        <p style={{ fontSize: 15, color: "var(--warm)", fontWeight: 400, marginBottom: 36 }}>
+          {isHe ? "כניסה עם מספר טלפון" : "Sign in with phone number"}
+        </p>
+        <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
+          <input type="tel" placeholder={isHe ? "מספר טלפון (05X...)" : "Phone number"} value={phone}
+            onChange={(e) => setPhone(e.target.value)} dir="ltr" required
+            autoComplete="tel" style={inputStyle} />
+          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          <button onClick={handlePhoneSend} disabled={loading}
+            style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
+            {loading ? (isHe ? "שולח..." : "Sending...") : (isHe ? "שלחו קוד" : "Send code")}
+          </button>
+          <button onClick={() => { setMode("signin"); setError(null); }}
+            style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8 }}>
+            {isHe ? "→ חזרה להתחברות" : "← Back to sign in"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Phone: Enter OTP ──
+  if (mode === "phone-otp") {
+    return (
+      <div style={{
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font, textAlign: "center",
+      }} dir={dir}>
+        <div style={{ fontSize: 48, marginBottom: 20 }}>📱</div>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontWeight: 300,
+          fontSize: 28, letterSpacing: "0.18em", color: "var(--dark)", marginBottom: 12,
+        }}>
+          {isHe ? "הזינו את הקוד" : "Enter the code"}
+        </div>
+        <p style={{ fontSize: 15, color: "var(--warm)", lineHeight: 1.6, maxWidth: 300, marginBottom: 24 }}>
+          {isHe ? `שלחתי קוד SMS ל-${phone}` : `I sent an SMS code to ${phone}`}
+        </p>
+        <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
+          <input type="text" inputMode="numeric" placeholder={isHe ? "קוד בן 6 ספרות" : "6-digit code"} value={otpCode}
+            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} dir="ltr"
+            autoComplete="one-time-code" maxLength={6}
+            style={{ ...inputStyle, textAlign: "center", fontSize: 24, letterSpacing: "0.3em" }} />
+          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          <button onClick={handlePhoneVerify} disabled={loading || otpCode.length < 6}
+            style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading || otpCode.length < 6 ? 0.5 : 1 }}>
+            {loading ? (isHe ? "מאמת..." : "Verifying...") : (isHe ? "אישור" : "Verify")}
+          </button>
+          <button onClick={() => { setMode("phone"); setError(null); setOtpCode(""); }}
+            style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8 }}>
+            {isHe ? "→ שלחו קוד חדש" : "← Send new code"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── Sign in / Sign up form ──
   return (
     <div style={{
@@ -363,6 +472,12 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
           </svg>
           {isHe ? "המשך עם Google" : "Continue with Google"}
+        </button>
+
+        <button type="button" onClick={() => { setMode("phone"); setError(null); }}
+          style={{ padding: "13px 15px", borderRadius: 14, background: "var(--white)", border: "1.5px solid var(--border)", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s" }}>
+          <span style={{ fontSize: 18 }}>📱</span>
+          {isHe ? "המשך עם מספר טלפון" : "Continue with phone number"}
         </button>
       </form>
 

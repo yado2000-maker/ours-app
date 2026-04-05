@@ -6,6 +6,7 @@ import buildPrompt from "./lib/prompt.js";
 import Setup from "./components/Setup.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
 import WelcomeScreen from "./components/WelcomeScreen.jsx";
+import LandingPage from "./components/LandingPage.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
@@ -65,7 +66,13 @@ export default function Sheli() {
     console.log("[Boot]", currentId ? `session: ${currentId}` : "no session");
 
     if (!session) {
-      setScreen("welcome");
+      // ?source=wa → skip landing page, go straight to auth (Path B: WhatsApp dashboard users)
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("source") === "wa") {
+        setScreen("auth");
+      } else {
+        setScreen("welcome");
+      }
       return;
     }
 
@@ -123,7 +130,7 @@ export default function Sheli() {
       console.log("[Boot] No hhId, running auto-detect...");
       try {
         const detected = await Promise.race([
-          detectHousehold(session.user.id, session.user.email),
+          detectHousehold(session.user.id, session.user.email, session.user.phone),
           new Promise(resolve => setTimeout(() => { console.warn("[Boot] Auto-detect timeout"); resolve(null); }, 5000)),
         ]);
         if (detected) {
@@ -509,8 +516,8 @@ export default function Sheli() {
   );
 
   if (screen === "welcome") return (
-    <WelcomeScreen
-      key="welcome-screen"
+    <LandingPage
+      key="landing-page"
       onGetStarted={() => setScreen("auth")}
       onSignIn={() => setScreen("auth")}
     />

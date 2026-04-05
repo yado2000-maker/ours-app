@@ -8,7 +8,27 @@ import { supabase } from "./supabase.js";
  */
 const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
 
-export async function detectHousehold(userId, userEmail) {
+export async function detectHousehold(userId, userEmail, userPhone) {
+  // Method 0: Check whatsapp_member_mapping by phone (highest priority for WA users)
+  if (userPhone) {
+    try {
+      // Normalize phone: strip +, leading 0 → 972
+      const digits = userPhone.replace(/\D/g, "");
+      const normalized = digits.startsWith("972") ? digits : digits.startsWith("0") ? "972" + digits.slice(1) : digits;
+
+      const { data: phoneMapping } = await withTimeout(
+        supabase.from("whatsapp_member_mapping").select("household_id").eq("phone_number", normalized).limit(1).single(),
+        3000
+      ) || {};
+
+      if (phoneMapping?.household_id) {
+        return await withTimeout(loadHouseholdInfo(phoneMapping.household_id), 3000);
+      }
+    } catch {
+      // No phone mapping found — continue
+    }
+  }
+
   // Method 1: Check household_members for this user_id (3s timeout)
   try {
     const { data: membership } = await withTimeout(
@@ -36,9 +56,6 @@ export async function detectHousehold(userId, userEmail) {
   } catch {
     // Not a creator — continue
   }
-
-  // Methods 3-4 removed: they grabbed ANY household without ownership check.
-  // Only Methods 1-2 (membership + created_by) are safe.
 
   return null;
 }

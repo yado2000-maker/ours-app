@@ -60,8 +60,9 @@
   - **Unknown direct user:** Gets welcome message explaining how to connect via group or app.
 - **Whapi.Cloud sends outgoing messages back as webhooks** — must skip bot's own phone number early in handler
 - **Bot phone: 972555175553** — set as `BOT_PHONE_NUMBER` env var in Edge Function secrets
-- **Edge Function deployment: single inlined file** — Supabase Edge Functions don't support cross-function shared imports. The `_shared/` files are for development reference; the deployed `index.inlined.ts` has everything inlined (~1,800 lines).
-- **Deploying: Dashboard paste (not CLI)** — File is too large (65KB) for MCP `deploy_edge_function`. Supabase CLI blocked by Windows Security. Deploy via: Dashboard → Edge Functions → whatsapp-webhook → Code → select all → paste `index.inlined.ts` → Deploy updates. Ensure Settings → Verify JWT is OFF.
+- **WhatsApp @mention = numeric LID** — `@שלי` in the group becomes `@138844095676524` in message text (WhatsApp Linked Device ID). Detection must match LID, phone number, Hebrew text "שלי", AND English spelling variants (Sheli/Shelly/Shelley). Bot LID: `138844095676524`, configurable via `BOT_WHATSAPP_LID` env var.
+- **Edge Function deployment: single inlined file** — Supabase Edge Functions don't support cross-function shared imports. The `_shared/` files are for development reference; the deployed `index.inlined.ts` has everything inlined (~2,130 lines).
+- **Deploying: Cursor paste to Dashboard** — File is ~82KB, too large for MCP `deploy_edge_function` or Notepad. Open in Cursor/VS Code → Ctrl+A, Ctrl+C → Supabase Dashboard → Code tab → paste → Deploy. Ensure Settings → Verify JWT is OFF.
 - **Supabase Management API** — `curl -H "Authorization: Bearer sbp_..." https://api.supabase.com/v1/projects/wzwwtghtnkapdwlgnrxr/functions` works for listing/metadata but not source upload.
 - **Shopping message batching** — 5s window for rapid-fire shopping items. Uses `amILastPendingMessage()` (checks by messageId, NOT timestamp — avoids clock skew). 30s TTL prevents stale pending messages.
 - **Group lifecycle management** — Bot auto-setup on group join (intro message, create household, auto-link via phone mapping, pre-map participants). Member add/remove handlers. Bot remove = soft-disable.
@@ -71,11 +72,12 @@
 - **Hebrew NLP patterns in prompt** — iteratively improved. Each misclassification becomes a new pattern.
 - **"NOT A TASK" distinction** — requests for info ("שלח קוד", "מה הסיסמא") are NOT tasks. Only household chores/to-dos.
 - **Duplicate handling** — bot asks "כבר ברשימה, להוסיף עוד?" instead of silently adding or ignoring
-- **Whapi trial: 4 days, 5 chats, 150 msgs/day** — upgrade to $29/mo or migrate to Meta Cloud API
+- **Whapi Sandbox (free):** 150 msgs/day, 5 chats, 1K requests. Sufficient for testing. Upgrade to $12/mo for production or migrate to Meta Cloud API.
 - **Bot identity: "Sheli" (שלי)** — feminine Hebrew verbs (הוספתי, בדקתי). Classifier prompt updated from "Ours" to "Sheli".
 - **Anthropic API Tier 1: 5 req/min** — Batch eval runner uses 5-at-a-time with 65s pause between batches. 120 cases take ~26 min. Add $5 credits to get Tier 2 (50 req/min).
 - **Only Python available in bash** — No Node.js/Deno in Git Bash on this machine. Test runners must be Python. `npm`/`node` only work from PowerShell.
 - **Inlined file is what's deployed** — Always edit `index.inlined.ts` for production changes. The modular `_shared/` files are dev reference. Must regenerate inlined file after any modular change.
+- **NEVER use `sed -i` on source files** — Windows Git Bash `sed` corrupts file encoding invisibly (bash reads OK, editors show empty). Use `iconv` or the Edit tool for line-ending changes.
 
 ## WhatsApp Bot — Two-Stage Pipeline (deployed 2026-04-03)
 
@@ -91,7 +93,7 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 - **Cost:** ~$0.50/household/month (down from ~$1.62 all-Sonnet). ~70% reduction.
 - **Accuracy:** 91.7% on 120 test cases (target was 85%). `ignore` 100%, `add_event` 100%, `question` 100%.
 
-### 9 Intent Types
+### 10 Intent Types
 | Intent | Action | DB Operation |
 |--------|--------|-------------|
 | `ignore` | No action, no reply | — |
@@ -103,28 +105,30 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 | `claim_task` | Self-assign task | UPDATE tasks.assigned_to (via assign_task action) |
 | `question` | Reply with household state | Sonnet reply only, no DB write |
 | `info_request` | Reply "I don't have that info" | Sonnet reply only, no DB write |
+| `correct_bot` | Undo wrong + redo correct | DELETE + INSERT + log to classification_corrections |
 
 ### Classification values in `whatsapp_messages.classification`
-`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`
+`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`
 
-### `whatsapp_messages` batch columns (added 2026-04-03)
+### `whatsapp_messages` columns (learning system, added 2026-04-04)
 - `batch_id` (TEXT) — groups messages into shopping batches
 - `batch_status` (TEXT) — `pending` → `processing` → `processed` (or `superseded`)
-- `classification_data` (JSONB) — full Haiku output (planned, Phase 1 of learning system)
+- `classification_data` (JSONB) — full Haiku output stored on every classification
 
 ### Known weaknesses
 - **`complete_task` at 60%** — implicit Hebrew completions ("בוצע", "טיפלתי בזה") without conversational context are genuinely ambiguous. Caught by Sonnet escalation in production.
 - **Full English in Hebrew group** — "pasta and cheese" classified as ignore. Rare edge case.
-- **Compound Hebrew names** — mostly fixed with prompt examples, but novel compounds may still split. Each correction improves the prompt.
+- **Compound Hebrew names** — mostly fixed with prompt examples, but novel compounds may still split. Each correction now auto-learns via `household_patterns`.
 
-### Learning System (designed, implementation pending)
+### Learning System (implemented 2026-04-04)
 - **Design:** `docs/plans/2026-04-03-learning-system-design.md`
-- **Plan:** `docs/plans/2026-04-03-learning-system-plan.md` (10 tasks, 3 phases)
-- **Stream A (global):** Weekly Claude review of corrections → propose prompt improvements → founder approves
-- **Stream B (per-family):** `household_patterns` table → nicknames, time expressions, category preferences → injected into Haiku prompt (~200 extra tokens)
-- **Feedback signals:** Implicit (delete within 5 min), explicit ("תמחקי"), @שלי corrections ("@שלי התכוונתי לשמן זית")
-- **New intent planned:** `correct_bot` — undo wrong action + redo correctly + log for learning
-- **New tables planned:** `classification_corrections`, `household_patterns`, `global_prompt_proposals`
+- **Plan:** `docs/plans/2026-04-03-learning-system-plan.md` (10 tasks, 3 phases — all complete)
+- **@שלי direct address:** Detected pre-classifier. Forces a reply in ALL routing branches (ignore, low-conf, medium-conf). Strips mention before classification.
+- **`correct_bot` intent:** No confidence threshold — corrections always routed to `handleCorrection()` which does undo → re-classify correction_text → redo → log.
+- **Quick undo:** "תמחקי"/"בטלי"/"לא נכון" within 60s of bot action undoes it instantly (pre-classifier, no Haiku call).
+- **Stream B (per-family):** `household_patterns` table → nicknames, time expressions, category preferences, compound names → injected into Haiku prompt as FAMILY PATTERNS section (~200 extra tokens). Auto-derived from corrections.
+- **Stream A (global):** Weekly Claude review of `classification_corrections` → `global_prompt_proposals` (future, not yet implemented).
+- **New tables:** `classification_corrections`, `household_patterns`, `global_prompt_proposals`
 
 ## RTL / Hebrew Design Rules
 - `dir="rtl"` on parent flips flexbox automatically — most layouts "just work"
@@ -166,6 +170,6 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 ## Key Business Decisions
 - **WhatsApp-first:** Bot in family group is primary interface, web app is dashboard
 - **Freemium:** 30 free actions/month, then upgrade prompt IN the WhatsApp group
-- **Pricing:** Free / Premium 19.90 ILS / Family+ 34.90 ILS
+- **Pricing:** Free / Premium 9.90 ILS / Family+ 24.90 ILS
 - **Israel-first:** Hebrew primary, expand to US via Facebook Messenger (free bot API)
 - **Interim WhatsApp API:** Whapi.Cloud ($29/mo) → migrate to Meta Cloud API (official Groups API, Oct 2025)
