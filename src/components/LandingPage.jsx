@@ -2,7 +2,7 @@ import { useState } from "react";
 import "../styles/landing.css";
 import { ShoppingFeatureIcon, CalendarFeatureIcon, ChoresFeatureIcon, ChevronRightIcon } from "./Icons.jsx";
 
-const WA_LINK = "https://wa.me/972555175553";
+const WA_LINK = "https://wa.me/972555175553?text=" + encodeURIComponent("היי שלי!");
 
 const MOCK_MESSAGES = [
   { sender: "אמא", text: "חלב, ביצים ולחם", type: "user" },
