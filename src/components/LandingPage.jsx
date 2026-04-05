@@ -115,6 +115,12 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
           <WhatsAppIcon />
           הוסיפו את שלי לקבוצה
         </a>
+
+        <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-qr">
+          <img src="/qr-whatsapp.svg" alt="QR code to add Sheli on WhatsApp" width="140" height="140" />
+          <span className="landing-qr-label">או סרקו את הקוד</span>
+        </a>
+
         <button className="landing-signin" onClick={onSignIn}>
           יש לי כבר חשבון &larr; כניסה
         </button>
@@ -122,7 +128,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
       {/* ─── Features ─── */}
       <section className="landing-features">
-        <h2 className="landing-section-title">מה שלי יודעת לעשות</h2>
+        <h2 className="landing-section-title">מה שלי יודעת לעשות?</h2>
         <div className="feature-cards">
           {FEATURES.map((f, i) => (
             <div key={i} className="feature-card">
@@ -140,7 +146,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
       {/* ─── How It Works ─── */}
       <section className="landing-steps">
-        <h2 className="landing-section-title">איך זה עובד</h2>
+        <h2 className="landing-section-title">איך זה עובד?</h2>
         <div className="steps-list">
           {STEPS.map((s, i) => (
             <div key={i} className="step-item">
