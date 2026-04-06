@@ -338,6 +338,16 @@ export default function Sheli() {
     lastSaveRef.current = Date.now();
     supabase.from("household_members").update({ display_name: newName }).eq("id", user.id).catch(e => console.error("[renameUser]", e));
   };
+  const handleRenameMember = async (memberId, newName) => {
+    if (!newName || !household) return;
+    const updatedMembers = household.members.map(m =>
+      m.id === memberId ? { ...m, name: newName } : m
+    );
+    const updatedHh = { ...household, members: updatedMembers };
+    setHouseholdS(updatedHh);
+    lastSaveRef.current = Date.now();
+    supabase.from("household_members").update({ display_name: newName }).eq("id", memberId).catch(e => console.error("[renameMember]", e));
+  };
 
   const handleRenameHousehold = async (newName) => {
     if (!newName || !household) return;
@@ -667,6 +677,7 @@ export default function Sheli() {
           isFounder={isFounder}
           onClose={() => setShowMenu(false)}
           onRenameUser={handleRenameUser}
+          onRenameMember={handleRenameMember}
           onRenameHousehold={handleRenameHousehold}
           onAddMember={handleAddMember}
           onRemoveMember={handleRemoveMember}

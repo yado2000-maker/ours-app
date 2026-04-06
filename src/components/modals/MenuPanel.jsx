@@ -9,6 +9,7 @@ export default function MenuPanel({
   isFounder,
   onClose,
   onRenameUser,
+  onRenameMember,
   onRenameHousehold,
   onAddMember,
   onRemoveMember,
@@ -26,6 +27,8 @@ export default function MenuPanel({
   const [copied, setCopied] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState(null); // M12: confirm before remove
+  const [editingMemberId, setEditingMemberId] = useState(null);
+  const [editMemberName, setEditMemberName] = useState("");
 
   const t = T[lang] || T.en;
   const dir = lang === "he" ? "rtl" : "ltr";
@@ -303,33 +306,56 @@ export default function MenuPanel({
                   gap: 4,
                   padding: "5px 10px",
                   borderRadius: 100,
-                  border: "1.5px solid var(--border)",
+                  border: `1.5px solid ${m.id === user?.id ? "var(--primary)" : "var(--border)"}`,
                   background: "var(--white)",
                   fontSize: 13,
                   color: "var(--warm)",
                 }}
               >
-                <span>{m.name}</span>
-                {m.id === user?.id && (
-                  <button
-                    onClick={() => {
-                      setNewName(m.name);
-                      setEditingName(true);
+                {editingMemberId === m.id ? (
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input
+                      value={editMemberName}
+                      onChange={(e) => setEditMemberName(e.target.value)}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && editMemberName.trim()) {
+                          if (m.id === user?.id) { onRenameUser(editMemberName.trim()); }
+                          else { onRenameMember?.(m.id, editMemberName.trim()); }
+                          setEditingMemberId(null);
+                        }
+                        if (e.key === "Escape") setEditingMemberId(null);
+                      }}
+                      style={{ width: 70, padding: "2px 6px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit", color: "var(--dark)", outline: "none", textAlign: "start" }}
+                      dir={dir}
+                    />
+                    <button onClick={() => {
+                      if (editMemberName.trim()) {
+                        if (m.id === user?.id) { onRenameUser(editMemberName.trim()); }
+                        else { onRenameMember?.(m.id, editMemberName.trim()); }
+                      }
+                      setEditingMemberId(null);
                     }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--muted)",
-                      fontSize: 10,
-                      cursor: "pointer",
-                      padding: 0,
-                      lineHeight: 1,
-                    }}
-                  >
-                    ✏️
-                  </button>
+                      style={{ background: "var(--primary)", color: "#fff", border: "none", fontSize: 10, borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: "inherit" }}>
+                      ✓
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span>{m.name}</span>
+                    {/* Edit: self always, others if founder */}
+                    {(m.id === user?.id || isFounder) && (
+                      <button
+                        onClick={() => { setEditMemberName(m.name); setEditingMemberId(m.id); }}
+                        style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 10, cursor: "pointer", padding: 0, lineHeight: 1 }}
+                      >
+                        ✏️
+                      </button>
+                    )}
+                  </>
                 )}
-                {isFounder && m.id !== user?.id && (
+                {/* Remove: founder only, not self, not while editing */}
+                {isFounder && m.id !== user?.id && editingMemberId !== m.id && (
                   removingMemberId === m.id ? (
                     <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
                       <button onClick={() => { onRemoveMember(m.id); setRemovingMemberId(null); }}
