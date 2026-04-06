@@ -1,0 +1,11 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sheli-grad" x1="0" y1="0" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E8725C"/>
+      <stop offset="100%" stop-color="#D4507A"/>
+    </linearGradient>
+    <filter id="text-shadow"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.15"/></filter>
+  </defs>
+  <rect width="192" height="192" rx="44" fill="url(#sheli-grad)"/>
+  <text x="96" y="118" text-anchor="middle" font-family="Nunito, sans-serif" font-weight="800" font-size="58" fill="white" letter-spacing="3" filter="url(#text-shadow)">sheli</text>
+</svg>

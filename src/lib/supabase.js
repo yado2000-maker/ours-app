@@ -28,7 +28,8 @@ export const lsGet = (key) => { try { return JSON.parse(localStorage.getItem(key
 export const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
 
 export const uid8 = () => Math.random().toString(36).slice(2, 10);
-export const uid  = () => Math.random().toString(36).slice(2, 6);
+// M15 fix: uid() was 4-char (~1.6M combos). Now 8-char (~2.8T combos) to prevent collisions.
+export const uid  = () => Math.random().toString(36).slice(2, 10);
 
 // ─── Normalized table functions (v2) ───
 
@@ -67,7 +68,7 @@ export const saveShoppingItem = async (hhId, item) => {
     household_id: hhId,
     name: item.name,
     qty: item.qty || null,
-    category: item.category || "Other",
+    category: item.category || "אחר",
     got: item.got || false,
   });
   if (error) console.error("[saveShoppingItem]", error);
@@ -101,31 +102,54 @@ export const clearGotShopping = async (hhId) => {
   await supabase.from("shopping_items").delete().eq("household_id", hhId).eq("got", true);
 };
 
+// ─── Safe bulk-write: upsert all items, then delete orphans ───
+// This avoids the delete-then-insert race that loses data if the insert fails.
+// Pattern: upsert the full list, then delete any rows NOT in the list.
+
 export const saveAllTasks = async (hhId, tasks) => {
-  await supabase.from("tasks").delete().eq("household_id", hhId);
-  if (tasks.length === 0) return;
+  if (tasks.length === 0) {
+    await supabase.from("tasks").delete().eq("household_id", hhId);
+    return;
+  }
   const rows = tasks.map(t => ({ household_id: hhId, ...toDb(t, TASK_MAP), done: t.done || false }));
-  const { error } = await supabase.from("tasks").insert(rows);
-  if (error) console.error("[saveAllTasks]", error);
+  const { error: upsertErr } = await supabase.from("tasks").upsert(rows);
+  if (upsertErr) { console.error("[saveAllTasks] upsert failed:", upsertErr); return; }
+  // Only delete orphans AFTER upsert succeeds
+  const ids = tasks.map(t => t.id).filter(Boolean);
+  if (ids.length > 0) {
+    await supabase.from("tasks").delete().eq("household_id", hhId).not("id", "in", `(${ids.join(",")})`);
+  }
 };
 
 export const saveAllShopping = async (hhId, items) => {
-  await supabase.from("shopping_items").delete().eq("household_id", hhId);
-  if (items.length === 0) return;
+  if (items.length === 0) {
+    await supabase.from("shopping_items").delete().eq("household_id", hhId);
+    return;
+  }
   const rows = items.map(s => ({
     id: s.id, household_id: hhId, name: s.name,
-    qty: s.qty || null, category: s.category || "Other", got: s.got || false,
+    qty: s.qty || null, category: s.category || "אחר", got: s.got || false,
   }));
-  const { error } = await supabase.from("shopping_items").insert(rows);
-  if (error) console.error("[saveAllShopping]", error);
+  const { error: upsertErr } = await supabase.from("shopping_items").upsert(rows);
+  if (upsertErr) { console.error("[saveAllShopping] upsert failed:", upsertErr); return; }
+  const ids = items.map(s => s.id).filter(Boolean);
+  if (ids.length > 0) {
+    await supabase.from("shopping_items").delete().eq("household_id", hhId).not("id", "in", `(${ids.join(",")})`);
+  }
 };
 
 export const saveAllEvents = async (hhId, events) => {
-  await supabase.from("events").delete().eq("household_id", hhId);
-  if (events.length === 0) return;
+  if (events.length === 0) {
+    await supabase.from("events").delete().eq("household_id", hhId);
+    return;
+  }
   const rows = events.map(e => ({ household_id: hhId, ...toDb(e, EVENT_MAP) }));
-  const { error } = await supabase.from("events").insert(rows);
-  if (error) console.error("[saveAllEvents]", error);
+  const { error: upsertErr } = await supabase.from("events").upsert(rows);
+  if (upsertErr) { console.error("[saveAllEvents] upsert failed:", upsertErr); return; }
+  const ids = events.map(e => e.id).filter(Boolean);
+  if (ids.length > 0) {
+    await supabase.from("events").delete().eq("household_id", hhId).not("id", "in", `(${ids.join(",")})`);
+  }
 };
 
 export const loadMessages = async (hhId, userId) => {

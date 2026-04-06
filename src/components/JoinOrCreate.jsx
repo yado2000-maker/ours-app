@@ -420,17 +420,7 @@ export default function JoinOrCreate({
         </p>
       </div>
 
-      {/* Inline keyframes — injected once */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
+      {/* L14: keyframes already defined in app.css — removed inline duplicate */}
     </div>
   );
 }

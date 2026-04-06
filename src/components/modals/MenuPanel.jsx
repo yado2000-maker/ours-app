@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import T from "../../locales/index.js";
 
 export default function MenuPanel({
@@ -25,10 +25,18 @@ export default function MenuPanel({
   const [newMemberName, setNewMemberName] = useState("");
   const [copied, setCopied] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState(null); // M12: confirm before remove
 
   const t = T[lang] || T.en;
   const dir = lang === "he" ? "rtl" : "ltr";
   const isHe = lang === "he";
+
+  // M5 fix: close on Escape key
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
   const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
   const joinUrl =
     typeof window !== "undefined"
@@ -322,21 +330,34 @@ export default function MenuPanel({
                   </button>
                 )}
                 {isFounder && m.id !== user?.id && (
-                  <button
-                    onClick={() => onRemoveMember(m.id)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--muted)",
-                      fontSize: 14,
-                      cursor: "pointer",
-                      padding: 0,
-                      lineHeight: 1,
-                      opacity: 0.5,
-                    }}
-                  >
-                    ×
-                  </button>
+                  removingMemberId === m.id ? (
+                    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                      <button onClick={() => { onRemoveMember(m.id); setRemovingMemberId(null); }}
+                        style={{ background: "#c33", color: "#fff", border: "none", fontSize: 10, borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: "inherit" }}>
+                        {isHe ? "הסירו" : "Remove"}
+                      </button>
+                      <button onClick={() => setRemovingMemberId(null)}
+                        style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 10, cursor: "pointer", fontFamily: "inherit", padding: "2px 4px" }}>
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setRemovingMemberId(m.id)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--muted)",
+                        fontSize: 14,
+                        cursor: "pointer",
+                        padding: 0,
+                        lineHeight: 1,
+                        opacity: 0.5,
+                      }}
+                    >
+                      ×
+                    </button>
+                  )
                 )}
               </div>
             ))}
@@ -495,10 +516,12 @@ export default function MenuPanel({
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <button
-            onClick={() => {
-              navigator.clipboard?.writeText(joinUrl);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(joinUrl);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch { /* clipboard not available (HTTP/iframe) — don't show false success */ }
             }}
             style={{
               flex: 1,

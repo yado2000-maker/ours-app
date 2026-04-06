@@ -38,7 +38,10 @@ export default function Sheli() {
   const [busy, setBusy]           = useState(false);
   const [showMenu, setShowMenu]   = useState(false);
   const [theme, setTheme]         = useState(() => lsGet("sheli-theme") || "auto");
-  const isFounder = !!lsGet("sheli-founder");
+  const [pendingDelete, setPendingDelete] = useState(null); // M4: {type, id} — confirm before delete
+  const [dataLoaded, setDataLoaded]     = useState(false); // M9: false until first household load
+  // L2 fix: convert to state so it reacts to changes (e.g. after handleSetup)
+  const [isFounder, setIsFounder] = useState(() => !!lsGet("sheli-founder"));
   const { session, user: authUser, profile, loading: authLoading, signOut } = useAuth();
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
@@ -118,7 +121,7 @@ export default function Sheli() {
               if (stillExists) {
                 setUser(stillExists);
                 lsSet("sheli-user", stillExists);
-                setScreen("chat"); return;
+                setDataLoaded(true); setScreen("chat"); return;
               }
             }
             setScreen("pick"); return;
@@ -200,25 +203,33 @@ export default function Sheli() {
     if (!hhId) return;
     const authUserId = session?.user?.id;
 
+    // M1 fix: per-table reloads instead of reloading all 5 tables for each change
+    const TASK_MAP = { assigned_to: 'assignedTo', completed_by: 'completedBy', completed_at: 'completedAt' };
+    const EVENT_MAP = { assigned_to: 'assignedTo', scheduled_for: 'scheduledFor' };
+    const fromDb = (obj, map) => { const rev = Object.fromEntries(Object.entries(map).map(([k,v])=>[v,k])); const out={}; for(const[k,v]of Object.entries(obj)){out[Object.entries(map).find(([mk,mv])=>mv===k)?.[0]||Object.entries(rev).find(([rk,rv])=>rv===k)?.[0]||k]=v;} return out; };
+
     const reloadTasks = async () => {
       if (Date.now() - lastSaveRef.current < 3000) return;
-      const v2 = await loadHousehold(hhId);
-      if (v2) setTasksS(v2.tasks);
+      const { data } = await supabase.from("tasks").select("*").eq("household_id", hhId);
+      if (data) setTasksS(data.map(t => { const o = {...t}; if(o.assigned_to){o.assignedTo=o.assigned_to;delete o.assigned_to;} if(o.completed_by){o.completedBy=o.completed_by;delete o.completed_by;} if(o.completed_at){o.completedAt=o.completed_at;delete o.completed_at;} return o; }));
     };
     const reloadShopping = async () => {
       if (Date.now() - lastSaveRef.current < 3000) return;
-      const v2 = await loadHousehold(hhId);
-      if (v2) setShoppingS(v2.shopping);
+      const { data } = await supabase.from("shopping_items").select("*").eq("household_id", hhId);
+      if (data) setShoppingS(data);
     };
     const reloadEvents = async () => {
       if (Date.now() - lastSaveRef.current < 3000) return;
-      const v2 = await loadHousehold(hhId);
-      if (v2) setEventsS(v2.events);
+      const { data } = await supabase.from("events").select("*").eq("household_id", hhId);
+      if (data) setEventsS(data.map(e => { const o={...e}; if(o.assigned_to){o.assignedTo=o.assigned_to;delete o.assigned_to;} if(o.scheduled_for){o.scheduledFor=o.scheduled_for;delete o.scheduled_for;} return o; }));
     };
     const reloadHousehold = async () => {
       if (Date.now() - lastSaveRef.current < 3000) return;
-      const v2 = await loadHousehold(hhId);
-      if (v2) setHouseholdS(v2.hh);
+      const [hhRes, memRes] = await Promise.all([
+        supabase.from("households_v2").select("*").eq("id", hhId).single(),
+        supabase.from("household_members").select("*").eq("household_id", hhId),
+      ]);
+      if (hhRes.data) setHouseholdS({ id: hhRes.data.id, name: hhRes.data.name, lang: hhRes.data.lang || "he", members: (memRes.data||[]).map(m=>({id:m.id,name:m.display_name,userId:m.user_id})) });
     };
     const reloadMessages = async () => {
       if (!authUserId || Date.now() - lastSaveRef.current < 3000) return;
@@ -261,6 +272,7 @@ export default function Sheli() {
     hh.id = hhId;
     lsSet("sheli-hhid", hhId);
     lsSet("sheli-founder", true);
+    setIsFounder(true);
 
     setHouseholdS(hh); setLang(hh.lang || "en");
     setTasksS([]); setShoppingS([]); setEventsS([]);
@@ -271,20 +283,28 @@ export default function Sheli() {
     }
     setScreen("connect-wa");
 
-    const authUserId = session?.user?.id;
-    supabase.from("households_v2").insert({
-      id: hhId, name: hh.name, lang: hh.lang || "he", created_by: authUserId,
-    }).catch(e => console.warn("[Setup] v2:", e));
+    try {
+      const authUserId = session?.user?.id;
+      // H3 fix: AWAIT household insert before members (FK dependency)
+      const { error: hhErr } = await supabase.from("households_v2").insert({
+        id: hhId, name: hh.name, lang: hh.lang || "he", created_by: authUserId,
+      });
+      if (hhErr) console.warn("[Setup] v2:", hhErr);
 
-    if (founder) {
-      await supabase.from("household_members").insert({
-        household_id: hhId, display_name: founder.name, role: "founder", user_id: authUserId,
-      }).catch(e => console.warn("[Setup] founder:", e));
-    }
-    for (const member of hh.members.slice(1)) {
-      supabase.from("household_members").insert({
-        household_id: hhId, display_name: member.name, role: "member",
-      }).catch(e => console.warn("[Setup] member:", e));
+      // H4 fix: pass generated ID so local state matches DB
+      if (founder) {
+        await supabase.from("household_members").insert({
+          id: founder.id, household_id: hhId, display_name: founder.name, role: "founder", user_id: authUserId,
+        }).catch(e => console.warn("[Setup] founder:", e));
+      }
+      for (const member of hh.members.slice(1)) {
+        supabase.from("household_members").insert({
+          id: member.id, household_id: hhId, display_name: member.name, role: "member",
+        }).catch(e => console.warn("[Setup] member:", e));
+      }
+    } finally {
+      // H1 fix: always reset so setup can run again after doReset
+      setupRunning.current = false;
     }
   };
 
@@ -384,14 +404,22 @@ export default function Sheli() {
     const updated = n.find(x => x.id === id);
     if (hhId && updated) saveShoppingItem(hhId, updated);
   };
+  // M4 fix: two-tap delete — first tap shows "Sure?", second tap deletes
   const deleteItem = async (type, id) => {
+    if (!pendingDelete || pendingDelete.type !== type || pendingDelete.id !== id) {
+      setPendingDelete({ type, id });
+      // Auto-clear after 3 seconds if user doesn't confirm
+      setTimeout(() => setPendingDelete(prev => prev?.id === id ? null : prev), 3000);
+      return;
+    }
+    setPendingDelete(null);
     const hhId = lsGet("sheli-hhid");
     lastSaveRef.current = Date.now();
     if (type === "task") {
-      setTasksS(tasks.filter(x => x.id !== id));
+      setTasksS(tasksRef.current.filter(x => x.id !== id));
       if (hhId) deleteTask(hhId, id);
     } else {
-      setShoppingS(shopping.filter(x => x.id !== id));
+      setShoppingS(shoppingRef.current.filter(x => x.id !== id));
       if (hhId) deleteShoppingItem(hhId, id);
     }
   };
@@ -431,11 +459,15 @@ export default function Sheli() {
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${session?.access_token || ""}`,
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1200,
-          system: buildPrompt(household, tasks, shopping, events, user, lang),
+          // H5 fix: use refs for fresh state (closures go stale on rapid sends)
+          system: buildPrompt(householdRef.current, tasksRef.current, shoppingRef.current, eventsRef.current, user, lang),
           messages: updated.slice(-20).map(m => ({ role: m.role, content: m.content })),
         })
       });
@@ -455,9 +487,10 @@ export default function Sheli() {
         const kept = current.filter(x => !aiIds.has(x.id) && x.id);
         return [...aiList, ...kept];
       };
-      const newTasks = mergeLists(parsed.tasks, tasks);
-      const newShop = mergeLists(parsed.shopping, shopping);
-      const newEvents = mergeLists(parsed.events, events);
+      // H5 fix: merge against fresh refs, not stale closures
+      const newTasks = mergeLists(parsed.tasks, tasksRef.current);
+      const newShop = mergeLists(parsed.shopping, shoppingRef.current);
+      const newEvents = mergeLists(parsed.events, eventsRef.current);
       setAllMsgs(finalAll); setTasksS(newTasks); setShoppingS(newShop); setEventsS(newEvents);
 
       lastSaveRef.current = Date.now();
@@ -508,9 +541,11 @@ export default function Sheli() {
   // ── Screens ──
   if (screen === "loading") return (
     <div style={{height:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--cream)",gap:8}}>
-      <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:28,letterSpacing:"0.22em",color:"var(--dark)",opacity:0.6}}>Sheli</div>
+      <div style={{fontFamily:"'Nunito',sans-serif",fontWeight:800,fontSize:30,letterSpacing:"0.04em",
+        background:"linear-gradient(135deg,#E8725C,#D4507A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",
+        filter:"drop-shadow(0 2px 4px rgba(0,0,0,0.08))"}}>sheli</div>
       <div style={{fontSize:13,color:"var(--muted)",fontWeight:300}}>
-        {T.en.loading}
+        {(T[lang] || T.en).loading}
       </div>
     </div>
   );
@@ -518,8 +553,8 @@ export default function Sheli() {
   if (screen === "welcome") return (
     <LandingPage
       key="landing-page"
-      onGetStarted={() => setScreen("auth")}
-      onSignIn={() => setScreen("auth")}
+      onGetStarted={() => { setLang("he"); setScreen("auth"); }}
+      onSignIn={() => { setLang("he"); setScreen("auth"); }}
     />
   );
 
@@ -610,7 +645,7 @@ export default function Sheli() {
                 // Messages already loaded from Supabase during boot
                 lsSet("sheli-user", m);
                 setUser(m);
-                setScreen("chat");
+                setDataLoaded(true); setScreen("chat");
               }}>
               {m.name}
             </button>
@@ -638,7 +673,17 @@ export default function Sheli() {
           onSwitchLang={switchLang}
           onSetTheme={setTheme}
           onSwitchUser={() => { setShowMenu(false); setUser(null); lsSet("sheli-user", null); setScreen("pick"); }}
-          onSignOut={async () => { await signOut(); setShowMenu(false); setScreen("welcome"); }}
+          onSignOut={async () => {
+            // H2 fix: clear all sheli-* keys to prevent cross-user data leak
+            localStorage.removeItem("sheli-hhid");
+            localStorage.removeItem("sheli-user");
+            localStorage.removeItem("sheli-founder");
+            localStorage.removeItem("sheli-onboarded");
+            localStorage.removeItem("sheli-msgs");
+            setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setIsFounder(false);
+            await signOut();
+            setShowMenu(false); setScreen("welcome");
+          }}
           onReset={doReset}
         />
       )}
@@ -654,7 +699,7 @@ export default function Sheli() {
             </button>
           </div>
           <div className="header-mid">
-            <div className="wordmark">Sheli</div>
+            <div className="wordmark">sheli</div>
           </div>
           <div className="header-side right" />
         </div>
@@ -709,11 +754,11 @@ export default function Sheli() {
           )}
 
           {tab === "tasks" && (
-            <TasksView tasks={tasks} user={user} lang={lang} onToggle={toggleTask} onClaim={claimTask} onDelete={deleteItem} onClearDone={clearDone} t={t} />
+            <TasksView tasks={tasks} user={user} lang={lang} onToggle={toggleTask} onClaim={claimTask} onDelete={deleteItem} onClearDone={clearDone} t={t} pendingDelete={pendingDelete} loading={!dataLoaded} />
           )}
 
           {tab === "shopping" && (
-            <ShoppingView shopping={shopping} onToggle={toggleShop} onDelete={deleteItem} onClearGot={clearGot} t={t} />
+            <ShoppingView shopping={shopping} onToggle={toggleShop} onDelete={deleteItem} onClearGot={clearGot} t={t} pendingDelete={pendingDelete} loading={!dataLoaded} />
           )}
 
           {tab === "week" && (

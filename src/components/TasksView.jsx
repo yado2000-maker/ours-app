@@ -10,7 +10,7 @@ const formatTs = (iso) => {
   return `${day} ${time}`;
 };
 
-export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDelete, onClearDone, t }) {
+export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDelete, onClearDone, t, pendingDelete, loading }) {
   const open = tasks.filter(x => !x.done);
   const done = tasks.filter(x => x.done);
   return (
@@ -19,7 +19,9 @@ export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDele
         <div className="list-title">{t.tasksTitle}</div>
         {done.length > 0 && <button className="clear-btn" onClick={onClearDone}>{t.clearDone}</button>}
       </div>
-      {tasks.length === 0 ? (
+      {loading ? (
+        <div className="list-empty"><div style={{fontSize:13,color:"var(--muted)",padding:24,textAlign:"center"}}>{(t.loading || "Loading...")}</div></div>
+      ) : tasks.length === 0 ? (
         <div className="list-empty">
           <div className="list-empty-icon"><EmptyTasksIcon size={44} /></div>
           <p className="list-empty-text">{t.tasksEmpty}</p>
@@ -45,7 +47,8 @@ export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDele
                       </div>
                     : <button className="take-btn" onClick={() => onClaim(task.id, user.name)}>{t.takeIt}</button>
                   }
-                  <button className="del-btn" onClick={() => onDelete("task", task.id)}><DeleteIcon size={14} /></button>
+                  <button className={`del-btn ${pendingDelete?.type === "task" && pendingDelete?.id === task.id ? "confirming" : ""}`}
+                      onClick={() => onDelete("task", task.id)}>{pendingDelete?.type === "task" && pendingDelete?.id === task.id ? "?" : <DeleteIcon size={14} />}</button>
                 </div>
               ))}
             </>
@@ -65,7 +68,8 @@ export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDele
                       <div className="task-text">{task.title}</div>
                       {who && <div className="task-meta">{ts ? t.completedAt(who, ts) : t.doneBy(who)}</div>}
                     </div>
-                    <button className="del-btn" onClick={() => onDelete("task", task.id)}><DeleteIcon size={14} /></button>
+                    <button className={`del-btn ${pendingDelete?.type === "task" && pendingDelete?.id === task.id ? "confirming" : ""}`}
+                      onClick={() => onDelete("task", task.id)}>{pendingDelete?.type === "task" && pendingDelete?.id === task.id ? "?" : <DeleteIcon size={14} />}</button>
                   </div>
                 );
               })}

@@ -21,12 +21,16 @@
 }
 
 .landing-wordmark {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 42px;
-  font-weight: 300;
-  letter-spacing: 0.22em;
-  color: var(--dark);
+  font-family: 'Nunito', sans-serif;
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: linear-gradient(135deg, #E8725C, #D4507A);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   margin: 0;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.08));
 }
 
 .landing-tagline {
@@ -159,7 +163,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #25D366;
+  background: #2D8E6F;
   color: #fff;
   font-family: 'Heebo', sans-serif;
   font-size: 16px;
@@ -175,7 +179,7 @@
 }
 
 .landing-cta:hover {
-  background: #20bd5a;
+  background: #257A5F;
 }
 
 .landing-cta:active {
@@ -186,6 +190,16 @@
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+}
+
+.landing-free-badge {
+  margin-top: 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--primary, #2AB673);
+  letter-spacing: 0;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .landing-qr {
@@ -267,7 +281,7 @@
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: var(--accent-bg, #faf0eb);
+  background: var(--primary-soft, rgba(42,182,115,0.10));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -315,7 +329,7 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--accent, #C4714A);
+  background: var(--primary, #E8725C);
   color: #fff;
   display: flex;
   align-items: center;

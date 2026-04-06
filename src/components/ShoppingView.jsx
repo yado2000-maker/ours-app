@@ -1,7 +1,7 @@
 import CheckSVG from "./CheckSVG.jsx";
 import { EmptyShoppingIcon, DeleteIcon } from "./Icons.jsx";
 
-export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t }) {
+export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t, pendingDelete, loading }) {
   const need = shopping.filter(s => !s.got);
   const got  = shopping.filter(s => s.got);
   const grouped = {};
@@ -14,7 +14,9 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
         <div className="list-title">{t.shopTitle}</div>
         {got.length > 0 && <button className="clear-btn" onClick={onClearGot}>{t.clearCart}</button>}
       </div>
-      {shopping.length === 0 ? (
+      {loading ? (
+        <div className="list-empty"><div style={{fontSize:13,color:"var(--muted)",padding:24,textAlign:"center"}}>{(t.loading || "Loading...")}</div></div>
+      ) : shopping.length === 0 ? (
         <div className="list-empty">
           <div className="list-empty-icon"><EmptyShoppingIcon size={44} /></div>
           <p className="list-empty-text">{t.shopEmpty}</p>
@@ -36,7 +38,8 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
                     <div className="shop-name">{s.name}</div>
                     {s.qty && <div className="shop-qty">{t.qtyLabel(s.qty)}</div>}
                   </div>
-                  <button className="del-btn" onClick={() => onDelete("shop", s.id)}><DeleteIcon size={14} /></button>
+                  <button className={`del-btn ${pendingDelete?.type === "shop" && pendingDelete?.id === s.id ? "confirming" : ""}`}
+                      onClick={() => onDelete("shop", s.id)}>{pendingDelete?.type === "shop" && pendingDelete?.id === s.id ? "?" : <DeleteIcon size={14} />}</button>
                 </div>
               ))}
             </div>
@@ -50,8 +53,9 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
                     <CheckSVG />
                   </div>
                   <div className="shop-text"><div className="shop-name">{s.name}</div></div>
-                  <div className="cat-badge">{s.category}</div>
-                  <button className="del-btn" onClick={() => onDelete("shop", s.id)}><DeleteIcon size={14} /></button>
+                  {s.category && <div className="cat-badge">{s.category}</div>}
+                  <button className={`del-btn ${pendingDelete?.type === "shop" && pendingDelete?.id === s.id ? "confirming" : ""}`}
+                      onClick={() => onDelete("shop", s.id)}>{pendingDelete?.type === "shop" && pendingDelete?.id === s.id ? "?" : <DeleteIcon size={14} />}</button>
                 </div>
               ))}
             </>

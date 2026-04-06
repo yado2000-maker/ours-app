@@ -4,8 +4,11 @@
 - **Frontend:** React 19 + Vite 8, deployed on Vercel (sheli.ai)
 - **Backend:** Supabase (project: wzwwtghtnkapdwlgnrxr, region: eu-central-2)
 - **AI:** Two-stage pipeline for WhatsApp bot (Haiku 4.5 classifier → Sonnet 4 reply generator); Sonnet 4 via /api/chat (web app)
-- **WhatsApp Bot:** Supabase Edge Function (whatsapp-webhook), Whapi.Cloud provider
-- **Auth:** Supabase Auth (Google OAuth + email/password)
+- **WhatsApp Bot:** Supabase Edge Function (whatsapp-webhook), Whapi.Cloud provider. Handles both group + 1:1 direct messages.
+- **Landing Page:** LandingPage.jsx replaces WelcomeScreen. Two-path routing: sheli.ai (cold traffic), ?source=wa (WA users skip to auth)
+- **1:1 Onboarding:** Bot handles direct messages (handleDirectMessage) with state machine (WELCOME→WAITING→ONBOARDED→ACTIVE) + pattern-based Q&A
+- **Auth:** Supabase Auth (Google OAuth + email/password + phone OTP via Twilio — not yet configured)
+- **Billing:** iCount (icount.co.il) — invoicing + CC processing + standing orders. API v3 at `api.icount.co.il/api/v3.php` (SID-based auth). Terminal not yet activated (beta mode).
 - **Bot phone:** +972 55-517-5553 (eSIM Plus virtual number, WhatsApp Business)
 
 ## Key Files
@@ -25,15 +28,24 @@
 - `supabase/functions/_shared/whatsapp-provider.ts` — Provider abstraction (Whapi.Cloud + Meta Cloud API)
 - `tests/classifier_eval.py` — Classifier eval runner (120 cases, Python, batch-of-5 for Tier 1 rate limits)
 - `tests/classifier-test-cases.ts` — 120 test fixtures for intent classifier (TypeScript reference)
+- `src/components/LandingPage.jsx` — Hebrew landing page (hero, WA mock, features, FAQ, QR code)
+- `src/styles/landing.css` — Landing page styles (mobile-first, RTL)
+- `public/qr-whatsapp.svg` — QR code linking to wa.me/972555175553
+- `supabase/functions/icount-webhook/index.ts` — iCount payment webhook handler
+- `docs/implementation-plan-v3.md` — **Active** implementation plan (replaces V2)
 
 ## Database: Normalized V2 Tables (migration completed 2026-04-02)
-- **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`
+- **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`, `onboarding_conversations`
+- `onboarding_conversations` — 1:1 chat state machine (phone, state, household_id, message_count, referral_code)
+- `whatsapp_config` added columns: `dashboard_link_sent`, `first_message_at`, `group_message_count`
+- `subscriptions` added column: `stripe_customer_id` (legacy name, used for any payment provider)
+- RPC: `increment_group_message_count(p_group_id)` — atomic counter for dashboard link trigger
 - **All FKs cascade** from `households_v2` — deleting a household clears all child data
 - **Web app + WhatsApp bot both read/write V2 tables only** — no blob, no dual-write
 - **Old `households` blob table still exists** (not dropped) but is unused — safe to drop when confident
 - **Field mapping:** DB uses snake_case (`assigned_to`), JS uses camelCase (`assignedTo`). `toDb`/`fromDb` mappers in supabase.js handle the boundary.
 - **Messages** stored in Supabase `messages` table (moved from localStorage 2026-04-02)
-- **Bulk AI writes** use delete+insert (not upsert) — AI returns full arrays, so replace-all is simpler
+- **Bulk AI writes use upsert→prune** (not delete→insert). `saveAllTasks/Shopping/Events` upsert first, then delete orphans only after upsert succeeds. If upsert fails, existing data is untouched. (Fixed 2026-04-06, was delete→insert which lost data on network failure.)
 - **Realtime:** 5 channels (tasks, shopping_items, events, households_v2, messages) with 3s echo debounce
 - **CRITICAL — silent upsert RLS failure:** Supabase `.upsert()` checks INSERT policy first, even for existing rows. If INSERT policy is stricter than UPDATE, upserts fail silently. All INSERT policies currently relaxed to `auth.uid() IS NOT NULL` (tighten before launch).
 
@@ -52,6 +64,14 @@
 - **Functional setState for screen transitions** — `setScreen(prev => prev === "loading" ? "welcome" : prev)` prevents overwriting active screens
 - **Modals render OUTSIDE `.app` div** (in React fragment) — they DON'T inherit font-family from `.app[dir="rtl"]`. Must set fontFamily explicitly on `.modal` class.
 - **StrictMode double-renders in dev** but not production — don't debug prod issues assuming double-render
+- **Guard refs need `try/finally`** — `setupRunning.current = true` must be reset in `finally` or the action permanently locks.
+- **Sign-out must clear localStorage** — `sheli-hhid`, `sheli-user`, `sheli-founder` persist across sessions, causing cross-user data leaks if not cleared.
+- **`send()` must use refs, not state** — `tasksRef.current` not `tasks` inside async `send()` to avoid stale closures on rapid sends.
+- **Password reset hash** — Don't strip URL hash before Supabase `onAuthStateChange` processes the recovery token. Listen for `PASSWORD_RECOVERY` event first.
+- **Landing page → auth language** — Landing is Hebrew-only; call `setLang("he")` before `setScreen("auth")`.
+- **`uid()` generates 8-char IDs** — was 4-char (collision risk at ~1300 items). AI prompt also requests 8-char IDs.
+- **Realtime handlers query own table only** — not `loadHousehold()` which queries all 5 tables. Each channel reloads just its table.
+- **API proxy (`api/chat.js`)** — Auth-protected (Supabase JWT), model-whitelisted (Sonnet/Haiku only), rate-limited (20/min/user), max_tokens capped (4096). Env var: `ANTHROPIC_API_KEY` (NOT `VITE_` prefix — server-only).
 
 ## WhatsApp Bot Gotchas
 - **1-on-1 AND group support (v8)** — Bot accepts both `@g.us` (group) and `@s.whatsapp.net` (direct). Different AI behavior per chat type:
@@ -66,7 +86,13 @@
 - **Supabase Management API** — `curl -H "Authorization: Bearer sbp_..." https://api.supabase.com/v1/projects/wzwwtghtnkapdwlgnrxr/functions` works for listing/metadata but not source upload.
 - **Shopping message batching** — 5s window for rapid-fire shopping items. Uses `amILastPendingMessage()` (checks by messageId, NOT timestamp — avoids clock skew). 30s TTL prevents stale pending messages.
 - **Group lifecycle management** — Bot auto-setup on group join (intro message, create household, auto-link via phone mapping, pre-map participants). Member add/remove handlers. Bot remove = soft-disable.
-- **Quiet hours** — `isQuietHours()`: nightly 22:00-07:00 + Shabbat (Friday 15:00 – Saturday 19:00) Israel timezone. Suppresses proactive messages only, reactive replies always work.
+- **Quiet hours** — `isQuietHours()` guards dashboard links + soft warnings: nightly 22:00-07:00 + Shabbat (Friday 15:00 – Saturday 19:00) Israel timezone. Reactive replies always work.
+- **`maybeSendSoftWarning` column names** — must use `message_text` and `whatsapp_message_id` (matching `logMessage`), not `text`/`message_id`.
+- **Empty actions for actionable intents** — When Haiku classifies `complete_task` but can't find the task_id, ask for clarification instead of false "done!" reply.
+- **Message length cap: 500 chars** — Truncated before classifier to prevent prompt injection + cost amplification. Empty messages skipped entirely.
+- **Batch processor uses stored `classification_data`** — No re-classification. Reads items from stored Haiku output (halves API cost).
+- **`add_event` time fallback: 18:00 today** — Not `new Date()` (which creates a "past/now" event when time can't be parsed).
+- **Upgrade prompt uses `ICOUNT_PAYMENT_LINK`** env var — Not Stripe. Billing provider is iCount.
 - **Compound Hebrew product names** — Classifier prompt includes examples (חלב אורז, שמן זית, נייר טואלט) to prevent splitting. Categories always assigned per item.
 - **Default shopping category: "אחר"** (Hebrew) not "Other" (English) — web app groups by Hebrew categories
 - **Hebrew NLP patterns in prompt** — iteratively improved. Each misclassification becomes a new pattern.
@@ -132,11 +158,35 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 
 ## RTL / Hebrew Design Rules
 - `dir="rtl"` on parent flips flexbox automatically — most layouts "just work"
+- **Hebrew CTAs: always gender-free plural** — "המשיכו" (not "המשך"), "הירשמו" (not "הירשם"), "התחברו" (not "התחבר"). Masculine plural = universal form in modern Hebrew UX.
 - Arrows: forward = ← in RTL, → in LTR. Back = → in RTL, ← in LTR.
 - `letter-spacing: 0` on Hebrew text (uppercase letter-spacing breaks Hebrew)
 - Font: Heebo for Hebrew, DM Sans for English, Cormorant Garamond for headings (serif)
 - WhatsApp mock on welcome screen: force `direction: ltr` on bubble layout (WhatsApp always shows your msgs on right), inner text gets `direction: rtl` for Hebrew
 - CSS logical properties: use `padding-inline-end` not `padding-right`, `inset-inline-end` not `right`
+- **Arrows in WhatsApp messages:** ASCII arrows (`->`, `<-`, `→`, `←`) render unpredictably in RTL. Use numbered steps instead.
+- **Section titles in Hebrew:** Use Heebo font (not Cormorant Garamond). Cormorant Garamond is ONLY for the English "Sheli" wordmark.
+
+## Landing Page
+- **Two entry points:** sheli.ai (LandingPage for cold traffic), `sheli.ai?source=wa` (skips landing → auth for WA dashboard users)
+- **wa.me pre-filled text:** `wa.me/972555175553?text=היי%20שלי!` — user taps Send, bot responds with welcome
+- **QR code:** `public/qr-whatsapp.svg` — scannable from desktop/screenshots, links to wa.me
+- **1:1 Q&A:** `ONBOARDING_QA` array in index.inlined.ts — pattern-matched answers for pricing, features, privacy, etc. Zero AI cost.
+
+## iCount API (Billing)
+- **API v3 base URL:** `https://api.icount.co.il/api/v3.php` (NOT apiv3.icount.co.il which is Stoplight docs UI only)
+- **Auth:** POST `/auth/login` with `Authorization: Bearer <token>` + `{"cid":"034322354"}` → returns SID. All calls use SID.
+- **Payment pages:** Need `paypage_id` from dashboard. Generate via POST `/paypage/generate_sale`.
+- **Webhook:** POST to our URL with `X-iCount-Secret` header. Configured in הגדרות → אוטומציה → Webhooks.
+- **Company ID:** 034322354 (שלי AI)
+- **npm wrapper:** `@bizup-pay/icount` — revealed the real API URL (not in official docs)
+
+## Payment Provider Research (Israel)
+- **Stripe:** NOT available for Israeli merchants. Workaround: Stripe Atlas $500 US LLC.
+- **Paddle:** Doesn't support ILS currency. Eliminated.
+- **Flat per-txn fees kill 9.90 ILS:** PayMe (₪1.20), Invoice4U (₪1.20), BlueSnap ($0.30) all eat 12-13%.
+- **iCount built-in terminal:** Best rate found — 0.5%+VAT, no flat fee. ₪199 setup + ₪30/mo + ₪30/mo standing orders.
+- **עוסק פטור:** Revenue < ₪120K/year qualifies. Register free at mas.gov.il.
 
 ## User Flow (7 screens)
 ```
@@ -160,7 +210,9 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - `npm run dev` — Vite dev server (port 5173)
 - `npm run build` — Production build
 - `python tests/classifier_eval.py` — Run 120-case Haiku classifier eval (~26 min Tier 1, ~4 min Tier 2, needs ANTHROPIC_API_KEY)
-- Edge Function deploy: use `mcp__f5337598__deploy_edge_function` MCP tool (not CLI), deploy `index.inlined.ts` not `index.ts`
+- Edge Function deploy: `index.inlined.ts` (~89KB) too large for MCP tool. Deploy via Supabase Dashboard paste (Cursor → Ctrl+A, Ctrl+C → Dashboard → Code → paste → Deploy). Verify JWT = OFF.
+- `icount-webhook` Edge Function: separate function, deploy via Dashboard. Verify JWT = OFF. Env var: `ICOUNT_WEBHOOK_SECRET`.
+- Vite dev server: port **5173** (not 3000). launch.json uses `"C:\\Program Files\\nodejs\\node.exe"` as runtimeExecutable.
 - DB migrations: use `mcp__f5337598__apply_migration` MCP tool
 
 ## Agent Skills
@@ -172,4 +224,7 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **Freemium:** 30 free actions/month, then upgrade prompt IN the WhatsApp group
 - **Pricing:** Free / Premium 9.90 ILS / Family+ 24.90 ILS
 - **Israel-first:** Hebrew primary, expand to US via Facebook Messenger (free bot API)
-- **Interim WhatsApp API:** Whapi.Cloud ($29/mo) → migrate to Meta Cloud API (official Groups API, Oct 2025)
+- **WhatsApp API:** Whapi.Cloud Sandbox (free, limited) → Meta Cloud API (apply for OBA, Phase 1)
+- **Billing provider:** iCount (icount.co.il) — 0.5% + ₪0.22/standing order charge, auto חשבונית מס. Terminal not yet activated.
+- **Beta mode:** `BETA_MODE=true` env var on whatsapp-webhook disables 30-action paywall. Remove to activate monetization.
+- **Implementation plan:** V3 active (`docs/implementation-plan-v3.md`), V2 superseded

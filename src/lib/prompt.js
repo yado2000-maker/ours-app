@@ -76,7 +76,7 @@ ${isHe
   : 'Shopping categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Health Store, Other'
 }
 
-Always return full arrays. Generate 4-char alphanumeric IDs for new items.`.trim();
+Always return full arrays. Generate 8-char alphanumeric IDs for new items (e.g. "a7k2m9x1").`.trim();
 };
 
 export default buildPrompt;

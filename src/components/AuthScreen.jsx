@@ -47,13 +47,29 @@ export default function AuthScreen({ onBack, lang = "en" }) {
   }, [mode]);
 
   // Detect password recovery URL (from reset email link)
+  // H9 fix: Don't strip hash immediately — let Supabase process it first via onAuthStateChange
   useEffect(() => {
     const hash = window.location.hash;
-    if (hash.includes("type=recovery")) {
+    if (!hash.includes("type=recovery")) return;
+
+    // Listen for Supabase to confirm the recovery session, THEN clean URL
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        setMode("reset-password");
+        // Safe to clean URL now — Supabase has the session
+        window.history.replaceState({}, "", window.location.pathname);
+        subscription.unsubscribe();
+      }
+    });
+
+    // Safety net: if Supabase doesn't fire within 3s, show reset form anyway
+    const timeout = setTimeout(() => {
       setMode("reset-password");
-      // Clean URL
       window.history.replaceState({}, "", window.location.pathname);
-    }
+      subscription.unsubscribe();
+    }, 3000);
+
+    return () => { clearTimeout(timeout); subscription.unsubscribe(); };
   }, []);
 
   const handleSubmit = async (e) => {
@@ -154,10 +170,12 @@ export default function AuthScreen({ onBack, lang = "en" }) {
 
   const handleGoogle = async () => {
     setError(null);
-    await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: redirectUrl },
     });
+    // M17 fix: show error if OAuth fails (e.g. popup blocked)
+    if (error) setError(isHe ? "ההתחברות עם Google נכשלה. נסו שוב" : "Google sign-in failed. Please try again");
   };
 
   // ── Phone Auth ──
@@ -215,8 +233,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>📬</div>
         <div style={{
-          fontFamily: "'Cormorant Garamond', serif", fontWeight: 300,
-          fontSize: 28, letterSpacing: "0.18em", color: "var(--dark)", marginBottom: 12,
+          fontFamily: isHe ? "'Heebo', sans-serif" : "'Cormorant Garamond', serif", fontWeight: isHe ? 500 : 300,
+          fontSize: 28, letterSpacing: isHe ? 0 : "0.18em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "בדקו את האימייל" : "Check your email"}
         </div>
@@ -253,8 +271,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>✉️</div>
         <div style={{
-          fontFamily: "'Cormorant Garamond', serif", fontWeight: 300,
-          fontSize: 28, letterSpacing: "0.18em", color: "var(--dark)", marginBottom: 12,
+          fontFamily: isHe ? "'Heebo', sans-serif" : "'Cormorant Garamond', serif", fontWeight: isHe ? 500 : 300,
+          fontSize: 28, letterSpacing: isHe ? 0 : "0.18em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "בדקו את האימייל" : "Check your email"}
         </div>
@@ -277,7 +295,9 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         flexDirection: "column", alignItems: "center", justifyContent: "center",
         padding: "40px 24px", fontFamily: font,
       }} dir={dir}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+        <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
+          background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+          filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
         <p style={{ fontSize: 15, color: "var(--warm)", fontWeight: 400, marginBottom: 36 }}>
           {isHe ? "בחרו סיסמה חדשה" : "Choose a new password"}
         </p>
@@ -306,7 +326,9 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         flexDirection: "column", alignItems: "center", justifyContent: "center",
         padding: "40px 24px", fontFamily: font,
       }} dir={dir}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+        <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
+          background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+          filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
         <p style={{ fontSize: 15, color: "var(--warm)", fontWeight: 400, marginBottom: 36 }}>
           {isHe ? "איפוס סיסמה" : "Reset password"}
         </p>
@@ -336,7 +358,9 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         flexDirection: "column", alignItems: "center", justifyContent: "center",
         padding: "40px 24px", fontFamily: font,
       }} dir={dir}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+        <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
+          background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+          filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
         <p style={{ fontSize: 15, color: "var(--warm)", fontWeight: 400, marginBottom: 36 }}>
           {isHe ? "כניסה עם מספר טלפון" : "Sign in with phone number"}
         </p>
@@ -368,8 +392,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>📱</div>
         <div style={{
-          fontFamily: "'Cormorant Garamond', serif", fontWeight: 300,
-          fontSize: 28, letterSpacing: "0.18em", color: "var(--dark)", marginBottom: 12,
+          fontFamily: isHe ? "'Heebo', sans-serif" : "'Cormorant Garamond', serif", fontWeight: isHe ? 500 : 300,
+          fontSize: 28, letterSpacing: isHe ? 0 : "0.18em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "הזינו את הקוד" : "Enter the code"}
         </div>
@@ -402,7 +426,9 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       flexDirection: "column", alignItems: "center", justifyContent: "center",
       padding: "40px 24px", fontFamily: font,
     }} dir={dir}>
-      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 38, letterSpacing: "0.22em", color: "var(--dark)", marginBottom: 4 }}>Sheli</div>
+      <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
+          background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+          filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
       <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: 300, marginBottom: 36, letterSpacing: "0.03em" }}>Smart AI for your life together</p>
 
       <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -446,7 +472,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
 
         <button type="submit" disabled={loading}
           style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1, transition: "background 0.2s" }}>
-          {loading ? (isHe ? "רגע..." : "Loading...") : mode === "signin" ? (isHe ? "התחבר" : "Sign In") : (isHe ? "היירשם" : "Sign Up")}
+          {loading ? (isHe ? "רגע..." : "Loading...") : mode === "signin" ? (isHe ? "התחברו" : "Sign In") : (isHe ? "הירשמו" : "Sign Up")}
         </button>
 
         {/* Forgot password link (signin only) */}
@@ -471,13 +497,13 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
           </svg>
-          {isHe ? "המשך עם Google" : "Continue with Google"}
+          {isHe ? "המשיכו עם Google" : "Continue with Google"}
         </button>
 
         <button type="button" onClick={() => { setMode("phone"); setError(null); }}
           style={{ padding: "13px 15px", borderRadius: 14, background: "var(--white)", border: "1.5px solid var(--border)", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s" }}>
           <span style={{ fontSize: 18 }}>📱</span>
-          {isHe ? "המשך עם מספר טלפון" : "Continue with phone number"}
+          {isHe ? "המשיכו עם מספר טלפון" : "Continue with phone number"}
         </button>
       </form>
 
