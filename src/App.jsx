@@ -553,8 +553,8 @@ export default function Sheli() {
   if (screen === "welcome") return (
     <LandingPage
       key="landing-page"
-      onGetStarted={() => { setLang("he"); setScreen("auth"); }}
-      onSignIn={() => { setLang("he"); setScreen("auth"); }}
+      onGetStarted={(l) => { setLang(l || "he"); setScreen("auth"); }}
+      onSignIn={(l) => { setLang(l || "he"); setScreen("auth"); }}
     />
   );
 

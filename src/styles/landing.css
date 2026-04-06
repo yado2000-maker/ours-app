@@ -6,8 +6,31 @@
   background: var(--cream);
   color: var(--dark);
   font-family: 'Heebo', sans-serif;
-  direction: rtl;
+  /* direction set inline via style prop — supports HE/EN toggle */
   -webkit-overflow-scrolling: touch;
+  position: relative;
+}
+
+.landing-lang-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 100;
+  background: var(--white);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warm);
+  cursor: pointer;
+  font-family: 'Nunito', sans-serif;
+  transition: all 0.15s;
+  box-shadow: var(--sh);
+}
+.landing-lang-toggle:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* ─── Hero ─── */
@@ -140,6 +163,11 @@
 
 .wa-bubble-sender-bot {
   color: #25D366;
+}
+
+.wa-mention {
+  color: #53bdeb;
+  font-weight: 500;
 }
 
 .wa-bubble-time {

@@ -4,82 +4,98 @@ import { ShoppingFeatureIcon, CalendarFeatureIcon, ChoresFeatureIcon, ChevronRig
 
 const WA_LINK = "https://wa.me/972555175553?text=" + encodeURIComponent("היי שלי!");
 
-const MOCK_MESSAGES = [
-  { sender: "אמא", text: "חלב, ביצים ולחם", type: "user" },
-  { sender: "שלי", text: "\u{1F6D2} הוספתי חלב, ביצים ולחם לרשימה", type: "bot" },
-  { sender: "אבא", text: "מישהו יכול לאסוף את נועה מחוג ב-5?", type: "user" },
-  { sender: "שלי", text: "\u{1F4C5} הוספתי: לאסוף את נועה ב-17:00, מי יכול?", type: "bot" },
-  { sender: "אמא", text: "אני", type: "user" },
-  { sender: "שלי", text: "\u2705 סימנתי לאמא", type: "bot" },
-];
+// ─── Bilingual content ───
 
-const FEATURES = [
-  {
-    Icon: ShoppingFeatureIcon,
-    title: "רשימת קניות",
-    subtitle: 'אמרו "חלב" בקבוצה וזה ברשימה. בלי אפליקציה, בלי הקלדה',
+const CONTENT = {
+  he: {
+    dir: "rtl",
+    font: "'Heebo', sans-serif",
+    tagline: "העוזרת החכמה של הבית והמשפחה",
+    mockGroup: "משפחת כהן",
+    mockMembers: "אמא, אבא, נועה, איתי, שלי",
+    mockMessages: [
+      { sender: "אמא", text: "חלב, לחם וביצים", type: "user" },
+      { sender: "שלי", text: "\u{1F6D2} הוספתי חלב, לחם וביצים לרשימה", type: "bot" },
+      { sender: "אבא", text: "@שלי תזכירי לי לעצור בסופר בדרך הביתה", type: "user", mention: "@שלי" },
+      { sender: "שלי", text: "\u{1F514} בשמחה! אזכיר לך ב-18:00 לעצור בסופר", type: "bot" },
+      { sender: "שלי", text: "\u{1F381} זוכרים שיש יומולדת לסבתא ביום שישי? זמן טוב לקנות מתנה", type: "bot" },
+    ],
+    cta: "הוסיפו את שלי לקבוצה",
+    freeBadge: "חינם לגמרי · עד 30 פעולות בחודש · בלי כרטיס אשראי",
+    qrLabel: "או סרקו את הקוד",
+    signin: "יש לי כבר חשבון \u2190 כניסה",
+    featuresTitle: "מה שלי יודעת לעשות?",
+    features: [
+      { Icon: ShoppingFeatureIcon, title: "רשימת קניות", subtitle: 'אמרו "חלב" בקבוצה וזה ברשימה. בלי אפליקציה, בלי הקלדה' },
+      { Icon: CalendarFeatureIcon, title: "חוגים, הסעות ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן המשפחתי" },
+      { Icon: ChoresFeatureIcon, title: "מטלות בית", subtitle: "מי עושה מה ומתי, שלי זוכרת ומעדכנת" },
+    ],
+    stepsTitle: "איך זה עובד?",
+    steps: [
+      { title: "הוסיפו את שלי לקבוצת הווטסאפ", subtitle: "לחצו על הכפתור ושלי מצטרפת לקבוצה שלכם" },
+      { title: "דברו כרגיל", subtitle: "שלי מבינה עברית טבעית: קניות, מטלות, אירועים" },
+      { title: "הכל מסתדר", subtitle: "הרשימה, היומן והמטלות מתעדכנים אוטומטית" },
+    ],
+    faqTitle: "שאלות נפוצות",
+    faq: [
+      { q: "האם שלי קוראת את כל ההודעות?", a: "שלי מזהה רק הודעות שקשורות למטלות, קניות ואירועים. שיחות חברתיות, תמונות ומדיה? שלי מתעלמת לחלוטין." },
+      { q: "איך שלי שומרת על הפרטיות שלנו?", a: "שלי לא שומרת תמונות, הודעות קוליות או מדיה — רק טקסט שקשור למטלות, קניות ואירועים. כל המידע נמחק אוטומטית אחרי 30 יום. שיחות אישיות? שלי לא רואה אותן בכלל." },
+      { q: "האם שלי משתפרת עם הזמן?", a: "כן! שלי לומדת את הסגנון של המשפחה שלכם — כינויים, שמות מוצרים, שעות קבועות. ככל שתשתמשו יותר, היא תבין אתכם טוב יותר." },
+      { q: "מי יכול לראות את המידע שלנו?", a: "רק בני הבית שלכם. כל משפחה מנותקת לחלוטין. אף אחד — כולל אנחנו — לא רואה את הרשימות או האירועים שלכם." },
+      { q: "כמה זה עולה?", a: "30 פעולות בחודש חינם. Premium ב-9.90 \u20AA לחודש, ללא הגבלה." },
+      { q: "האם זה עובד בקבוצות קיימות?", a: "כן! פשוט הוסיפו את שלי לכל קבוצת ווטסאפ קיימת. לא צריך ליצור קבוצה חדשה." },
+      { q: "מה שלי יודעת לעשות?", a: "רשימות קניות, מטלות בית, אירועים ביומן, תזכורות, ומענה לשאלות על מה שצריך לעשות." },
+      { q: "מה קורה אם אני רוצה להפסיק?", a: "פשוט הוציאו את שלי מהקבוצה. כל המידע נמחק אוטומטית, בלי התחייבות ובלי שאלות." },
+    ],
+    bottomTitle: "מוכנים להתחיל?",
+    bottomLink: "או היכנסו לאפליקציה",
+    langToggle: "EN",
   },
-  {
-    Icon: CalendarFeatureIcon,
-    title: "חוגים, הסעות ואירועים",
-    subtitle: "שלי מזהה תאריכים ומארגנת את היומן המשפחתי",
+  en: {
+    dir: "ltr",
+    font: "'Nunito', sans-serif",
+    tagline: "Your home & family's smart helper",
+    mockGroup: "The Johnsons",
+    mockMembers: "Mom, Dad, Emma, Jake, Sheli",
+    mockMessages: [
+      { sender: "Mom", text: "Milk, bread and eggs", type: "user" },
+      { sender: "Sheli", text: "\u{1F6D2} Added milk, bread and eggs to the list", type: "bot" },
+      { sender: "Dad", text: "@Sheli remind me to stop at the store on the way home", type: "user", mention: "@Sheli" },
+      { sender: "Sheli", text: "\u{1F514} Sure! I'll remind you at 6pm to stop at the store", type: "bot" },
+      { sender: "Sheli", text: "\u{1F381} Remember Grandma's birthday is on Friday? Good time to get a gift", type: "bot" },
+    ],
+    cta: "Add Sheli to your group",
+    freeBadge: "Completely free · Up to 30 actions/month · No credit card",
+    qrLabel: "or scan the code",
+    signin: "I have an account \u2192 Sign in",
+    featuresTitle: "What can Sheli do?",
+    features: [
+      { Icon: ShoppingFeatureIcon, title: "Shopping lists", subtitle: 'Say "milk" in the group and it\'s on the list. No app, no typing.' },
+      { Icon: CalendarFeatureIcon, title: "Events & scheduling", subtitle: "Sheli spots dates and organizes the family calendar" },
+      { Icon: ChoresFeatureIcon, title: "Household tasks", subtitle: "Who does what and when — Sheli remembers and updates" },
+    ],
+    stepsTitle: "How does it work?",
+    steps: [
+      { title: "Add Sheli to your WhatsApp group", subtitle: "Tap the button and Sheli joins your group" },
+      { title: "Just talk normally", subtitle: "Sheli understands natural language: shopping, tasks, events" },
+      { title: "Everything stays organized", subtitle: "Lists, calendar and tasks update automatically" },
+    ],
+    faqTitle: "FAQ",
+    faq: [
+      { q: "Does Sheli read all our messages?", a: "Sheli only picks up messages about tasks, shopping and events. Social chat, photos and media? Completely ignored." },
+      { q: "How does Sheli protect our privacy?", a: "Sheli doesn't store photos, voice messages or media — only text related to tasks, shopping and events. All data is auto-deleted after 30 days. Personal conversations? Sheli doesn't see them at all." },
+      { q: "Does Sheli get smarter over time?", a: "Yes! Sheli learns your family's style — nicknames, product names, regular schedules. The more you use her, the better she understands you." },
+      { q: "Who can see our data?", a: "Only your household members. Each family is completely isolated. Nobody — including us — can see your lists or events." },
+      { q: "How much does it cost?", a: "30 actions per month for free. Premium at $2.70/month for unlimited use." },
+      { q: "Does it work with existing groups?", a: "Yes! Just add Sheli to any existing WhatsApp group. No need to create a new one." },
+      { q: "What can Sheli do?", a: "Shopping lists, household tasks, calendar events, reminders, and answering questions about what needs to be done." },
+      { q: "What if I want to stop?", a: "Just remove Sheli from the group. All data is automatically deleted — no commitment, no questions asked." },
+    ],
+    bottomTitle: "Ready to get started?",
+    bottomLink: "or open the app",
+    langToggle: "עב",
   },
-  {
-    Icon: ChoresFeatureIcon,
-    title: "מטלות בית",
-    subtitle: "מי עושה מה ומתי, שלי זוכרת ומעדכנת",
-  },
-];
-
-const STEPS = [
-  {
-    title: "הוסיפו את שלי לקבוצת הווטסאפ",
-    subtitle: "לחצו על הכפתור ושלי מצטרפת לקבוצה שלכם",
-  },
-  {
-    title: "דברו כרגיל",
-    subtitle: "שלי מבינה עברית טבעית: קניות, מטלות, אירועים",
-  },
-  {
-    title: "הכל מסתדר",
-    subtitle: "הרשימה, היומן והמטלות מתעדכנים אוטומטית",
-  },
-];
-
-const FAQ_ITEMS = [
-  {
-    q: "האם שלי קוראת את כל ההודעות?",
-    a: "שלי מזהה רק הודעות שקשורות למטלות, קניות ואירועים. שיחות חברתיות, תמונות ומדיה? שלי מתעלמת לחלוטין.",
-  },
-  {
-    q: "איך שלי שומרת על הפרטיות שלנו?",
-    a: "שלי לא שומרת תמונות, הודעות קוליות או מדיה — רק טקסט שקשור למטלות, קניות ואירועים. כל המידע נמחק אוטומטית אחרי 30 יום. שיחות אישיות? שלי לא רואה אותן בכלל.",
-  },
-  {
-    q: "האם שלי משתפרת עם הזמן?",
-    a: "כן! שלי לומדת את הסגנון של המשפחה שלכם — כינויים, שמות מוצרים, שעות קבועות. ככל שתשתמשו יותר, היא תבין אתכם טוב יותר.",
-  },
-  {
-    q: "מי יכול לראות את המידע שלנו?",
-    a: "רק בני הבית שלכם. כל משפחה מנותקת לחלוטין. אף אחד — כולל אנחנו — לא רואה את הרשימות או האירועים שלכם.",
-  },
-  {
-    q: "כמה זה עולה?",
-    a: "30 פעולות בחודש חינם. Premium ב-9.90 \u20AA לחודש, ללא הגבלה.",
-  },
-  {
-    q: "האם זה עובד בקבוצות קיימות?",
-    a: "כן! פשוט הוסיפו את שלי לכל קבוצת ווטסאפ קיימת. לא צריך ליצור קבוצה חדשה.",
-  },
-  {
-    q: "מה שלי יודעת לעשות?",
-    a: "רשימות קניות, מטלות בית, אירועים ביומן, תזכורות, ומענה לשאלות על מה שצריך לעשות.",
-  },
-  {
-    q: "מה קורה אם אני רוצה להפסיק?",
-    a: "פשוט הוציאו את שלי מהקבוצה. כל המידע נמחק אוטומטית, בלי התחייבות ובלי שאלות.",
-  },
-];
+};
 
 const WhatsAppIcon = () => (
   <svg viewBox="0 0 24 24" fill="currentColor">
@@ -89,27 +105,38 @@ const WhatsAppIcon = () => (
 
 export default function LandingPage({ onGetStarted, onSignIn }) {
   const [openFaq, setOpenFaq] = useState(null);
+  const [lang, setLang] = useState("he");
+  const c = CONTENT[lang];
+
+  const handleSignIn = () => onSignIn(lang);
+  const handleGetStarted = () => onGetStarted(lang);
 
   return (
-    <div className="landing">
+    <div className="landing" style={{ direction: c.dir, fontFamily: c.font }}>
+      {/* ─── Language Toggle ─── */}
+      <button
+        className="landing-lang-toggle"
+        onClick={() => { setLang(lang === "he" ? "en" : "he"); setOpenFaq(null); }}
+      >
+        {c.langToggle}
+      </button>
+
       {/* ─── Hero ─── */}
       <section className="landing-hero">
         <h1 className="landing-wordmark">sheli</h1>
-        <p className="landing-tagline">
-          העוזרת החכמה של הבית והמשפחה
-        </p>
+        <p className="landing-tagline">{c.tagline}</p>
 
         {/* WhatsApp Mock */}
         <div className="wa-mock">
           <div className="wa-mock-header">
             <div className="wa-mock-avatar">👨‍👩‍👧</div>
             <div className="wa-mock-group-info">
-              <span className="wa-mock-group-name">משפחת כהן</span>
-              <span className="wa-mock-group-members">אמא, אבא, נועה, איתי, שלי</span>
+              <span className="wa-mock-group-name">{c.mockGroup}</span>
+              <span className="wa-mock-group-members">{c.mockMembers}</span>
             </div>
           </div>
-          <div className="wa-mock-chat">
-            {MOCK_MESSAGES.map((msg, i) => (
+          <div className="wa-mock-chat" style={{ direction: lang === "he" ? "rtl" : "ltr" }}>
+            {c.mockMessages.map((msg, i) => (
               <div
                 key={i}
                 className={`wa-bubble wa-bubble-${msg.type}`}
@@ -118,7 +145,9 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                 <span className={`wa-bubble-sender wa-bubble-sender-${msg.type}`}>
                   {msg.sender}
                 </span>
-                {msg.text}
+                {msg.mention
+                  ? <>{msg.text.split(msg.mention)[0]}<span className="wa-mention">{msg.mention}</span>{msg.text.split(msg.mention)[1]}</>
+                  : msg.text}
                 <span className="wa-bubble-time">
                   {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
                 </span>
@@ -129,28 +158,26 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
         <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-cta">
           <WhatsAppIcon />
-          הוסיפו את שלי לקבוצה
+          {c.cta}
         </a>
 
-        <div className="landing-free-badge">
-          חינם לגמרי · עד 30 פעולות בחודש · בלי כרטיס אשראי
-        </div>
+        <div className="landing-free-badge">{c.freeBadge}</div>
 
         <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-qr">
           <img src="/qr-whatsapp.svg" alt="QR code to add Sheli on WhatsApp" width="140" height="140" />
-          <span className="landing-qr-label">או סרקו את הקוד</span>
+          <span className="landing-qr-label">{c.qrLabel}</span>
         </a>
 
-        <button className="landing-signin" onClick={onSignIn}>
-          יש לי כבר חשבון &larr; כניסה
+        <button className="landing-signin" onClick={handleSignIn}>
+          {c.signin}
         </button>
       </section>
 
       {/* ─── Features ─── */}
       <section className="landing-features">
-        <h2 className="landing-section-title">מה שלי יודעת לעשות?</h2>
+        <h2 className="landing-section-title">{c.featuresTitle}</h2>
         <div className="feature-cards">
-          {FEATURES.map((f, i) => (
+          {c.features.map((f, i) => (
             <div key={i} className="feature-card">
               <div className="feature-card-icon">
                 <f.Icon size={22} />
@@ -166,9 +193,9 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
       {/* ─── How It Works ─── */}
       <section className="landing-steps">
-        <h2 className="landing-section-title">איך זה עובד?</h2>
+        <h2 className="landing-section-title">{c.stepsTitle}</h2>
         <div className="steps-list">
-          {STEPS.map((s, i) => (
+          {c.steps.map((s, i) => (
             <div key={i} className="step-item">
               <div className="step-number">{i + 1}</div>
               <div className="step-text">
@@ -182,9 +209,9 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
       {/* ─── FAQ ─── */}
       <section className="landing-faq">
-        <h2 className="landing-section-title">שאלות נפוצות</h2>
+        <h2 className="landing-section-title">{c.faqTitle}</h2>
         <div className="faq-list">
-          {FAQ_ITEMS.map((faq, i) => (
+          {c.faq.map((faq, i) => (
             <div key={i} className="faq-item">
               <button
                 className="faq-question"
@@ -206,13 +233,13 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
       {/* ─── Bottom CTA ─── */}
       <section className="landing-bottom-cta">
-        <h2 className="landing-section-title">מוכנים להתחיל?</h2>
+        <h2 className="landing-section-title">{c.bottomTitle}</h2>
         <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-cta">
           <WhatsAppIcon />
-          הוסיפו את שלי לקבוצה
+          {c.cta}
         </a>
-        <button className="landing-app-link" onClick={onGetStarted}>
-          או היכנסו לאפליקציה
+        <button className="landing-app-link" onClick={handleGetStarted}>
+          {c.bottomLink}
         </button>
       </section>
     </div>
