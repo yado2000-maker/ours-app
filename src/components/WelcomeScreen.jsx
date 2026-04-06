@@ -45,7 +45,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           fontWeight: 300,
           marginBottom: 48,
           letterSpacing: "0.03em",
-        }}>Smart AI for your life together</p>
+        }}>Your home & family's smart helper</p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, width: "100%", maxWidth: 300 }}>
           {[
@@ -151,8 +151,8 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           marginBottom: 16,
         }}>
           {isHe
-            ? "העוזרת החכמה של הבית בווטסאפ שלכם"
-            : "Your home's smart assistant, right in your WhatsApp"}
+            ? "העוזרת החכמה של הבית והמשפחה"
+            : "Your home & family's smart helper"}
         </p>
 
         {/* Compact WhatsApp mock — just 2 messages */}

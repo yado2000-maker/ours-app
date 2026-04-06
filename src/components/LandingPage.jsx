@@ -96,7 +96,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <section className="landing-hero">
         <h1 className="landing-wordmark">sheli</h1>
         <p className="landing-tagline">
-          העוזרת החכמה של הבית בווטסאפ שלכם
+          העוזרת החכמה של הבית והמשפחה
         </p>
 
         {/* WhatsApp Mock */}

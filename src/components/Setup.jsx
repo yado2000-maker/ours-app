@@ -24,7 +24,7 @@ export default function Setup({ onDone, initialLang }) {
   return (
     <div className="setup-wrap" dir={dir} style={{ fontFamily: lang === "he" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif" }}>
       <div className="setup-mark">Sheli</div>
-      <p className="setup-tagline">Smart AI for your life together</p>
+      <p className="setup-tagline">Your home & family's smart helper</p>
 
       <div className="setup-form">
         {step === 0 && (
