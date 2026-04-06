@@ -1,11 +1,11 @@
-# Sheli (שלי) — Smart AI for Your Life Together
+# sheli (שלי) — Your Home & Family's Smart Helper
 
 ## Architecture
 - **Frontend:** React 19 + Vite 8, deployed on Vercel (sheli.ai)
 - **Backend:** Supabase (project: wzwwtghtnkapdwlgnrxr, region: eu-central-2)
 - **AI:** Two-stage pipeline for WhatsApp bot (Haiku 4.5 classifier → Sonnet 4 reply generator); Sonnet 4 via /api/chat (web app)
 - **WhatsApp Bot:** Supabase Edge Function (whatsapp-webhook), Whapi.Cloud provider. Handles both group + 1:1 direct messages.
-- **Landing Page:** LandingPage.jsx replaces WelcomeScreen. Two-path routing: sheli.ai (cold traffic), ?source=wa (WA users skip to auth)
+- **Landing Page:** LandingPage.jsx — bilingual HE/EN toggle, two-path routing: sheli.ai (cold traffic), ?source=wa (WA users skip to auth)
 - **1:1 Onboarding:** Bot handles direct messages (handleDirectMessage) with state machine (WELCOME→WAITING→ONBOARDED→ACTIVE) + pattern-based Q&A
 - **Auth:** Supabase Auth (Google OAuth + email/password + phone OTP via Twilio — not yet configured)
 - **Billing:** iCount (icount.co.il) — invoicing + CC processing + standing orders. API v3 at `api.icount.co.il/api/v3.php` (SID-based auth). Terminal not yet activated (beta mode).
@@ -73,7 +73,27 @@
 - **Realtime handlers query own table only** — not `loadHousehold()` which queries all 5 tables. Each channel reloads just its table.
 - **API proxy (`api/chat.js`)** — Auth-protected (Supabase JWT), model-whitelisted (Sonnet/Haiku only), rate-limited (20/min/user), max_tokens capped (4096). Env var: `ANTHROPIC_API_KEY` (NOT `VITE_` prefix — server-only).
 
+## Design System (v2, 2026-04-06)
+- **Primary:** Coral `#E8725C` (brand, wordmark, badges, step numbers)
+- **Accent:** Green `#2AB673` (Sheli's voice, confirmations, nav indicator)
+- **WhatsApp CTA:** Muted forest green `#2D8E6F` (not neon WhatsApp green)
+- **Dark text:** Teal-gray `#1E2D2D` (cool neutral, not brown)
+- **Background:** `#FAFCFB` (cool white, not beige)
+- **Wordmark:** lowercase "sheli" in Nunito 800, coral→pink gradient (`#E8725C → #D4507A`) with drop shadow
+- **Icon:** `/public/icons/icon.svg` — gradient rounded square with white "sheli" wordmark
+- **Fonts:** Nunito (EN body + wordmark), Heebo (HE body). Cormorant Garamond removed.
+- **Taglines:** HE "העוזרת החכמה של הבית והמשפחה" / EN "Your home & family's smart helper"
+- **Dark theme:** Cool teal-gray (`#141A1A` bg, `#1C2424` cards, `#2A3636` borders) — not warm brown
+- **Design doc:** `docs/plans/2026-04-06-design-system.md`
+
+## שלי Name Detection (3-layer, 2026-04-06)
+- **Layer 1 (regex, pre-classifier):** High-confidence patterns only — שלי at start of message, after greeting/thanks, standalone at end, @mention. Cross-message "של מי" check (90s window) prevents "mine!" false positives.
+- **Layer 2 (Haiku classifier):** `addressed_to_bot: boolean` field in classification output. Hebrew grammar guidance in prompt (possessive vs name patterns). When in doubt, prefer possessive.
+- **Layer 3 (Sonnet reply):** Emoji energy matching (mirror sender's emotional temperature). Out-of-scope deflection (weather/trivia → varied friendly redirect, HE+EN). Self-knowledge answers (privacy, learning, pricing).
+- **Design doc:** `docs/plans/2026-04-06-sheli-name-detection-design.md`
+
 ## WhatsApp Bot Gotchas
+- **Whapi.Cloud:** Developer Premium ($12/mo), unlimited messages/chats. Paid until 2026-05-07.
 - **1-on-1 AND group support (v8)** — Bot accepts both `@g.us` (group) and `@s.whatsapp.net` (direct). Different AI behavior per chat type:
   - **Direct (1-on-1):** Respond to EVERY message — personal assistant mode. Resolve household via `whatsapp_member_mapping` phone lookup.
   - **Group:** Only respond when mentioned by name ("שלי"), message is actionable (task/shopping/event), or question directed at bot. Skip social noise.
@@ -161,7 +181,9 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 - **Hebrew CTAs: always gender-free plural** — "המשיכו" (not "המשך"), "הירשמו" (not "הירשם"), "התחברו" (not "התחבר"). Masculine plural = universal form in modern Hebrew UX.
 - Arrows: forward = ← in RTL, → in LTR. Back = → in RTL, ← in LTR.
 - `letter-spacing: 0` on Hebrew text (uppercase letter-spacing breaks Hebrew)
-- Font: Heebo for Hebrew, DM Sans for English, Cormorant Garamond for headings (serif)
+- Font: Heebo for Hebrew, Nunito for English. Cormorant Garamond removed (too "luxury editorial" for a family app).
+- **Hebrew copy:** use "מטלות" not "משימות" (tasks — משימות sounds military). Sheli speaks feminine first-person ("הוספתי" not "הוסף").
+- **Copywriting skill:** `.claude/skills/copywriting.md` — guidelines for taglines, CTAs, FAQ, bot messages, social media (HE+EN).
 - WhatsApp mock on welcome screen: force `direction: ltr` on bubble layout (WhatsApp always shows your msgs on right), inner text gets `direction: rtl` for Hebrew
 - CSS logical properties: use `padding-inline-end` not `padding-right`, `inset-inline-end` not `right`
 - **Arrows in WhatsApp messages:** ASCII arrows (`->`, `<-`, `→`, `←`) render unpredictably in RTL. Use numbered steps instead.
