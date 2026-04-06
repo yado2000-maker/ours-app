@@ -343,15 +343,13 @@ export default function MenuPanel({
                 ) : (
                   <>
                     <span>{m.name}</span>
-                    {/* Edit: self always, others if founder */}
-                    {(m.id === user?.id || isFounder) && (
-                      <button
-                        onClick={() => { setEditMemberName(m.name); setEditingMemberId(m.id); }}
-                        style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 10, cursor: "pointer", padding: 0, lineHeight: 1 }}
-                      >
-                        ✏️
-                      </button>
-                    )}
+                    {/* Edit: anyone can edit any member name */}
+                    <button
+                      onClick={() => { setEditMemberName(m.name); setEditingMemberId(m.id); }}
+                      style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 10, cursor: "pointer", padding: 0, lineHeight: 1 }}
+                    >
+                      ✏️
+                    </button>
                   </>
                 )}
                 {/* Remove: founder only, not self, not while editing */}
