@@ -683,7 +683,7 @@ export default function MenuPanel({
                     flex: 1,
                     padding: "9px 16px",
                     borderRadius: 10,
-                    background: "var(--coral)",
+                    background: "var(--dark)",
                     color: "#fff",
                     border: "none",
                     fontSize: 13,
