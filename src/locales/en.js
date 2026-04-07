@@ -90,5 +90,12 @@ const en = {
   menuReset: "Delete all data and reset",
   menuHhName: "Home name",
   menuMembers: "Members",
+  // Referral
+  menuReferral: "Family brings Family",
+  menuReferralDesc: "Invite another family to Sheli \u2014 both families get 1 free month of Premium!",
+  menuReferralShare: "Share on WhatsApp",
+  menuReferralCopy: "Copy link",
+  menuReferralCopied: "Copied!",
+  menuReferralStats: (sent, completed) => `Invited: ${sent} families \u00B7 ${completed} activated`,
 };
 export default en;

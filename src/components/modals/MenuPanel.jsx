@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import T from "../../locales/index.js";
-import { analytics } from "../../lib/analytics.js";
+import { analytics, track } from "../../lib/analytics.js";
+import { loadReferralStats } from "../../lib/supabase.js";
 
 export default function MenuPanel({
   user,
@@ -30,6 +31,8 @@ export default function MenuPanel({
   const [removingMemberId, setRemovingMemberId] = useState(null); // M12: confirm before remove
   const [editingMemberId, setEditingMemberId] = useState(null);
   const [editMemberName, setEditMemberName] = useState("");
+  const [referralCopied, setReferralCopied] = useState(false);
+  const [referralStats, setReferralStats] = useState({ sent: 0, completed: 0 });
 
   const t = T[lang] || T.en;
   const dir = lang === "he" ? "rtl" : "ltr";
@@ -41,6 +44,15 @@ export default function MenuPanel({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
+  const referralCode = household?.referralCode;
+  const referralLink = referralCode ? `https://sheli.ai/r/${referralCode}` : "";
+
+  useEffect(() => {
+    if (household?.id) {
+      loadReferralStats(household.id).then(setReferralStats);
+    }
+  }, [household?.id]);
+
   const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
   const joinUrl =
     typeof window !== "undefined"
@@ -597,6 +609,96 @@ export default function MenuPanel({
         <div
           style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }}
         />
+
+        {/* 4b. Family brings Family */}
+        {referralCode && (
+          <>
+            <div className="section-head" style={{ marginBottom: 8 }}>
+              {t.menuReferral}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>
+              {t.menuReferralDesc}
+            </div>
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "var(--cream)",
+                border: "1px solid var(--border)",
+                fontSize: 12,
+                color: "var(--warm)",
+                wordBreak: "break-all",
+                direction: "ltr",
+                marginBottom: 8,
+                userSelect: "all",
+              }}
+            >
+              {referralLink}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(referralLink);
+                    setReferralCopied(true);
+                    track("referral_link_copied");
+                    setTimeout(() => setReferralCopied(false), 2000);
+                  } catch {}
+                }}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: 10,
+                  background: referralCopied ? "var(--green)" : "var(--coral)",
+                  color: "#fff",
+                  border: "none",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "background 0.2s",
+                }}
+              >
+                {referralCopied ? t.menuReferralCopied : t.menuReferralCopy}
+              </button>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(
+                  isHe
+                    ? "\u05D4\u05D9\u05D9! \u05EA\u05E0\u05E1\u05D5 \u05D0\u05EA \u05E9\u05DC\u05D9 \u2014 \u05E2\u05D5\u05D6\u05E8\u05EA \u05D7\u05DB\u05DE\u05D4 \u05DC\u05DE\u05E9\u05E4\u05D7\u05D4 \u05D1\u05D5\u05D5\u05D8\u05E1\u05D0\u05E4 \uD83C\uDFE0\n" + referralLink
+                    : "Hey! Try Sheli \u2014 a smart family helper on WhatsApp \uD83C\uDFE0\n" + referralLink
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => track("referral_link_shared_wa")}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: 10,
+                  background: "#25D366",
+                  color: "#fff",
+                  border: "none",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  textDecoration: "none",
+                  textAlign: "center",
+                  display: "block",
+                }}
+              >
+                {t.menuReferralShare}
+              </a>
+            </div>
+            {referralStats.sent > 0 && (
+              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+                {typeof t.menuReferralStats === "function"
+                  ? t.menuReferralStats(referralStats.sent, referralStats.completed)
+                  : ""}
+              </div>
+            )}
+            <div style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }} />
+          </>
+        )}
 
         {/* 5. WhatsApp Bot */}
         <div className="section-head" style={{ marginBottom: 8 }}>

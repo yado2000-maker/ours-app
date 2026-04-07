@@ -47,12 +47,23 @@ export const loadHousehold = async (hhId) => {
       id: hhRes.data.id,
       name: hhRes.data.name,
       lang: hhRes.data.lang || "he",
+      referralCode: hhRes.data.referral_code || null,
       members: (membersRes.data || []).map(m => ({ id: m.id, name: m.display_name, userId: m.user_id })),
     },
     tasks: (tasksRes.data || []).map(t => fromDb(t, TASK_MAP)),
     shopping: shoppingRes.data || [],
     events: (eventsRes.data || []).map(e => fromDb(e, EVENT_MAP)),
   };
+};
+
+export const loadReferralStats = async (hhId) => {
+  const { data, error } = await supabase
+    .from("referrals")
+    .select("id, status")
+    .eq("referrer_household_id", hhId);
+  if (error) { console.error("[loadReferralStats]", error); return { sent: 0, completed: 0 }; }
+  const rows = data || [];
+  return { sent: rows.length, completed: rows.filter(r => r.status === "completed").length };
 };
 
 export const saveTask = async (hhId, task) => {
