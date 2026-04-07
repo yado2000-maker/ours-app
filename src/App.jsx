@@ -443,14 +443,20 @@ export default function Sheli() {
   const clearDone = async () => {
     setTasksS(tasks.filter(x => !x.done));
     const hhId = lsGet("sheli-hhid");
-    lastSaveRef.current = Date.now();
-    if (hhId) clearDoneTasks(hhId);
+    if (hhId) {
+      lastSaveRef.current = Date.now();
+      await clearDoneTasks(hhId);
+      lastSaveRef.current = Date.now(); // refresh debounce after bulk delete completes
+    }
   };
   const clearGot = async () => {
     setShoppingS(shopping.filter(x => !x.got));
     const hhId = lsGet("sheli-hhid");
-    lastSaveRef.current = Date.now();
-    if (hhId) clearGotShopping(hhId);
+    if (hhId) {
+      lastSaveRef.current = Date.now();
+      await clearGotShopping(hhId);
+      lastSaveRef.current = Date.now(); // refresh debounce after bulk delete completes
+    }
   };
   const deleteEventHandler = async (id) => {
     setEventsS(events.filter(x => x.id !== id));
