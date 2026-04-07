@@ -539,48 +539,52 @@ export default function MenuPanel({
         </div>
         <div
           style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
             padding: "10px 14px",
             borderRadius: 10,
             background: "var(--cream)",
             border: "1px solid var(--border)",
-            marginBottom: 8,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--dark)",
-              direction: "ltr",
-              textAlign: dir === "rtl" ? "end" : "start",
-              fontFamily: "'DM Sans',sans-serif",
-            }}
-          >
-            +972 55-517-5553
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-            {t.waSettingsSub}
-          </div>
-        </div>
-        <a
-          href="https://wa.me/972555175553?text=%D7%A9%D7%9C%D7%95%D7%9D%20%D7%A9%D7%9C%D7%99"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-block",
-            padding: "8px 18px",
-            borderRadius: 999,
-            background: "#25D366",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 500,
-            textDecoration: "none",
-            fontFamily: "inherit",
             marginBottom: 16,
           }}
         >
-          {t.waSettingsBtn}
-        </a>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 2 }}>
+              sheli
+            </div>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: "var(--dark)",
+                direction: "ltr",
+                textAlign: dir === "rtl" ? "end" : "start",
+                fontFamily: "'DM Sans',sans-serif",
+              }}
+            >
+              +972 55-517-5553
+            </div>
+          </div>
+          <a
+            href="https://wa.me/972555175553?text=%D7%A9%D7%9C%D7%95%D7%9D%20%D7%A9%D7%9C%D7%99"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              padding: "8px 16px",
+              borderRadius: 999,
+              background: "#25D366",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 500,
+              textDecoration: "none",
+              fontFamily: "inherit",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {t.waSettingsBtn}
+          </a>
+        </div>
 
         <div
           style={{ height: 1.5, background: "var(--border)", margin: "4px 0 16px" }}
