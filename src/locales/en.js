@@ -93,8 +93,8 @@ const en = {
   // Referral
   menuReferral: "Family brings Family",
   menuReferralDesc: "Invite another family to Sheli \u2014 both families get 1 free month of Premium!",
-  menuReferralShare: "Share on WhatsApp",
-  menuReferralCopy: "Copy link",
+  menuReferralShare: "Send to a family",
+  menuReferralCopy: "Copy",
   menuReferralCopied: "Copied!",
   menuReferralStats: (sent, completed) => `Invited: ${sent} families \u00B7 ${completed} activated`,
 };

@@ -1,3 +1,6 @@
 {
-  "regions": ["fra1"]
+  "regions": ["fra1"],
+  "rewrites": [
+    { "source": "/r/:code", "destination": "/api/r/:code" }
+  ]
 }

@@ -218,7 +218,7 @@ export default function MenuPanel({
 
         {/* Divider */}
         <div
-          style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }}
+          style={{ height: 1.5, background: "var(--border)", margin: "4px 0 16px" }}
         />
 
         {/* 2. Household section */}
@@ -449,7 +449,7 @@ export default function MenuPanel({
         </div>
 
         <div
-          style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }}
+          style={{ height: 1.5, background: "var(--border)", margin: "4px 0 16px" }}
         />
 
         {/* 3. Preferences */}
@@ -528,7 +528,7 @@ export default function MenuPanel({
         </div>
 
         <div
-          style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }}
+          style={{ height: 1.5, background: "var(--border)", margin: "4px 0 16px" }}
         />
 
         {/* 4. Invite */}
@@ -607,96 +607,105 @@ export default function MenuPanel({
         </div>
 
         <div
-          style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }}
+          style={{ height: 1.5, background: "var(--border)", margin: "4px 0 16px" }}
         />
 
-        {/* 4b. Family brings Family */}
+        {/* 4b. Family brings Family — promotional card */}
         {referralCode && (
           <>
-            <div className="section-head" style={{ marginBottom: 8 }}>
-              {t.menuReferral}
-            </div>
-            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, lineHeight: 1.5 }}>
-              {t.menuReferralDesc}
-            </div>
             <div
               style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                background: "var(--cream)",
-                border: "1px solid var(--border)",
-                fontSize: 12,
-                color: "var(--warm)",
-                wordBreak: "break-all",
-                direction: "ltr",
-                marginBottom: 8,
-                userSelect: "all",
+                padding: "16px",
+                borderRadius: 14,
+                background: "linear-gradient(135deg, #FFF0ED 0%, #FFF7F5 100%)",
+                border: "1.5px solid #F0C4BB",
+                marginBottom: 16,
               }}
             >
-              {referralLink}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-              <button
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(referralLink);
-                    setReferralCopied(true);
-                    track("referral_link_copied");
-                    setTimeout(() => setReferralCopied(false), 2000);
-                  } catch {}
-                }}
-                style={{
-                  flex: 1,
-                  padding: "10px",
-                  borderRadius: 10,
-                  background: referralCopied ? "var(--green)" : "var(--coral)",
-                  color: "#fff",
-                  border: "none",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  transition: "background 0.2s",
-                }}
-              >
-                {referralCopied ? t.menuReferralCopied : t.menuReferralCopy}
-              </button>
-              <a
-                href={`https://wa.me/?text=${encodeURIComponent(
-                  isHe
-                    ? "\u05D4\u05D9\u05D9! \u05EA\u05E0\u05E1\u05D5 \u05D0\u05EA \u05E9\u05DC\u05D9 \u2014 \u05E2\u05D5\u05D6\u05E8\u05EA \u05D7\u05DB\u05DE\u05D4 \u05DC\u05DE\u05E9\u05E4\u05D7\u05D4 \u05D1\u05D5\u05D5\u05D8\u05E1\u05D0\u05E4 \uD83C\uDFE0\n" + referralLink
-                    : "Hey! Try Sheli \u2014 a smart family helper on WhatsApp \uD83C\uDFE0\n" + referralLink
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => track("referral_link_shared_wa")}
-                style={{
-                  flex: 1,
-                  padding: "10px",
-                  borderRadius: 10,
-                  background: "#25D366",
-                  color: "#fff",
-                  border: "none",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  textDecoration: "none",
-                  textAlign: "center",
-                  display: "block",
-                }}
-              >
-                {t.menuReferralShare}
-              </a>
-            </div>
-            {referralStats.sent > 0 && (
-              <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
-                {typeof t.menuReferralStats === "function"
-                  ? t.menuReferralStats(referralStats.sent, referralStats.completed)
-                  : ""}
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--dark)", marginBottom: 6 }}>
+                🎁 {t.menuReferral}
               </div>
-            )}
-            <div style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }} />
+              <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+                {t.menuReferralDesc}
+              </div>
+              <div
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  background: "#fff",
+                  border: "1px solid #F0C4BB",
+                  fontSize: 11.5,
+                  color: "var(--warm)",
+                  wordBreak: "break-all",
+                  direction: "ltr",
+                  marginBottom: 10,
+                  userSelect: "all",
+                }}
+              >
+                {referralLink}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(referralLink);
+                      setReferralCopied(true);
+                      track("referral_link_copied");
+                      setTimeout(() => setReferralCopied(false), 2000);
+                    } catch {}
+                  }}
+                  style={{
+                    flex: "0 0 auto",
+                    padding: "9px 16px",
+                    borderRadius: 10,
+                    background: referralCopied ? "var(--green)" : "#fff",
+                    color: referralCopied ? "#fff" : "var(--coral)",
+                    border: referralCopied ? "none" : "1.5px solid var(--coral)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  {referralCopied ? t.menuReferralCopied : t.menuReferralCopy}
+                </button>
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(
+                    isHe
+                      ? "\u05D4\u05D9\u05D9! \u05EA\u05E0\u05E1\u05D5 \u05D0\u05EA \u05E9\u05DC\u05D9 \u2014 \u05E2\u05D5\u05D6\u05E8\u05EA \u05D7\u05DB\u05DE\u05D4 \u05DC\u05DE\u05E9\u05E4\u05D7\u05D4 \u05D1\u05D5\u05D5\u05D8\u05E1\u05D0\u05E4 \uD83C\uDFE0\n" + referralLink
+                      : "Hey! Try Sheli \u2014 a smart family helper on WhatsApp \uD83C\uDFE0\n" + referralLink
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => track("referral_link_shared_wa")}
+                  style={{
+                    flex: 1,
+                    padding: "9px 16px",
+                    borderRadius: 10,
+                    background: "var(--coral)",
+                    color: "#fff",
+                    border: "none",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    textDecoration: "none",
+                    textAlign: "center",
+                    display: "block",
+                  }}
+                >
+                  {t.menuReferralShare}
+                </a>
+              </div>
+              {referralStats.sent > 0 && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
+                  {typeof t.menuReferralStats === "function"
+                    ? t.menuReferralStats(referralStats.sent, referralStats.completed)
+                    : ""}
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -750,7 +759,7 @@ export default function MenuPanel({
         </a>
 
         <div
-          style={{ height: 1, background: "var(--border)", margin: "0 0 16px" }}
+          style={{ height: 1.5, background: "var(--border)", margin: "4px 0 16px" }}
         />
 
         {/* 6. Account */}
