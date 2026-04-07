@@ -9,6 +9,7 @@ export default function MenuPanel({
   lang,
   theme,
   isFounder,
+  email,
   onClose,
   onRenameUser,
   onRenameMember,
@@ -773,8 +774,37 @@ export default function MenuPanel({
         )}
 
         {/* 7. Account */}
-        <div className="section-head" style={{ marginBottom: 8 }}>
+        <div className="section-head" style={{ marginBottom: 10 }}>
           {t.menuAccount}
+        </div>
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "var(--cream)",
+            border: "1px solid var(--border)",
+            marginBottom: 12,
+          }}
+        >
+          {email && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>{t.menuEmail}</div>
+              <div style={{ fontSize: 13, color: "var(--dark)", direction: "ltr", fontFamily: "'DM Sans',sans-serif" }}>{email}</div>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>{t.menuPlan}</div>
+            <div style={{
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "2px 10px",
+              borderRadius: 999,
+              background: "var(--green-light)",
+              color: "var(--green)",
+            }}>
+              {t.menuPlanFree}
+            </div>
+          </div>
         </div>
         <button
           onClick={() => {

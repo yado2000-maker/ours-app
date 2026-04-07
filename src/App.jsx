@@ -697,6 +697,7 @@ export default function Sheli() {
           lang={lang}
           theme={theme}
           isFounder={isFounder}
+          email={session?.user?.email || ""}
           onClose={() => setShowMenu(false)}
           onRenameUser={handleRenameUser}
           onRenameMember={handleRenameMember}
