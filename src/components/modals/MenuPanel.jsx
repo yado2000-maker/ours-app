@@ -453,8 +453,11 @@ export default function MenuPanel({
         />
 
         {/* 3. Invite member to household */}
-        <div className="section-head" style={{ marginBottom: 8 }}>
+        <div className="section-head" style={{ marginBottom: 4 }}>
           {typeof t.menuInvite === "function" ? t.menuInvite(household?.name || "") : t.menuInvite}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, lineHeight: 1.4 }}>
+          {t.menuInviteDesc}
         </div>
         <div
           style={{
@@ -528,8 +531,11 @@ export default function MenuPanel({
         </div>
 
         {/* 4. WhatsApp Bot */}
-        <div className="section-head" style={{ marginBottom: 8 }}>
+        <div className="section-head" style={{ marginBottom: 4 }}>
           {t.menuWhatsApp}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10, lineHeight: 1.4 }}>
+          {t.menuWaDesc}
         </div>
         <div
           style={{

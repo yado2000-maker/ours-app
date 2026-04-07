@@ -375,7 +375,10 @@ export default function Sheli() {
     const updatedHh = { ...household, members: household.members.filter(m => m.id !== memberId) };
     setHouseholdS(updatedHh);
     lastSaveRef.current = Date.now();
-    supabase.from("household_members").delete().eq("id", memberId).eq("household_id", household.id).catch(e => console.error("[removeMember]", e));
+    try {
+      await supabase.from("household_members").delete().eq("id", memberId).eq("household_id", household.id);
+    } catch (e) { console.error("[removeMember]", e); }
+    lastSaveRef.current = Date.now();
   };
 
   // ── Language switch ──

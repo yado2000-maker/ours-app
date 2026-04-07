@@ -83,6 +83,8 @@ const en = {
   menuSaveName: "Save",
   menuAddMember: "Add member",
   menuAddMemberPlaceholder: "Name...",
+  menuInviteDesc: "Send the link to family members \u2014 they\u2019ll join your household in the app",
+  menuWaDesc: "Save this number and add Sheli to your home or family WhatsApp group",
   menuCopyLink: "Copy link",
   menuLinkCopied: "Copied!",
   menuShareWa: "Share on WhatsApp",
