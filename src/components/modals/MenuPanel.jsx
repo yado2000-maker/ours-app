@@ -353,8 +353,8 @@ export default function MenuPanel({
                     </button>
                   </>
                 )}
-                {/* Remove: founder only, not self, not while editing */}
-                {isFounder && m.id !== user?.id && editingMemberId !== m.id && (
+                {/* Remove: any user can remove others (not self), not while editing */}
+                {m.id !== user?.id && editingMemberId !== m.id && (
                   removingMemberId === m.id ? (
                     <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
                       <button onClick={() => { onRemoveMember(m.id); setRemovingMemberId(null); }}
@@ -521,7 +521,7 @@ export default function MenuPanel({
 
         {/* 4. Invite */}
         <div className="section-head" style={{ marginBottom: 8 }}>
-          {t.menuInvite}
+          {typeof t.menuInvite === "function" ? t.menuInvite(household?.name || "") : t.menuInvite}
         </div>
         <div
           style={{
