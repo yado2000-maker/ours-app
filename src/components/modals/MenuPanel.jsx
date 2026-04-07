@@ -806,6 +806,32 @@ export default function MenuPanel({
             </div>
           </div>
         </div>
+        <a
+          href="https://sheli.ai/upgrade"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => track("upgrade_cta_clicked")}
+          style={{
+            display: "block",
+            width: "100%",
+            padding: "12px",
+            borderRadius: 10,
+            background: "var(--coral, #E8725C)",
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 600,
+            textAlign: "center",
+            textDecoration: "none",
+            fontFamily: "inherit",
+            marginBottom: 4,
+            boxSizing: "border-box",
+          }}
+        >
+          {t.menuUpgrade}
+        </a>
+        <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", marginBottom: 12 }}>
+          {t.menuUpgradeDesc}
+        </div>
         <button
           onClick={() => {
             onSignOut();
