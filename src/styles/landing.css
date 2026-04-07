@@ -443,6 +443,7 @@
   color: var(--warm);
   line-height: 1.6;
   padding: 0 0;
+  white-space: pre-line;
 }
 
 .faq-answer.open {

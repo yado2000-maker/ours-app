@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import T from "../locales/index.js";
 import { supabase } from "../lib/supabase.js";
+import { analytics } from "../lib/analytics.js";
 
 export default function AuthScreen({ onBack, lang = "en" }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email" | "forgot" | "forgot-sent" | "reset-password" | "phone" | "phone-otp"
@@ -89,6 +90,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           setLoading(false);
           return;
         }
+        analytics.signupStarted("email");
         const { data, error } = await supabase.auth.signUp({
           email, password,
           options: { data: { full_name: displayName.trim() }, emailRedirectTo: redirectUrl },
@@ -99,11 +101,13 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             setError(isHe ? "כבר יש חשבון עם האימייל הזה. נסו התחברות" : "Already registered. Try signing in");
             setMode("signin");
           } else {
+            analytics.signupCompleted("email");
             setMode("check-email");
           }
           setLoading(false);
           return;
         }
+        analytics.signupCompleted("email");
         return; // auto-confirmed, boot effect will navigate
 
       } else if (mode === "reset-password") {
@@ -128,6 +132,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         // Sign in
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        analytics.signinCompleted("email");
         return; // boot effect navigates
       }
     } catch (err) {
@@ -170,6 +175,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
 
   const handleGoogle = async () => {
     setError(null);
+    analytics.signupStarted("google");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: redirectUrl },
@@ -188,6 +194,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
 
   const handlePhoneSend = async () => {
     setError(null);
+    analytics.signupStarted("phone");
     const formatted = formatPhoneForAuth(phone);
     if (formatted.length < 13) {
       setError(isHe ? "נא להזין מספר טלפון תקין" : "Please enter a valid phone number");
@@ -211,6 +218,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       const formatted = formatPhoneForAuth(phone);
       const { error } = await supabase.auth.verifyOtp({ phone: formatted, token: otpCode, type: "sms" });
       if (error) throw error;
+      analytics.signinCompleted("phone");
       // Boot effect will navigate
     } catch (err) {
       setError(err.message || (isHe ? "קוד לא נכון" : "Invalid code"));

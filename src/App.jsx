@@ -3,6 +3,7 @@ import T from "./locales/index.js";
 import "./styles/app.css";
 import { supabase, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents, loadMessages, insertMessage } from "./lib/supabase.js";
 import buildPrompt from "./lib/prompt.js";
+import { analytics, identifyUser } from "./lib/analytics.js";
 import Setup from "./components/Setup.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
 import WelcomeScreen from "./components/WelcomeScreen.jsx";
@@ -67,6 +68,8 @@ export default function Sheli() {
     if (!wasNull && !isNew && currentId) return;
 
     console.log("[Boot]", currentId ? `session: ${currentId}` : "no session");
+
+    if (session?.user) identifyUser(session.user.id, { email: session.user.email });
 
     if (!session) {
       // ?source=wa → skip landing page, go straight to auth (Path B: WhatsApp dashboard users)
@@ -282,6 +285,7 @@ export default function Sheli() {
       setUser(founder);
     }
     setScreen("connect-wa");
+    analytics.householdCreated(hh.lang || "en", hh.members.length);
 
     try {
       const authUserId = session?.user?.id;
@@ -376,6 +380,7 @@ export default function Sheli() {
 
   // ── Language switch ──
   const switchLang = async (l) => {
+    analytics.languageSwitched(lang, l);
     setLang(l);
     if (household) {
       const updated = { ...household, lang: l };
@@ -393,6 +398,7 @@ export default function Sheli() {
       return { ...x, done: nowDone, completedBy: nowDone ? user.name : null, completedAt: nowDone ? new Date().toISOString() : null };
     });
     setTasksS(n);
+    if (n.find(x => x.id === id)?.done) analytics.taskCompleted();
     const hhId = lsGet("sheli-hhid");
     lastSaveRef.current = Date.now();
     const updated = n.find(x => x.id === id);
@@ -409,6 +415,7 @@ export default function Sheli() {
   const toggleShop = async (id) => {
     const n = shopping.map(x => x.id === id ? { ...x, got: !x.got } : x);
     setShoppingS(n);
+    if (n.find(x => x.id === id)?.got) analytics.shoppingItemGot();
     const hhId = lsGet("sheli-hhid");
     lastSaveRef.current = Date.now();
     const updated = n.find(x => x.id === id);
@@ -465,6 +472,7 @@ export default function Sheli() {
     setAllMsgs(nextAll); setInput(""); setBusy(true); setTab("chat");
 
     if (hhId && authUserId) insertMessage(hhId, authUserId, uMsg).catch(e => console.warn("[send] msg:", e));
+    analytics.aiMessageSent(lang);
 
     try {
       const res = await fetch("/api/chat", {
@@ -497,6 +505,11 @@ export default function Sheli() {
         const kept = current.filter(x => !aiIds.has(x.id) && x.id);
         return [...aiList, ...kept];
       };
+      analytics.aiMessageReceived(lang, !!parsed.tasks, !!parsed.shopping, !!parsed.events);
+      if (Array.isArray(parsed.tasks)) parsed.tasks.filter(t => !tasksRef.current.find(x => x.id === t.id)).forEach(() => analytics.taskCreated());
+      if (Array.isArray(parsed.shopping)) parsed.shopping.filter(s => !shoppingRef.current.find(x => x.id === s.id)).forEach(() => analytics.shoppingItemAdded());
+      if (Array.isArray(parsed.events)) parsed.events.filter(e => !eventsRef.current.find(x => x.id === e.id)).forEach(() => analytics.eventCreated());
+
       // H5 fix: merge against fresh refs, not stale closures
       const newTasks = mergeLists(parsed.tasks, tasksRef.current);
       const newShop = mergeLists(parsed.shopping, shoppingRef.current);
@@ -534,6 +547,7 @@ export default function Sheli() {
     rec.onresult = (e) => {
       const transcript = e.results[0][0].transcript;
       setInput(prev => prev ? prev + " " + transcript : transcript);
+      analytics.voiceInputUsed(lang);
     };
     recognitionRef.current = rec;
     rec.start();
@@ -550,10 +564,9 @@ export default function Sheli() {
 
   // ── Screens ──
   if (screen === "loading") return (
-    <div style={{height:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--cream)",gap:8}}>
-      <div style={{fontFamily:"'Nunito',sans-serif",fontWeight:800,fontSize:30,letterSpacing:"0.04em",
-        background:"linear-gradient(135deg,#E8725C,#D4507A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",
-        filter:"drop-shadow(0 2px 4px rgba(0,0,0,0.08))"}}>sheli</div>
+    <div style={{height:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--cream)",gap:12}}>
+      <img src="/icons/icon.svg" alt="sheli" style={{width:72,height:72,borderRadius:16,
+        filter:"drop-shadow(0 4px 12px rgba(232,114,92,0.25))"}} />
       <div style={{fontSize:13,color:"var(--muted)",fontWeight:300}}>
         {(T[lang] || T.en).loading}
       </div>

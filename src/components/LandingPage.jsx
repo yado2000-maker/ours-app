@@ -39,7 +39,8 @@ const CONTENT = {
     faqTitle: "שאלות נפוצות",
     faq: [
       { q: "איך שלי עובדת?", a: "שלי היא מנוע בינה מלאכותית חכם שמבין עברית בשיחה טבעית — תגידו \u0022חלב\u0022 והיא תוסיף לרשימה, תכתבו \u0022לאסוף את נועה מהחוג ב-5\u0022 והיא תזכיר לכם בזמן, ואפילו תחלק מטלות בית בין בני הבית. היא לומדת את הסגנון שלכם עם הזמן — כינויים, מוצרים קבועים, שעות שחוזרות. ככל שתשתמשו יותר, היא תבין אתכם טוב יותר." },
-      { q: "כמה זה עולה?", a: "30 פעולות בחודש חינם, בלי כרטיס אשראי. רוצים ללא הגבלה? Premium ב-9.90 \u20AA לחודש." },
+      { q: "יש גם אפליקציה?", a: "כן! לשלי יש אפליקציה נהדרת - רשימת הקניות, המטלות ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה. אפשר לצפות בהכל, לערוך ולהתעדכן בקלות. היכנסו: sheli.ai" },
+      { q: "כמה זה עולה?", a: "חינם לגמרי עד 30 פעולות בחודש, כל חודש!\nצריכים יותר פעולות? הצטרפו למנוי פרימיום ללא הגבלה ב-9.90 \u20AA לחודש בלבד." },
       { q: "מה עם הפרטיות?", a: "שלי לא שומרת תמונות, הודעות קוליות או מדיה — רק טקסט שקשור למטלות, קניות ואירועים. כל המידע נמחק אחרי 30 יום. שיחות אישיות? שלי לא רואה אותן בכלל. רק בני הבית שלכם רואים את המידע — אף אחד אחר, כולל אנחנו." },
       { q: "איך מתחילים? ואיך מפסיקים?", a: "הוסיפו את שלי לכל קבוצת ווטסאפ קיימת — היא מתחילה לעזור מיד. רוצים להפסיק? פשוט הוציאו אותה מהקבוצה. הכל נמחק אוטומטית, בלי התחייבות." },
     ],
@@ -79,6 +80,7 @@ const CONTENT = {
     faqTitle: "FAQ",
     faq: [
       { q: "How does Sheli work?", a: "Sheli is a smart AI that understands natural language — say \"milk\" and it's on the list, write \"pick up Emma from class at 5\" and she'll remind you on time, even assign chores around the house. She learns your style over time — nicknames, regular products, recurring schedules. The more you use her, the better she gets." },
+      { q: "Is there also an app?", a: "Yes! Sheli has an amazing app — your shopping list, tasks and calendar sync in real time, both from WhatsApp and the app. View, edit and stay up to date easily. Visit: sheli.ai" },
       { q: "How much does it cost?", a: "30 actions per month for free, no credit card needed. Want unlimited? Premium is $2.70/month." },
       { q: "What about privacy?", a: "Sheli doesn't store photos, voice messages or media — only text about tasks, shopping and events. All data is deleted after 30 days. Personal conversations? Sheli doesn't see them at all. Only your household members can see your data — nobody else, including us." },
       { q: "How do I start? And stop?", a: "Add Sheli to any existing WhatsApp group — she starts helping right away. Want to stop? Just remove her from the group. Everything is deleted automatically, no strings attached." },

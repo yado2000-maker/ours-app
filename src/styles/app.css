@@ -54,6 +54,7 @@
 html,body{height:100%;background:var(--cream);overflow:hidden;}
 .app{display:flex;flex-direction:column;height:100dvh;max-width:480px;margin:0 auto;background:var(--cream);}
 .app[dir="ltr"]{font-family:'Nunito',sans-serif;}
+.app[dir="ltr"] *{font-family:'Nunito',sans-serif;}
 .app[dir="rtl"]{font-family:'Heebo',sans-serif;}
 .app[dir="rtl"] *{font-family:'Heebo',sans-serif;}
 .app[dir="rtl"] .wordmark,.app[dir="ltr"] .wordmark{font-family:'Nunito',sans-serif!important;font-weight:800!important;letter-spacing:0.04em!important;}

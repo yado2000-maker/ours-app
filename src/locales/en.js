@@ -35,7 +35,7 @@ const en = {
   s2: "Add milk, eggs and bread to the list",
   s3: (n) => `Add 'vacuum living room' for ${n}`,
   s4: "What\u2019s on the calendar this week?",
-  inputPlaceholder: (n) => `Message Sheli as ${n}\u2026`,
+  inputPlaceholder: (n) => `Message Sheli\u2026`,
   sheliLabel: "Sheli",
   tasksTitle: "Chores & Tasks",
   clearDone: "Clear done",

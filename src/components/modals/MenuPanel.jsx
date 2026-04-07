@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import T from "../../locales/index.js";
+import { analytics } from "../../lib/analytics.js";
 
 export default function MenuPanel({
   user,
@@ -495,7 +496,7 @@ export default function MenuPanel({
           ].map(([val, label]) => (
             <button
               key={val}
-              onClick={() => onSetTheme(val)}
+              onClick={() => { analytics.themeChanged(val); onSetTheme(val); }}
               style={{
                 flex: 1,
                 padding: "8px 0",
@@ -544,6 +545,7 @@ export default function MenuPanel({
               try {
                 await navigator.clipboard.writeText(joinUrl);
                 setCopied(true);
+                analytics.memberInviteSent("copy_link");
                 setTimeout(() => setCopied(false), 2000);
               } catch { /* clipboard not available (HTTP/iframe) — don't show false success */ }
             }}
@@ -571,6 +573,7 @@ export default function MenuPanel({
             )}`}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => analytics.memberInviteSent("whatsapp")}
             style={{
               flex: 1,
               padding: "10px",
