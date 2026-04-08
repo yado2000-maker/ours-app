@@ -19,7 +19,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
   const t = T[lang] || T.en;
   const dir = t.dir;
   const isHe = lang === "he";
-  const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+  const font = isHe ? "'Heebo',sans-serif" : "'Nunito',sans-serif";
 
   const redirectUrl = window.location.hostname === "localhost"
     ? window.location.origin : "https://sheli.ai";
@@ -241,8 +241,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>📬</div>
         <div style={{
-          fontFamily: isHe ? "'Heebo', sans-serif" : "'Cormorant Garamond', serif", fontWeight: isHe ? 500 : 300,
-          fontSize: 28, letterSpacing: isHe ? 0 : "0.18em", color: "var(--dark)", marginBottom: 12,
+          fontFamily: isHe ? "'Heebo', sans-serif" : "'Nunito', sans-serif", fontWeight: isHe ? 500 : 700,
+          fontSize: 28, letterSpacing: isHe ? 0 : "0.02em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "בדקו את האימייל" : "Check your email"}
         </div>
@@ -279,8 +279,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>✉️</div>
         <div style={{
-          fontFamily: isHe ? "'Heebo', sans-serif" : "'Cormorant Garamond', serif", fontWeight: isHe ? 500 : 300,
-          fontSize: 28, letterSpacing: isHe ? 0 : "0.18em", color: "var(--dark)", marginBottom: 12,
+          fontFamily: isHe ? "'Heebo', sans-serif" : "'Nunito', sans-serif", fontWeight: isHe ? 500 : 700,
+          fontSize: 28, letterSpacing: isHe ? 0 : "0.02em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "בדקו את האימייל" : "Check your email"}
         </div>
@@ -316,7 +316,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           <input type="password" placeholder={isHe ? "אימות סיסמה" : "Confirm password"} value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)} dir="ltr" required minLength={6}
             autoComplete="new-password" style={inputStyle} />
-          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
           <button type="submit" disabled={loading}
             style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
             {loading ? (isHe ? "רגע..." : "Loading...") : (isHe ? "עדכנו סיסמה" : "Update Password")}
@@ -344,7 +344,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           <input type="email" placeholder={isHe ? "אימייל" : "Email"} value={email}
             onChange={(e) => setEmail(e.target.value)} dir="ltr" required autoComplete="email"
             style={inputStyle} />
-          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
           <button onClick={handleForgotPassword} disabled={loading}
             style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
             {loading ? (isHe ? "רגע..." : "Loading...") : (isHe ? "שלחו קישור איפוס" : "Send reset link")}
@@ -376,7 +376,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           <input type="tel" placeholder={isHe ? "מספר טלפון (05X...)" : "Phone number"} value={phone}
             onChange={(e) => setPhone(e.target.value)} dir="ltr" required
             autoComplete="tel" style={inputStyle} />
-          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
           <button onClick={handlePhoneSend} disabled={loading}
             style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
             {loading ? (isHe ? "שולח..." : "Sending...") : (isHe ? "שלחו קוד" : "Send code")}
@@ -400,8 +400,8 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       }} dir={dir}>
         <div style={{ fontSize: 48, marginBottom: 20 }}>📱</div>
         <div style={{
-          fontFamily: isHe ? "'Heebo', sans-serif" : "'Cormorant Garamond', serif", fontWeight: isHe ? 500 : 300,
-          fontSize: 28, letterSpacing: isHe ? 0 : "0.18em", color: "var(--dark)", marginBottom: 12,
+          fontFamily: isHe ? "'Heebo', sans-serif" : "'Nunito', sans-serif", fontWeight: isHe ? 500 : 700,
+          fontSize: 28, letterSpacing: isHe ? 0 : "0.02em", color: "var(--dark)", marginBottom: 12,
         }}>
           {isHe ? "הזינו את הקוד" : "Enter the code"}
         </div>
@@ -413,7 +413,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} dir="ltr"
             autoComplete="one-time-code" maxLength={6}
             style={{ ...inputStyle, textAlign: "center", fontSize: 24, letterSpacing: "0.3em" }} />
-          {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+          {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
           <button onClick={handlePhoneVerify} disabled={loading || otpCode.length < 6}
             style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading || otpCode.length < 6 ? 0.5 : 1 }}>
             {loading ? (isHe ? "מאמת..." : "Verifying...") : (isHe ? "אישור" : "Verify")}
@@ -476,7 +476,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             autoComplete="new-password" style={inputStyle} />
         )}
 
-        {error && <p style={{ fontSize: 13, color: "var(--accent)", textAlign: "center", margin: 0 }}>{error}</p>}
+        {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
 
         <button type="submit" disabled={loading}
           style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1, transition: "background 0.2s" }}>

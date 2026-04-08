@@ -54,7 +54,7 @@ export default function MenuPanel({
     }
   }, [household?.id]);
 
-  const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+  const font = isHe ? "'Heebo',sans-serif" : "'Nunito',sans-serif";
   const joinUrl =
     typeof window !== "undefined"
       ? window.location.origin + "/?join=" + (household?.id || "")
@@ -561,7 +561,7 @@ export default function MenuPanel({
                 color: "var(--dark)",
                 direction: "ltr",
                 textAlign: dir === "rtl" ? "end" : "start",
-                fontFamily: "'DM Sans',sans-serif",
+                fontFamily: "'Nunito',sans-serif",
               }}
             >
               +972 55-517-5553
@@ -620,7 +620,7 @@ export default function MenuPanel({
                 fontSize: 13,
                 fontWeight: 500,
                 cursor: "pointer",
-                fontFamily: "'DM Sans',sans-serif",
+                fontFamily: "'Nunito',sans-serif",
                 transition: "all 0.15s",
               }}
             >
@@ -789,7 +789,7 @@ export default function MenuPanel({
           {email && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>{t.menuEmail}</div>
-              <div style={{ fontSize: 13, color: "var(--dark)", direction: "ltr", fontFamily: "'DM Sans',sans-serif" }}>{email}</div>
+              <div style={{ fontSize: 13, color: "var(--dark)", direction: "ltr", fontFamily: "'Nunito',sans-serif" }}>{email}</div>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

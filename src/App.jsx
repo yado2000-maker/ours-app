@@ -646,24 +646,22 @@ export default function Sheli() {
   // ── Connect WhatsApp screen (post-setup onboarding) ──
   if (screen === "connect-wa") {
     const wDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
-    const wFont = wDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+    const wFont = wDir === "rtl" ? "'Heebo',sans-serif" : "'Nunito',sans-serif";
     const wt = T[household?.lang || "en"] || T.en;
     return (
-      <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:wFont,textAlign:"center"}} dir={wDir}>
-        <div style={{fontSize:48,marginBottom:16}}>💬</div>
-        <div style={{fontSize:20,fontWeight:500,color:"var(--dark)",marginBottom:12}}>{wt.waTitle}</div>
-        <p style={{fontSize:14,color:"var(--muted)",fontWeight:400,lineHeight:1.65,maxWidth:300,marginBottom:24}}>{wt.waSub}</p>
-        <div style={{background:"var(--white)",border:"1.5px solid var(--border)",borderRadius:16,padding:"20px 24px",marginBottom:24,width:"100%",maxWidth:300}}>
-          <div style={{fontSize:13,color:"var(--muted)",marginBottom:8}}>{wt.waStep1}</div>
-          <div style={{fontSize:18,fontWeight:600,color:"var(--dark)",marginBottom:16,letterSpacing:"0.03em",fontFamily:"'DM Sans',sans-serif",direction:"ltr"}}>{SHELI_PHONE_DISPLAY}</div>
-          <div style={{fontSize:13,color:"var(--muted)"}}>{wt.waStep2}</div>
+      <div className="cwa-wrap" style={{fontFamily:wFont}} dir={wDir}>
+        <div className="cwa-icon">💬</div>
+        <div className="cwa-title">{wt.waTitle}</div>
+        <p className="cwa-sub">{wt.waSub}</p>
+        <div className="cwa-card">
+          <div className="cwa-step">{wt.waStep1}</div>
+          <div className="cwa-phone">{SHELI_PHONE_DISPLAY}</div>
+          <div className="cwa-step">{wt.waStep2}</div>
         </div>
-        <a href={SHELI_WA_LINK} target="_blank" rel="noopener noreferrer"
-          style={{display:"block",padding:"14px 36px",borderRadius:999,background:"#25D366",color:"#fff",border:"none",fontSize:15,fontWeight:500,cursor:"pointer",fontFamily:"inherit",textDecoration:"none",marginBottom:16,transition:"opacity 0.2s"}}>
+        <a href={SHELI_WA_LINK} target="_blank" rel="noopener noreferrer" className="cwa-btn">
           {wt.waBtn}
         </a>
-        <button onClick={() => { lsSet("sheli-onboarded", true); setScreen(user ? "chat" : "pick"); }}
-          style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"inherit",padding:8}}>
+        <button onClick={() => { lsSet("sheli-onboarded", true); setScreen(user ? "chat" : "pick"); }} className="cwa-later">
           {wt.waLater}
         </button>
       </div>
@@ -673,29 +671,25 @@ export default function Sheli() {
   // ── User picker screen ──
   if (screen === "pick") {
     const pickDir = (household?.lang || "en") === "he" ? "rtl" : "ltr";
-    const pickFont = pickDir === "rtl" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+    const pickFont = pickDir === "rtl" ? "'Heebo',sans-serif" : "'Nunito',sans-serif";
     return (
-      <div style={{minHeight:"100dvh",background:"var(--cream)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",fontFamily:pickFont}} dir={pickDir}>
-        <div style={{fontFamily:"'Cormorant Garamond',serif",fontWeight:300,fontSize:36,letterSpacing:"0.22em",color:"var(--dark)",marginBottom:6}}>Sheli</div>
-        <p style={{fontSize:15,color:"var(--dark)",fontWeight:400,marginBottom:4,textAlign:"center"}}>
+      <div className="pick-wrap" style={{fontFamily:pickFont}} dir={pickDir}>
+        <div className="setup-mark">sheli</div>
+        <p className="pick-welcome">
           {pickDir === "rtl"
             ? `ברוכים הבאים, ${household.name}`
             : `Welcome, ${household.name}`}
         </p>
-        <p style={{fontSize:13,color:"var(--muted)",fontWeight:300,marginBottom:36}}>
+        <p className="pick-question">
           {pickDir === "rtl" ? "איך קוראים לך?" : "Who are you?"}
         </p>
-        <div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:280}}>
+        <div className="pick-list">
           {household.members.map(m => (
-            <button key={m.id}
-              style={{padding:"15px 20px",borderRadius:14,border:"1.5px solid var(--border)",background:"var(--white)",fontFamily:pickFont,fontSize:16,fontWeight:500,color:"var(--dark)",cursor:"pointer",transition:"all 0.15s",boxShadow:"var(--sh)"}}
-              onMouseOver={e=>e.currentTarget.style.borderColor="var(--accent)"}
-              onMouseOut={e=>e.currentTarget.style.borderColor="var(--border)"}
+            <button key={m.id} className="pick-member"
               onClick={() => {
                 if (!lsGet("sheli-hhid") && household?.id) {
                   lsSet("sheli-hhid", household.id);
                 }
-                // Messages already loaded from Supabase during boot
                 lsSet("sheli-user", m);
                 setUser(m);
                 setDataLoaded(true); setScreen("chat");

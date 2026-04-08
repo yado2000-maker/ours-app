@@ -11,7 +11,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   const t = lang ? T[lang] : T.en;
   const dir = lang === "he" ? "rtl" : "ltr";
   const isHe = lang === "he";
-  const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+  const font = isHe ? "'Heebo',sans-serif" : "'Nunito',sans-serif";
 
   const selectLang = (l) => {
     setLang(l);
@@ -29,16 +29,18 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
         alignItems: "center",
         justifyContent: "center",
         padding: "40px 24px",
-        fontFamily: "'DM Sans',sans-serif",
+        fontFamily: "'Nunito',sans-serif",
       }}>
         <div style={{
-          fontFamily: "'Cormorant Garamond',serif",
-          fontWeight: 300,
+          fontFamily: "'Nunito',sans-serif",
+          fontWeight: 800,
           fontSize: 42,
-          letterSpacing: "0.22em",
-          color: "var(--dark)",
+          letterSpacing: "0.04em",
+          background: "linear-gradient(135deg, #E8725C, #D4507A)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
           marginBottom: 8,
-        }}>Sheli</div>
+        }}>sheli</div>
         <p style={{
           fontSize: 14,
           color: "var(--muted)",
@@ -133,13 +135,15 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
       }}>
         {/* Wordmark + tagline */}
         <div style={{
-          fontFamily: "'Cormorant Garamond',serif",
-          fontWeight: 300,
+          fontFamily: "'Nunito',sans-serif",
+          fontWeight: 800,
           fontSize: 28,
-          letterSpacing: "0.22em",
-          color: "var(--dark)",
+          letterSpacing: "0.04em",
+          background: "linear-gradient(135deg, #E8725C, #D4507A)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
           marginBottom: 4,
-        }}>Sheli</div>
+        }}>sheli</div>
 
         <p style={{
           fontSize: 15,

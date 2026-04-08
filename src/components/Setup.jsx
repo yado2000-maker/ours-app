@@ -22,8 +22,8 @@ export default function Setup({ onDone, initialLang }) {
   const selectLang = (l) => { setLang(l); setTimeout(() => setStep(1), 160); };
 
   return (
-    <div className="setup-wrap" dir={dir} style={{ fontFamily: lang === "he" ? "'Heebo',sans-serif" : "'DM Sans',sans-serif" }}>
-      <div className="setup-mark">Sheli</div>
+    <div className="setup-wrap" dir={dir} style={{ fontFamily: lang === "he" ? "'Heebo',sans-serif" : "'Nunito',sans-serif" }}>
+      <div className="setup-mark">sheli</div>
       <p className="setup-tagline">Your home & family's smart helper</p>
 
       <div className="setup-form">

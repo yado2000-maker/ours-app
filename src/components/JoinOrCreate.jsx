@@ -29,7 +29,7 @@ export default function JoinOrCreate({
 
   const isHe = lang === "he";
   const dir = isHe ? "rtl" : "ltr";
-  const font = isHe ? "'Heebo',sans-serif" : "'DM Sans',sans-serif";
+  const font = isHe ? "'Heebo',sans-serif" : "'Nunito',sans-serif";
 
   const handleJoinDetected = async () => {
     if (!detectedHousehold) return;
@@ -82,11 +82,13 @@ export default function JoinOrCreate({
 
     // Sheli wordmark
     wordmark: {
-      fontFamily: "'Cormorant Garamond', serif",
-      fontWeight: 300,
+      fontFamily: "'Nunito', sans-serif",
+      fontWeight: 800,
       fontSize: 38,
-      letterSpacing: "0.22em",
-      color: "var(--dark)",
+      letterSpacing: "0.04em",
+      background: "linear-gradient(135deg, #E8725C, #D4507A)",
+      WebkitBackgroundClip: "text",
+      WebkitTextFillColor: "transparent",
       marginBottom: 6,
       userSelect: "none",
     },
@@ -119,7 +121,7 @@ export default function JoinOrCreate({
       padding: "22px 20px 18px",
       border: "2px solid var(--accent)",
       boxShadow:
-        "0 2px 18px rgba(196, 113, 74, 0.12), 0 1px 4px rgba(0,0,0,0.04)",
+        "0 2px 18px rgba(232, 114, 92, 0.12), 0 1px 4px rgba(0,0,0,0.04)",
       display: "flex",
       flexDirection: "column",
       gap: 12,
@@ -136,7 +138,7 @@ export default function JoinOrCreate({
       width: 120,
       height: 120,
       borderRadius: "50%",
-      background: "rgba(196, 113, 74, 0.06)",
+      background: "rgba(232, 114, 92, 0.06)",
       pointerEvents: "none",
     },
 
@@ -149,9 +151,9 @@ export default function JoinOrCreate({
     },
 
     detectedName: {
-      fontFamily: "'Cormorant Garamond', serif",
+      fontFamily: "'Nunito', sans-serif",
       fontSize: 24,
-      fontWeight: 400,
+      fontWeight: 700,
       color: "var(--dark)",
       lineHeight: 1.2,
       display: "flex",
@@ -227,7 +229,7 @@ export default function JoinOrCreate({
       fontSize: 15,
       color: "var(--dark)",
       outline: "none",
-      fontFamily: "'DM Sans', sans-serif",
+      fontFamily: "'Nunito', sans-serif",
       textAlign: "start",
       transition: "border-color 0.2s",
       direction: "ltr",
@@ -266,7 +268,7 @@ export default function JoinOrCreate({
     // Error message
     error: {
       fontSize: 13,
-      color: "var(--accent)",
+      color: "var(--primary)",
       textAlign: "center",
       marginBottom: 12,
       animation: "fadeIn 0.2s ease",
@@ -276,7 +278,7 @@ export default function JoinOrCreate({
   return (
     <div style={s.wrap} dir={dir}>
       {/* Wordmark */}
-      <div style={s.wordmark}>Sheli</div>
+      <div style={s.wordmark}>sheli</div>
 
       {/* Subtitle */}
       <p style={s.subtitle}>
