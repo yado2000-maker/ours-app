@@ -4,7 +4,7 @@ import { supabase } from "../lib/supabase.js";
 import { analytics } from "../lib/analytics.js";
 
 export default function AuthScreen({ onBack, lang = "en" }) {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "check-email" | "forgot" | "forgot-sent" | "reset-password" | "phone" | "phone-otp"
+  const [mode, setMode] = useState("main"); // "main" | "signin" | "signup" | "check-email" | "forgot" | "forgot-sent" | "reset-password" | "phone" | "phone-otp"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -381,9 +381,9 @@ export default function AuthScreen({ onBack, lang = "en" }) {
             style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
             {loading ? (isHe ? "שולח..." : "Sending...") : (isHe ? "שלחו קוד" : "Send code")}
           </button>
-          <button onClick={() => { setMode("signin"); setError(null); }}
+          <button onClick={() => { setMode("main"); setError(null); }}
             style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8 }}>
-            {isHe ? "→ חזרה להתחברות" : "← Back to sign in"}
+            {isHe ? "→ חזרה" : "← Back"}
           </button>
         </div>
       </div>
@@ -398,7 +398,10 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         flexDirection: "column", alignItems: "center", justifyContent: "center",
         padding: "40px 24px", fontFamily: font, textAlign: "center",
       }} dir={dir}>
-        <div style={{ fontSize: 48, marginBottom: 20 }}>📱</div>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="#2D8E6F" style={{ marginBottom: 20 }}>
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+          <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 0 1-4.106-1.138l-.294-.176-2.862.85.85-2.862-.176-.294A7.96 7.96 0 0 1 4 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/>
+        </svg>
         <div style={{
           fontFamily: isHe ? "'Heebo', sans-serif" : "'Nunito', sans-serif", fontWeight: isHe ? 500 : 700,
           fontSize: 28, letterSpacing: isHe ? 0 : "0.02em", color: "var(--dark)", marginBottom: 12,
@@ -406,7 +409,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           {isHe ? "הזינו את הקוד" : "Enter the code"}
         </div>
         <p style={{ fontSize: 15, color: "var(--warm)", lineHeight: 1.6, maxWidth: 300, marginBottom: 24 }}>
-          {isHe ? `שלחתי קוד SMS ל-${phone}` : `I sent an SMS code to ${phone}`}
+          {isHe ? `שלחתי קוד בוואטסאפ ל-${phone}` : `I sent a WhatsApp code to ${phone}`}
         </p>
         <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
           <input type="text" inputMode="numeric" placeholder={isHe ? "קוד בן 6 ספרות" : "6-digit code"} value={otpCode}
@@ -427,7 +430,77 @@ export default function AuthScreen({ onBack, lang = "en" }) {
     );
   }
 
-  // ── Sign in / Sign up form ──
+  // WhatsApp icon SVG (inline, muted forest green)
+  const waIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+      <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 0 1-4.106-1.138l-.294-.176-2.862.85.85-2.862-.176-.294A7.96 7.96 0 0 1 4 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/>
+    </svg>
+  );
+
+  // ── Main auth screen (WhatsApp primary, Google secondary, email tertiary) ──
+  if (mode === "main") {
+    return (
+      <div style={{
+        minHeight: "100dvh", background: "var(--cream)", display: "flex",
+        flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 24px", fontFamily: font,
+      }} dir={dir}>
+        <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
+            background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+            filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
+        <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: isHe ? 400 : 300, marginBottom: 36, letterSpacing: isHe ? 0 : "0.03em" }}>{isHe ? "העוזרת החכמה של הבית והמשפחה" : "Your home & family's smart helper"}</p>
+
+        <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Primary: WhatsApp OTP */}
+          <button type="button" onClick={() => { setMode("phone"); setError(null); }}
+            style={{ padding: "15px 20px", borderRadius: 14, background: "#2D8E6F", color: "#fff", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "opacity 0.15s" }}>
+            {isHe ? "שלחו לי קוד חד פעמי לטלפון" : "Send me a one-time code"}
+            {waIcon}
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "2px 0" }}>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>{isHe ? "או" : "or"}</span>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+
+          {/* Secondary: Google */}
+          <button type="button" onClick={handleGoogle}
+            style={{ padding: "13px 15px", borderRadius: 14, background: "#f3f4f6", border: "1.5px solid #e5e7eb", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s" }}>
+            {isHe ? "כניסה דרך Google" : "Sign in with Google"}
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "2px 0" }}>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>{isHe ? "או" : "or"}</span>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+
+          {/* Tertiary: Email */}
+          <button type="button" onClick={() => { setMode("signin"); setError(null); }}
+            style={{ padding: "13px 15px", borderRadius: 14, background: "var(--white)", border: "1.5px solid var(--border)", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", textAlign: "center", transition: "all 0.15s" }}>
+            {isHe ? "כניסה עם אימייל וסיסמה" : "Sign in with email & password"}
+          </button>
+        </div>
+
+        {onBack && (
+          <button onClick={onBack}
+            style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8, marginTop: 8 }}>
+            {isHe ? "→ חזרה" : "← Back"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // ── Sign in / Sign up form (email + password) ──
   return (
     <div style={{
       minHeight: "100dvh", background: "var(--cream)", display: "flex",
@@ -437,7 +510,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
       <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
           background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
           filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
-      <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: isHe ? 400 : 300, marginBottom: 36, letterSpacing: isHe ? 0 : "0.03em" }}>{isHe ? "העוזרת החכמה של הבית והמשפחה" : "Your home & family's smart helper"}</p>
+      <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: isHe ? 400 : 300, marginBottom: 36, letterSpacing: isHe ? 0 : "0.03em" }}>{isHe ? "כניסה עם אימייל" : "Sign in with email"}</p>
 
       <form onSubmit={handleSubmit} style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Mode toggle */}
@@ -483,44 +556,18 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           {loading ? (isHe ? "רגע..." : "Loading...") : mode === "signin" ? (isHe ? "התחברו" : "Sign In") : (isHe ? "הירשמו" : "Sign Up")}
         </button>
 
-        {/* Forgot password link (signin only) */}
         {mode === "signin" && (
           <button type="button" onClick={() => { setMode("forgot"); setError(null); }}
             style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", padding: 2, textAlign: "center" }}>
             {isHe ? "שכחתם סיסמה?" : "Forgot password?"}
           </button>
         )}
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "4px 0" }}>
-          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>{isHe ? "או" : "or"}</span>
-          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-        </div>
-
-        <button type="button" onClick={handleGoogle}
-          style={{ padding: "13px 15px", borderRadius: 14, background: "var(--white)", border: "1.5px solid var(--border)", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s" }}>
-          <svg width="18" height="18" viewBox="0 0 24 24">
-            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-          </svg>
-          {isHe ? "המשיכו עם Google" : "Continue with Google"}
-        </button>
-
-        <button type="button" onClick={() => { setMode("phone"); setError(null); }}
-          style={{ padding: "13px 15px", borderRadius: 14, background: "var(--white)", border: "1.5px solid var(--border)", color: "var(--warm)", fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.15s" }}>
-          <span style={{ fontSize: 18 }}>📱</span>
-          {isHe ? "המשיכו עם מספר טלפון" : "Continue with phone number"}
-        </button>
       </form>
 
-      {onBack && (
-        <button onClick={onBack}
-          style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8, marginTop: 8 }}>
-          {isHe ? "→ חזרה" : "← Back"}
-        </button>
-      )}
+      <button onClick={() => { setMode("main"); setError(null); }}
+        style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: 8, marginTop: 12 }}>
+        {isHe ? "→ חזרה" : "← Back"}
+      </button>
     </div>
   );
 }

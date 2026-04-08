@@ -153,8 +153,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
         </div>
 
         <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-cta">
-          <WhatsAppIcon />
           {c.cta}
+          <WhatsAppIcon />
         </a>
 
         <div className="landing-free-badge">{c.freeBadge}</div>
@@ -231,8 +231,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <section className="landing-bottom-cta">
         <h2 className="landing-section-title">{c.bottomTitle}</h2>
         <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-cta">
-          <WhatsAppIcon />
           {c.cta}
+          <WhatsAppIcon />
         </a>
         <span className="landing-bottom-or">{c.bottomOr}</span>
         <button className="landing-cta landing-cta-app" onClick={handleGetStarted}>
