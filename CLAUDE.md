@@ -49,12 +49,13 @@
 - **Messages** stored in Supabase `messages` table (moved from localStorage 2026-04-02)
 - **Bulk AI writes use upsert→prune** (not delete→insert). `saveAllTasks/Shopping/Events` upsert first, then delete orphans only after upsert succeeds. If upsert fails, existing data is untouched. (Fixed 2026-04-06, was delete→insert which lost data on network failure.)
 - **Realtime:** 5 channels (tasks, shopping_items, events, households_v2, messages) with 3s echo debounce
-- **CRITICAL — silent upsert RLS failure:** Supabase `.upsert()` checks INSERT policy first, even for existing rows. If INSERT policy is stricter than UPDATE, upserts fail silently. All INSERT policies currently relaxed to `auth.uid() IS NOT NULL` (tighten before launch).
+- **RLS tightened (2026-04-08):** All tables now use `is_household_member(household_id)` for CRUD. Upsert-safe: INSERT WITH CHECK and UPDATE USING use the same `is_household_member` check, so upserts pass both paths identically. `household_members` INSERT uses `(user_id = auth.uid() OR is_household_member(household_id))` to allow self-join and founder adding members. Bot-only tables (`classification_corrections`, `global_prompt_proposals`, `household_patterns`) have RLS enabled with no policies (service_role only).
+- **Supabase upsert RLS gotcha (historical):** `.upsert()` checks INSERT policy first, even for existing rows. Fixed by making INSERT and UPDATE use the same check (`is_household_member`). Previously all INSERT policies were relaxed to `auth.uid() IS NOT NULL`.
 
 ## Supabase Gotchas
 - **RLS blocks everything when auth.uid() is NULL** — Supabase client with publishable key + auth session sends JWT. If JWT is stale/expired, auth.uid() returns NULL and all RLS policies fail silently.
 - **Clock skew warning** (`Session as retrieved from URL was issued in the future`) — indicates JWT timestamp mismatch. Can cause auth.uid() to be NULL. Fix: clear localStorage and re-authenticate.
-- **RLS is currently RELAXED for development** — most tables use `auth.uid() IS NOT NULL` instead of membership checks. Tighten before launch.
+- **RLS tightened for launch (2026-04-08)** — all core tables use `is_household_member(household_id)`. See security audit: `docs/plans/2026-04-08-security-audit-design.md`.
 - **Use JWT anon key, NOT publishable key** — `sb_publishable_...` format causes 406 errors on raw REST calls (PostgREST rejects non-JWT tokens). Always use the legacy `eyJhbG...` anon JWT. Both are available in the project.
 - **Edge Functions use service_role key** (bypasses RLS). Web app uses anon JWT key (goes through RLS).
 - **Realtime must be explicitly enabled** per table: `ALTER PUBLICATION supabase_realtime ADD TABLE public.tablename;`

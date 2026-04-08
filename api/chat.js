@@ -65,6 +65,18 @@ export default async function handler(req, res) {
   // Cap max_tokens
   const maxTokens = Math.min(body.max_tokens || MAX_TOKENS_CAP, MAX_TOKENS_CAP);
 
+  // SECURITY: Cap system prompt and message sizes to prevent cost amplification
+  if (body.system && typeof body.system === "string" && body.system.length > 8000) {
+    return res.status(400).json({ error: "System prompt too long" });
+  }
+  const totalInputChars = body.messages.reduce((sum, m) => {
+    const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "");
+    return sum + content.length;
+  }, 0);
+  if (totalInputChars > 50000) {
+    return res.status(400).json({ error: "Input messages too long" });
+  }
+
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
