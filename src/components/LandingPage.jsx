@@ -41,11 +41,12 @@ const CONTENT = {
       { q: "איך שלי עובדת?", a: "שלי היא מנוע בינה מלאכותית חכם שמבין עברית בשיחה טבעית — תגידו \u0022חלב\u0022 והיא תוסיף לרשימה, תכתבו \u0022לאסוף את נועה מהחוג ב-5\u0022 והיא תזכיר לכם בזמן, ואפילו תחלק מטלות בית בין בני הבית. היא לומדת את הסגנון שלכם עם הזמן — כינויים, מוצרים קבועים, שעות שחוזרות. ככל שתשתמשו יותר, היא תבין אתכם טוב יותר." },
       { q: "יש גם אפליקציה?", a: "כן! לשלי יש אפליקציה נהדרת - רשימת הקניות, המטלות ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה. אפשר לצפות בהכל, לערוך ולהתעדכן בקלות. היכנסו: sheli.ai" },
       { q: "כמה זה עולה?", a: "חינם לגמרי עד 30 פעולות בחודש, כל חודש!\nצריכים יותר פעולות? הצטרפו למנוי פרימיום ללא הגבלה ב-9.90 \u20AA לחודש בלבד." },
-      { q: "מה עם הפרטיות?", a: "שלי לא שומרת תמונות, הודעות קוליות או מדיה — רק טקסט שקשור למטלות, קניות ואירועים. כל המידע נמחק אחרי 30 יום. שיחות אישיות? שלי לא רואה אותן בכלל. רק בני הבית שלכם רואים את המידע — אף אחד אחר, כולל אנחנו." },
+      { q: "מה עם הפרטיות?", a: "שלי לא שומרת תמונות או וידאו. היא יכולה לשמוע הודעות קוליות קצרות - תוכלו להקליט לה את המצרכים לקניות או את מטלות הבית בדיוק כמו בהודעת טקסט - היא לא שומרת את ההקלטה אלא רק את התוכן שלה, בדיוק כמו הודעה רגילה. כל המידע נמחק אחרי 30 יום. שיחות אישיות? שלי לא רואה אותן בכלל. רק בני הבית שלכם רואים את המידע - אף אחד אחר לא יכול לגשת למידע, כולל אותנו." },
       { q: "איך מתחילים? ואיך מפסיקים?", a: "הוסיפו את שלי לכל קבוצת ווטסאפ קיימת — היא מתחילה לעזור מיד. רוצים להפסיק? פשוט הוציאו אותה מהקבוצה. הכל נמחק אוטומטית, בלי התחייבות." },
     ],
     bottomTitle: "מוכנים להתחיל?",
-    bottomLink: "או היכנסו לאפליקציה",
+    bottomLink: "קחו אותי לאפליקציה",
+    bottomOr: "או",
     langToggle: "EN",
   },
   en: {
@@ -82,11 +83,12 @@ const CONTENT = {
       { q: "How does Sheli work?", a: "Sheli is a smart AI that understands natural language — say \"milk\" and it's on the list, write \"pick up Emma from class at 5\" and she'll remind you on time, even assign chores around the house. She learns your style over time — nicknames, regular products, recurring schedules. The more you use her, the better she gets." },
       { q: "Is there also an app?", a: "Yes! Sheli has an amazing app — your shopping list, tasks and calendar sync in real time, both from WhatsApp and the app. View, edit and stay up to date easily. Visit: sheli.ai" },
       { q: "How much does it cost?", a: "30 actions per month for free, no credit card needed. Want unlimited? Premium is $2.70/month." },
-      { q: "What about privacy?", a: "Sheli doesn't store photos, voice messages or media — only text about tasks, shopping and events. All data is deleted after 30 days. Personal conversations? Sheli doesn't see them at all. Only your household members can see your data — nobody else, including us." },
+      { q: "What about privacy?", a: "Sheli doesn't store photos or videos. She can listen to short voice messages — you can record your shopping list or household tasks just like a text message. She doesn't save the recording, only its content, just like a regular message. All data is deleted after 30 days. Personal conversations? Sheli doesn't see them at all. Only your household members can see your data — nobody else, including us." },
       { q: "How do I start? And stop?", a: "Add Sheli to any existing WhatsApp group — she starts helping right away. Want to stop? Just remove her from the group. Everything is deleted automatically, no strings attached." },
     ],
     bottomTitle: "Ready to get started?",
-    bottomLink: "or open the app",
+    bottomLink: "Take me to the app",
+    bottomOr: "or",
     langToggle: "עב",
   },
 };
@@ -232,7 +234,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
           <WhatsAppIcon />
           {c.cta}
         </a>
-        <button className="landing-app-link" onClick={handleGetStarted}>
+        <span className="landing-bottom-or">{c.bottomOr}</span>
+        <button className="landing-cta landing-cta-app" onClick={handleGetStarted}>
           {c.bottomLink}
         </button>
       </section>

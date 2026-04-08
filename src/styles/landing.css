@@ -465,18 +465,21 @@
   margin-bottom: 20px;
 }
 
-.landing-app-link {
-  margin-top: 16px;
-  font-size: 13px;
+.landing-bottom-or {
+  margin: 12px 0;
+  font-size: 14px;
   color: var(--muted);
-  cursor: pointer;
-  background: none;
-  border: none;
   font-family: 'Heebo', sans-serif;
 }
 
-.landing-app-link:hover {
-  color: var(--dark);
+.landing-cta-app {
+  background: var(--warm);
+  cursor: pointer;
+  border: none;
+}
+
+.landing-cta-app:hover {
+  background: var(--dark);
 }
 
 /* ─── Desktop ─── */
