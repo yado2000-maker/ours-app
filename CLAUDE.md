@@ -7,7 +7,7 @@
 - **WhatsApp Bot:** Supabase Edge Function (whatsapp-webhook), Whapi.Cloud provider. Handles both group + 1:1 direct messages.
 - **Landing Page:** LandingPage.jsx — bilingual HE/EN toggle, two-path routing: sheli.ai (cold traffic), ?source=wa (WA users skip to auth)
 - **1:1 Onboarding:** Bot handles direct messages (handleDirectMessage) with state machine (WELCOME→WAITING→ONBOARDED→ACTIVE) + pattern-based Q&A
-- **Auth:** Supabase Auth (Google OAuth + email/password + phone OTP via Twilio — not yet configured)
+- **Auth:** Supabase Auth (Google OAuth + email/password + phone OTP via WhatsApp/Vonage)
 - **Billing:** iCount (icount.co.il) — invoicing + CC processing + standing orders. API v3 at `api.icount.co.il/api/v3.php` (SID-based auth). Terminal not yet activated (beta mode).
 - **Bot phone:** +972 55-517-5553 (eSIM Plus virtual number, WhatsApp Business)
 
@@ -26,6 +26,7 @@
 - `supabase/functions/_shared/ai-classifier.ts` — Old monolithic Sonnet classifier (kept as fallback for medium-confidence escalation)
 - `supabase/functions/_shared/action-executor.ts` — DB action executor (6 action types incl. assign_task)
 - `supabase/functions/_shared/whatsapp-provider.ts` — Provider abstraction (Whapi.Cloud + Meta Cloud API)
+- `supabase/functions/otp-sender/index.ts` — Phone OTP delivery via Supabase Send SMS Hook (WhatsApp primary via Whapi.Cloud, Vonage SMS fallback, post-auth bridge message)
 - `tests/classifier_eval.py` — Classifier eval runner (120 cases, Python, batch-of-5 for Tier 1 rate limits)
 - `tests/classifier-test-cases.ts` — 120 test fixtures for intent classifier (TypeScript reference)
 - `src/components/LandingPage.jsx` — Hebrew landing page (hero, WA mock, features, FAQ, QR code)
@@ -35,6 +36,7 @@
 - `docs/implementation-plan-v3.md` — **Active** implementation plan (replaces V2)
 
 ## Database: Normalized V2 Tables (migration completed 2026-04-02)
+- **Await all deletes before Realtime re-fetch** — Non-awaited `supabase.delete()` races with Realtime `postgres_changes`. Bulk deletes (clear cart, clear done) fire N events; trailing events slip past 3s debounce → items reappear. Pattern: `lastSaveRef = now(); await delete(); lastSaveRef = now();`
 - **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`, `onboarding_conversations`
 - `onboarding_conversations` — 1:1 chat state machine (phone, state, household_id, message_count, referral_code)
 - `whatsapp_config` added columns: `dashboard_link_sent`, `first_message_at`, `group_message_count`
@@ -67,6 +69,7 @@
 - **Guard refs need `try/finally`** — `setupRunning.current = true` must be reset in `finally` or the action permanently locks.
 - **Sign-out must clear localStorage** — `sheli-hhid`, `sheli-user`, `sheli-founder` persist across sessions, causing cross-user data leaks if not cleared.
 - **`send()` must use refs, not state** — `tasksRef.current` not `tasks` inside async `send()` to avoid stale closures on rapid sends.
+- **`analytics.track()` does NOT exist** — `analytics` object only has named methods. For custom events: `import { analytics, track } from "../../lib/analytics.js"` and call `track("event_name")` directly.
 - **Password reset hash** — Don't strip URL hash before Supabase `onAuthStateChange` processes the recovery token. Listen for `PASSWORD_RECOVERY` event first.
 - **Landing page → auth language** — Landing is Hebrew-only; call `setLang("he")` before `setScreen("auth")`.
 - **`uid()` generates 8-char IDs** — was 4-char (collision risk at ~1300 items). AI prompt also requests 8-char IDs.
@@ -77,7 +80,9 @@
 - **Primary:** Coral `#E8725C` (brand, wordmark, badges, step numbers)
 - **Accent:** Green `#2AB673` (Sheli's voice, confirmations, nav indicator)
 - **WhatsApp CTA:** Muted forest green `#2D8E6F` (not neon WhatsApp green)
-- **Dark text:** Teal-gray `#1E2D2D` (cool neutral, not brown)
+- **Dark text:** Teal-gray `#1E2D2D` (cool neutral, not brown) — reserve for TEXT only, too harsh for button backgrounds
+- **Button backgrounds:** Use `var(--warm)` (#4A5858) — softer teal-gray that matches palette
+- **Never use coral on pink backgrounds** — zero luminance contrast. Use `var(--warm)` or `var(--dark)` on coral/pink cards.
 - **Background:** `#FAFCFB` (cool white, not beige)
 - **Wordmark:** lowercase "sheli" in Nunito 800, coral→pink gradient (`#E8725C → #D4507A`) with drop shadow
 - **Icon:** `/public/icons/icon.svg` — gradient rounded square with white "sheli" wordmark
@@ -85,6 +90,12 @@
 - **Taglines:** HE "העוזרת החכמה של הבית והמשפחה" / EN "Your home & family's smart helper"
 - **Dark theme:** Cool teal-gray (`#141A1A` bg, `#1C2424` cards, `#2A3636` borders) — not warm brown
 - **Design doc:** `docs/plans/2026-04-06-design-system.md`
+
+## Analytics
+- **PostHog (web app only):** 22 custom events wired via `src/lib/analytics.js`. Key: `VITE_POSTHOG_KEY` (build-time, redeploy required). Dashboard: `us.posthog.com/project/372561`
+- **WhatsApp bot analytics:** NOT in PostHog. Query `whatsapp_messages` table in Supabase — `classification` column tracks intent routing (`haiku_actionable`, `batch_actionable`, `haiku_ignore`, etc.)
+- **Ad blockers (ABP, uBlock) block PostHog** — `us-assets.i.posthog.com` is on block lists. Test analytics in incognito (no extensions).
+- **`person_profiles: "identified_only"`** — anonymous pageview events are captured, but custom events only associate with persons after `identifyUser()` call (post-auth).
 
 ## שלי Name Detection (3-layer, 2026-04-06)
 - **Layer 1 (regex, pre-classifier):** High-confidence patterns only — שלי at start of message, after greeting/thanks, standalone at end, @mention. Cross-message "של מי" check (90s window) prevents "mine!" false positives.
@@ -123,7 +134,18 @@
 - **Anthropic API Tier 1: 5 req/min** — Batch eval runner uses 5-at-a-time with 65s pause between batches. 120 cases take ~26 min. Add $5 credits to get Tier 2 (50 req/min).
 - **Only Python available in bash** — No Node.js/Deno in Git Bash on this machine. Test runners must be Python. `npm`/`node` only work from PowerShell.
 - **Inlined file is what's deployed** — Always edit `index.inlined.ts` for production changes. The modular `_shared/` files are dev reference. Must regenerate inlined file after any modular change.
+- **Voice message support:** <=30s voice messages transcribed via Groq Whisper (`whisper-large-v3`, auto-detect language). Transcribed text injected into existing pipeline (identical to typed text). >30s skipped. Env var: `GROQ_API_KEY`. Free tier: 28,800 sec/day.
+- **Whapi voice payload:** Whapi sends `type: "voice"` (not `"ptt"`). Audio data under `msg.voice` with `id` (media ID), `seconds` (duration), `mime_type`. No direct download `link` — fetch via `GET /media/{mediaId}` with bearer token + `Accept: audio/ogg`. TypeMap covers `ptt`, `audio`, and `voice` → internal `"voice"` type.
 - **NEVER use `sed -i` on source files** — Windows Git Bash `sed` corrupts file encoding invisibly (bash reads OK, editors show empty). Use `iconv` or the Edit tool for line-ending changes.
+
+## Phone OTP Auth (deployed 2026-04-08)
+- **Architecture:** Supabase Send SMS Hook → `otp-sender` Edge Function → WhatsApp (Whapi.Cloud) primary, Vonage SMS fallback
+- **Cost:** ~$0/OTP via WhatsApp (flat $12/mo Whapi), ~$0.057/SMS via Vonage fallback
+- **OTP expiry:** 600 seconds (10 minutes), 6 digits
+- **Bridge message:** After phone-auth, new users without a household get WhatsApp DM nudging them to add Sheli to family group
+- **Edge Function secrets (otp-sender):** `VONAGE_API_KEY`, `VONAGE_API_SECRET`, `VONAGE_SENDER` (Sheli), `OTP_HOOK_SECRET` (from Supabase Send SMS Hook). Shares `WHAPI_TOKEN`, `WHAPI_API_URL`, `BOT_PHONE_NUMBER`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` with whatsapp-webhook.
+- **Vonage provider:** Configured as Supabase Phone Auth provider (real credentials). Hook overrides it, but Vonage kicks in if hook is disabled.
+- **Phase 2:** Migrate to Meta Cloud API for WhatsApp OTP (adds auto-fill, $0.0053/msg). Design: `docs/plans/2026-04-08-whatsapp-otp-auth-design.md`
 
 ## WhatsApp Bot — Two-Stage Pipeline (deployed 2026-04-03)
 
@@ -154,7 +176,7 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 | `correct_bot` | Undo wrong + redo correct | DELETE + INSERT + log to classification_corrections |
 
 ### Classification values in `whatsapp_messages.classification`
-`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`
+`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`, `skipped_long_voice`, `voice_transcription_failed`
 
 ### `whatsapp_messages` columns (learning system, added 2026-04-04)
 - `batch_id` (TEXT) — groups messages into shopping batches
@@ -221,6 +243,7 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 ## Git / Deploy Workflow
 - **GitHub repo:** yado2000-maker/ours-app (public, brand name: Sheli)
 - **Vercel auto-deploys from `main`** — push to main triggers build
+- **Vite SPA catch-all shadows API routes** — `api/r/[code].js` serves at `/api/r/:code`. For clean URLs like `/r/:code`, add rewrite in `vercel.json`: `{ "source": "/r/:code", "destination": "/api/r/:code" }`
 - **Canonical codebase:** `C:\Users\yarond\Downloads\claude code\ours-app\` — all editing happens here
 - **Git repo for commits:** `C:\Users\yarond\Downloads\claude code\ours-app-git\` — copy changed files here, commit, push
 - **Deploy process:** Edit in `ours-app` → copy changed files to `ours-app-git` → commit → push → Vercel auto-deploys
@@ -249,4 +272,8 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **WhatsApp API:** Whapi.Cloud Sandbox (free, limited) → Meta Cloud API (apply for OBA, Phase 1)
 - **Billing provider:** iCount (icount.co.il) — 0.5% + ₪0.22/standing order charge, auto חשבונית מס. Terminal not yet activated.
 - **Beta mode:** `BETA_MODE=true` env var on whatsapp-webhook disables 30-action paywall. Remove to activate monetization.
+- **Referral system:** "Family brings Family" — referral code on `households_v2`, Vercel redirect `/r/:code` → WhatsApp, bot detects code in 1:1, rewards both families 30 days free at 10 actions. Design: `docs/plans/2026-04-07-family-brings-family-design.md`
 - **Implementation plan:** V3 active (`docs/implementation-plan-v3.md`), V2 superseded
+
+## TODO (wire when first paying user)
+- **Dynamic plan badge in MenuPanel** — Currently static "חינם". Query `subscriptions` client-side: if `plan !== "free"` OR `free_until > now()`, show "פרימיום" badge + hide upgrade CTA. `free_until` from referrals already works bot-side.

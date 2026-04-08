@@ -20,6 +20,22 @@ import { detectHousehold, joinByCode } from "./lib/household-detect.js";
 const SHELI_PHONE = "972555175553";
 const SHELI_WA_LINK = `https://wa.me/${SHELI_PHONE}?text=${encodeURIComponent("שלום שלי")}`;
 const SHELI_PHONE_DISPLAY = "+972 55-517-5553";
+const OTP_SENDER_URL = "https://wzwwtghtnkapdwlgnrxr.supabase.co/functions/v1/otp-sender";
+
+// Fire-and-forget: send WhatsApp bridge nudge to new phone-auth users
+async function sendOtpBridge(phone, accessToken) {
+  if (!phone || !accessToken) return;
+  try {
+    await fetch(OTP_SENDER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
+      body: JSON.stringify({ action: "bridge", phone }),
+    });
+    console.log("[Boot] OTP bridge message sent");
+  } catch (err) {
+    console.warn("[Boot] OTP bridge failed (non-fatal):", err);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
@@ -157,6 +173,11 @@ export default function Sheli() {
           return;
         }
       } catch (e) { console.warn("[Boot] Auto-detect error:", e); }
+
+      // Send WhatsApp bridge nudge for phone-auth users without a household
+      if (session.user.phone && session.user.app_metadata?.provider === "phone") {
+        sendOtpBridge(session.user.phone, session.access_token);
+      }
 
       // Show join-or-create screen (with or without detected household)
       setScreen("join-or-create");
