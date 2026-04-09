@@ -103,10 +103,12 @@ export default function Sheli() {
       return;
     }
 
-    // Admin dashboard shortcut — only for allowlisted users
-    if (lsGet("sheli-admin")) {
+    // Admin dashboard — check URL param (already signed in) or localStorage flag (just signed in)
+    const adminParam = new URLSearchParams(window.location.search).get("admin") === "1";
+    if (adminParam || lsGet("sheli-admin")) {
       localStorage.removeItem("sheli-admin");
       if (["28daa344-ad5a-449b-8e36-f6296bb2f51c"].includes(currentId)) {
+        window.history.replaceState({}, "", window.location.pathname);
         setScreen("admin");
         return;
       }
