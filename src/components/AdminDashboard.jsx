@@ -56,7 +56,7 @@ function fmtDate(dateStr) {
 }
 
 function fmtTime(date) {
-  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function pct(a, b) {
@@ -91,7 +91,7 @@ function Sparkline({ data = [], width = "100%", height = 120, color = "var(--acc
   };
 
   return (
-    <svg width={width} height={viewH} viewBox={`0 0 ${viewW} ${viewH}`} preserveAspectRatio="none" style={{ display: "block" }}>
+    <svg width={width} height={viewH} viewBox={`0 0 ${viewW} ${viewH}`} preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
       {/* Grid lines */}
       {[0.25, 0.5, 0.75].map((f) => (
         <line key={f} x1={pad.left} x2={viewW - pad.right} y1={pad.top + chartH * (1 - f)} y2={pad.top + chartH * (1 - f)} stroke="var(--border)" strokeWidth="0.5" />
@@ -116,7 +116,7 @@ function Sparkline({ data = [], width = "100%", height = 120, color = "var(--acc
 
       {/* Labels */}
       {labels.map((label, i) => (
-        <text key={i} x={toX(i)} y={viewH - 2} textAnchor="middle" fontSize="10" fill="var(--muted)" fontFamily="Nunito, sans-serif">
+        <text key={i} x={toX(i)} y={viewH - 2} textAnchor="middle" fontSize="11" fill="var(--muted)" fontFamily="Nunito, sans-serif">
           {label}
         </text>
       ))}
