@@ -55,6 +55,12 @@ function fmtDate(dateStr) {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+function fmtHour(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  return `${String(d.getHours()).padStart(2, "0")}:00`;
+}
+
 function fmtTime(date) {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -363,14 +369,20 @@ export default function AdminDashboard({ session, onBack }) {
   const fn = funnel || {};
   const ft = features || {};
 
-  const msgDays = ov.messages_by_day || [];
-  const waData = msgDays.map((d) => d.wa || 0);
-  const webData = msgDays.map((d) => d.web || 0);
-  const msgLabels = msgDays.map((d) => fmtDate(d.day));
+  const isHourly = period === 1 && ov.messages_by_hour;
+  const msgSrc = isHourly ? (ov.messages_by_hour || []) : (ov.messages_by_day || []);
+  const waData = msgSrc.map((d) => d.wa || 0);
+  const webData = msgSrc.map((d) => d.web || 0);
+  const msgLabels = isHourly
+    ? msgSrc.map((d) => fmtHour(d.hour))
+    : msgSrc.map((d) => fmtDate(d.day));
 
-  const weekTrend = ov.weekly_active_trend || [];
-  const weekData = weekTrend.map((w) => w.count || 0);
-  const weekLabels = weekTrend.map((w) => fmtDate(w.week));
+  const isHourlyTrend = period === 1 && ov.hourly_active_trend;
+  const trendSrc = isHourlyTrend ? (ov.hourly_active_trend || []) : (ov.weekly_active_trend || []);
+  const weekData = trendSrc.map((w) => w.count || 0);
+  const weekLabels = isHourlyTrend
+    ? trendSrc.map((w) => fmtHour(w.hour))
+    : trendSrc.map((w) => fmtDate(w.week));
 
   const households = (ov.household_details || []).sort((a, b) => (b.wa_msgs + b.web_msgs) - (a.wa_msgs + a.web_msgs));
 
@@ -489,7 +501,7 @@ export default function AdminDashboard({ session, onBack }) {
             <div style={{
               background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
             }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Weekly Active Trend</h3>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>{isHourlyTrend ? "Hourly Active Trend (24h)" : "Weekly Active Trend"}</h3>
               <Sparkline data={weekData} height={120} color="var(--accent)" fillOpacity={0.12} labels={weekLabels} />
             </div>
           )}
@@ -524,7 +536,7 @@ export default function AdminDashboard({ session, onBack }) {
               background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
               padding: 20, marginBottom: 20,
             }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 4px" }}>Messages (14 days)</h3>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 4px" }}>{isHourly ? "Messages (24h by hour)" : "Messages (14 days)"}</h3>
               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
                 <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--accent)", marginRight: 4, verticalAlign: "middle" }} />WhatsApp</span>
                 <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--primary)", marginRight: 4, verticalAlign: "middle" }} />Web</span>
