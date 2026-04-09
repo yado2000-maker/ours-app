@@ -4,6 +4,18 @@ import { supabase } from "../lib/supabase.js";
 const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c", "9698d5df-e40e-4f2b-a91e-a911f14fe1c8"];
 const REFRESH_INTERVAL = 60000;
 
+// Override html/body overflow:hidden from app.css so admin dashboard can scroll
+function useBodyScroll() {
+  useEffect(() => {
+    document.documentElement.style.overflow = "auto";
+    document.body.style.overflow = "auto";
+    return () => {
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+    };
+  }, []);
+}
+
 const INTENT_COLORS = {
   add_shopping: "#2AB673",
   add_task: "#E8725C",
@@ -234,6 +246,7 @@ function DataTable({ columns, rows, emptyMsg = "No data" }) {
 // ── Main Component ──
 
 export default function AdminDashboard({ session, onBack }) {
+  useBodyScroll();
   const [overview, setOverview] = useState(null);
   const [funnel, setFunnel] = useState(null);
   const [features, setFeatures] = useState(null);
