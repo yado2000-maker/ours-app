@@ -389,7 +389,7 @@ export default function JoinOrCreate({
             value={phone}
             onChange={(e) => { setPhone(e.target.value); if (error) setError(null); }}
             onKeyDown={(e) => e.key === "Enter" && handlePhoneLookup()}
-            placeholder={isHe ? "למשל 0525937316" : "e.g. 0525937316"}
+            placeholder={isHe ? "למשל 0521234567" : "e.g. 0521234567"}
             style={s.codeInput}
             dir="ltr"
             onFocus={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
