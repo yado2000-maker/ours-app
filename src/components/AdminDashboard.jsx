@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../lib/supabase.js";
 
-const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c", "9698d5df-e40e-4f2b-a91e-a911f14fe1c8"];
+const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c", "9698d5df-e40e-4f2b-a91e-a911f14fe1c8", "dc552ffd-65f5-4943-a64a-8f6d56c8578a"];
 const REFRESH_INTERVAL = 60000;
 
 // Override html/body overflow:hidden from app.css so admin dashboard can scroll
