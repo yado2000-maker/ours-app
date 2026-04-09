@@ -52,7 +52,7 @@ function relativeTime(dateStr) {
 function fmtDate(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
 function fmtHour(dateStr) {
@@ -121,11 +121,15 @@ function Sparkline({ data = [], width = "100%", height = 120, color = "var(--acc
       ))}
 
       {/* Labels */}
-      {labels.map((label, i) => (
-        <text key={i} x={toX(i)} y={viewH - 2} textAnchor="middle" fontSize="11" fill="var(--muted)" fontFamily="Nunito, sans-serif">
-          {label}
-        </text>
-      ))}
+      {labels.map((label, i) => {
+        const skip = labels.length > 16 ? 3 : labels.length > 10 ? 2 : 1;
+        if (i % skip !== 0) return null;
+        return (
+          <text key={i} x={toX(i)} y={viewH - 2} textAnchor="middle" fontSize="11" fill="var(--muted)" fontFamily="Nunito, sans-serif">
+            {label}
+          </text>
+        );
+      })}
     </svg>
   );
 }
