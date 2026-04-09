@@ -92,27 +92,12 @@ export default function Sheli() {
     if (!session) {
       // ?source=wa → skip landing page, go straight to auth (Path B: WhatsApp dashboard users)
       const params = new URLSearchParams(window.location.search);
-      if (params.get("admin") === "1") {
-        lsSet("sheli-admin", true);
-        setScreen("auth");
-      } else if (params.get("source") === "wa") {
+      if (params.get("source") === "wa") {
         setScreen("auth");
       } else {
         setScreen("welcome");
       }
       return;
-    }
-
-    // Admin dashboard — check URL param (already signed in) or localStorage flag (just signed in)
-    const adminParam = new URLSearchParams(window.location.search).get("admin") === "1";
-    if (adminParam || lsGet("sheli-admin")) {
-      localStorage.removeItem("sheli-admin");
-      if (["28daa344-ad5a-449b-8e36-f6296bb2f51c"].includes(currentId)) {
-        window.history.replaceState({}, "", window.location.pathname);
-        setScreen("admin");
-        return;
-      }
-      // Non-admin: fall through to normal boot
     }
 
     // Authenticated → proceed with household loading (with 8s global timeout)
@@ -624,6 +609,13 @@ export default function Sheli() {
   const starters    = [t.s1, t.s2, t.s3(userName), t.s4];
 
   // ── Screens ──
+  // Admin dashboard — direct render if URL param present + admin user
+  const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c"];
+  const isAdminUrl = new URLSearchParams(window.location.search).get("admin") === "1";
+  if ((isAdminUrl || screen === "admin") && session?.user?.id && ADMIN_IDS.includes(session.user.id)) {
+    return <AdminDashboard session={session} onBack={() => { window.history.replaceState({}, "", window.location.pathname); setScreen("chat"); }} />;
+  }
+
   if (screen === "loading") return (
     <div style={{height:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--cream)",gap:12}}>
       <img src="/icons/icon.svg" alt="sheli" style={{width:72,height:72,borderRadius:16,
@@ -632,10 +624,6 @@ export default function Sheli() {
         {(T[lang] || T.en).loading}
       </div>
     </div>
-  );
-
-  if (screen === "admin") return (
-    <AdminDashboard session={session} onBack={() => setScreen("chat")} />
   );
 
   if (screen === "welcome") return (
