@@ -61,6 +61,12 @@ export default function Sheli() {
   const [dataLoaded, setDataLoaded]     = useState(false); // M9: false until first household load
   // L2 fix: convert to state so it reacts to changes (e.g. after handleSetup)
   const [isFounder, setIsFounder] = useState(() => !!lsGet("sheli-founder"));
+  // Admin dashboard — one-time URL check on mount
+  const [isAdmin] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("admin") === "1") { window.history.replaceState({}, "", window.location.pathname); return true; }
+    return false;
+  });
   const { session, user: authUser, profile, loading: authLoading, signOut } = useAuth();
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
@@ -609,11 +615,8 @@ export default function Sheli() {
   const starters    = [t.s1, t.s2, t.s3(userName), t.s4];
 
   // ── Screens ──
-  // Admin dashboard — direct render if URL param present + admin user
-  const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c"];
-  const isAdminUrl = new URLSearchParams(window.location.search).get("admin") === "1";
-  if ((isAdminUrl || screen === "admin") && session?.user?.id && ADMIN_IDS.includes(session.user.id)) {
-    return <AdminDashboard session={session} onBack={() => { window.history.replaceState({}, "", window.location.pathname); setScreen("chat"); }} />;
+  if (isAdmin && session?.user?.id === "28daa344-ad5a-449b-8e36-f6296bb2f51c") {
+    return <AdminDashboard session={session} onBack={() => window.location.href = "/"} />;
   }
 
   if (screen === "loading") return (
