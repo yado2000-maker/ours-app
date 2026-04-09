@@ -10,6 +10,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("+972");
   const [otpCode, setOtpCode] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -187,9 +188,12 @@ export default function AuthScreen({ onBack, lang = "en" }) {
   // ── Phone Auth ──
   const formatPhoneForAuth = (raw) => {
     const digits = raw.replace(/\D/g, "");
-    if (digits.startsWith("972")) return "+" + digits;
-    if (digits.startsWith("0")) return "+972" + digits.slice(1);
-    return "+972" + digits;
+    const code = countryCode.replace(/\D/g, "");
+    // If they typed the full international number, use as-is
+    if (digits.startsWith(code)) return "+" + digits;
+    // Strip leading 0 (local format)
+    const local = digits.startsWith("0") ? digits.slice(1) : digits;
+    return "+" + code + local;
   };
 
   const handlePhoneSend = async () => {
@@ -373,9 +377,27 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           {isHe ? "כניסה עם מספר טלפון" : "Sign in with phone number"}
         </p>
         <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
-          <input type="tel" placeholder={isHe ? "מספר טלפון (05X...)" : "Phone number"} value={phone}
-            onChange={(e) => setPhone(e.target.value)} dir="ltr" required
-            autoComplete="tel" style={inputStyle} />
+          <div style={{ display: "flex", gap: 8, direction: "ltr" }}>
+            <select value={countryCode} onChange={e => setCountryCode(e.target.value)}
+              style={{ ...inputStyle, width: 90, flexShrink: 0, padding: "14px 8px", fontSize: 14, textAlign: "center" }}>
+              <option value="+972">🇮🇱 +972</option>
+              <option value="+1">🇺🇸 +1</option>
+              <option value="+44">🇬🇧 +44</option>
+              <option value="+33">🇫🇷 +33</option>
+              <option value="+49">🇩🇪 +49</option>
+              <option value="+351">🇵🇹 +351</option>
+              <option value="+34">🇪🇸 +34</option>
+              <option value="+39">🇮🇹 +39</option>
+              <option value="+61">🇦🇺 +61</option>
+              <option value="+91">🇮🇳 +91</option>
+              <option value="+380">🇺🇦 +380</option>
+              <option value="+7">🇷🇺 +7</option>
+            </select>
+            <input type="tel" placeholder={isHe ? "מספר טלפון" : "Phone number"} value={phone}
+              onChange={(e) => setPhone(e.target.value)} dir="ltr" required
+              autoComplete="tel" style={{ ...inputStyle, flex: 1 }}
+              onKeyDown={e => { if (e.key === "Enter" && !loading) handlePhoneSend(); }} />
+          </div>
           {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
           <button onClick={handlePhoneSend} disabled={loading}
             style={{ padding: 15, borderRadius: 14, background: "var(--dark)", color: "var(--white)", border: "none", cursor: loading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 500, fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
@@ -415,6 +437,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
           <input type="text" inputMode="numeric" placeholder={isHe ? "קוד בן 6 ספרות" : "6-digit code"} value={otpCode}
             onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))} dir="ltr"
             autoComplete="one-time-code" maxLength={6}
+            onKeyDown={e => { if (e.key === "Enter" && otpCode.length === 6 && !loading) handlePhoneVerify(); }}
             style={{ ...inputStyle, textAlign: "center", fontSize: 24, letterSpacing: "0.3em" }} />
           {error && <p style={{ fontSize: 13, color: "var(--primary)", textAlign: "center", margin: 0 }}>{error}</p>}
           <button onClick={handlePhoneVerify} disabled={loading || otpCode.length < 6}
