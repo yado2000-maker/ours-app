@@ -16,6 +16,7 @@ import MenuPanel from "./components/modals/MenuPanel.jsx";
 import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
 import JoinOrCreate from "./components/JoinOrCreate.jsx";
 import { detectHousehold, joinByCode } from "./lib/household-detect.js";
+import AdminDashboard from "./components/AdminDashboard.jsx";
 
 const SHELI_PHONE = "972555175553";
 const SHELI_WA_LINK = `https://wa.me/${SHELI_PHONE}?text=${encodeURIComponent("שלום שלי")}`;
@@ -91,12 +92,25 @@ export default function Sheli() {
     if (!session) {
       // ?source=wa → skip landing page, go straight to auth (Path B: WhatsApp dashboard users)
       const params = new URLSearchParams(window.location.search);
-      if (params.get("source") === "wa") {
+      if (params.get("admin") === "1") {
+        lsSet("sheli-admin", true);
+        setScreen("auth");
+      } else if (params.get("source") === "wa") {
         setScreen("auth");
       } else {
         setScreen("welcome");
       }
       return;
+    }
+
+    // Admin dashboard shortcut — only for allowlisted users
+    if (lsGet("sheli-admin")) {
+      localStorage.removeItem("sheli-admin");
+      if (["28daa344-ad5a-449b-8e36-f6296bb2f51c"].includes(currentId)) {
+        setScreen("admin");
+        return;
+      }
+      // Non-admin: fall through to normal boot
     }
 
     // Authenticated → proceed with household loading (with 8s global timeout)
@@ -616,6 +630,10 @@ export default function Sheli() {
         {(T[lang] || T.en).loading}
       </div>
     </div>
+  );
+
+  if (screen === "admin") return (
+    <AdminDashboard session={session} onBack={() => setScreen("chat")} />
   );
 
   if (screen === "welcome") return (

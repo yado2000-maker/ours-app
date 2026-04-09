@@ -1,0 +1,779 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { supabase } from "../lib/supabase.js";
+
+const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c"];
+const REFRESH_INTERVAL = 60000;
+
+const INTENT_COLORS = {
+  add_shopping: "#2AB673",
+  add_task: "#E8725C",
+  add_event: "#5B8DEF",
+  complete_task: "#F5A623",
+  complete_shopping: "#9B59B6",
+  question: "#3DC882",
+  add_reminder: "#E67E22",
+  claim_task: "#1ABC9C",
+  info_request: "#95A5A6",
+  correct_bot: "#E74C3C",
+  instruct_bot: "#3498DB",
+  other: "#8A9494",
+};
+
+const FUNNEL_STEPS = ["welcome", "waiting", "onboarded", "active"];
+const FUNNEL_COLORS = ["#3DC882", "#2AB673", "#1E9E5E", "#17804B"];
+
+// ── Helpers ──
+
+function relativeTime(dateStr) {
+  if (!dateStr) return "never";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 0) return "just now";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function fmtTime(date) {
+  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function pct(a, b) {
+  if (!b) return "0%";
+  return `${Math.round((a / b) * 100)}%`;
+}
+
+// ── Sparkline SVG ──
+
+function Sparkline({ data = [], width = "100%", height = 120, color = "var(--accent)", fillOpacity = 0.1, labels = [], secondData = null, secondColor = "var(--primary)" }) {
+  if (!data.length) return <svg width={width} height={height} />;
+
+  const pad = { top: 12, bottom: labels.length ? 22 : 8, left: 8, right: 8 };
+  const viewW = 500;
+  const viewH = height;
+  const chartW = viewW - pad.left - pad.right;
+  const chartH = viewH - pad.top - pad.bottom;
+
+  const allVals = secondData ? [...data, ...secondData] : data;
+  const maxVal = Math.max(...allVals, 1);
+  const minVal = Math.min(...allVals, 0);
+  const range = maxVal - minVal || 1;
+  const yPad = range * 0.1;
+
+  const toX = (i) => pad.left + (i / Math.max(data.length - 1, 1)) * chartW;
+  const toY = (v) => pad.top + chartH - ((v - minVal + yPad) / (range + yPad * 2)) * chartH;
+
+  const makeLine = (vals) => vals.map((v, i) => `${toX(i)},${toY(v)}`).join(" ");
+  const makeFill = (vals) => {
+    const baseline = toY(minVal);
+    return `${toX(0)},${baseline} ${vals.map((v, i) => `${toX(i)},${toY(v)}`).join(" ")} ${toX(vals.length - 1)},${baseline}`;
+  };
+
+  return (
+    <svg width={width} height={viewH} viewBox={`0 0 ${viewW} ${viewH}`} preserveAspectRatio="none" style={{ display: "block" }}>
+      {/* Grid lines */}
+      {[0.25, 0.5, 0.75].map((f) => (
+        <line key={f} x1={pad.left} x2={viewW - pad.right} y1={pad.top + chartH * (1 - f)} y2={pad.top + chartH * (1 - f)} stroke="var(--border)" strokeWidth="0.5" />
+      ))}
+
+      {/* Second data (behind) */}
+      {secondData && (
+        <>
+          <polygon points={makeFill(secondData)} fill={secondColor} opacity={fillOpacity} />
+          <polyline points={makeLine(secondData)} fill="none" stroke={secondColor} strokeWidth="2" />
+        </>
+      )}
+
+      {/* Primary data */}
+      <polygon points={makeFill(data)} fill={color} opacity={fillOpacity} />
+      <polyline points={makeLine(data)} fill="none" stroke={color} strokeWidth="2" />
+
+      {/* Dots */}
+      {data.map((v, i) => (
+        <circle key={i} cx={toX(i)} cy={toY(v)} r="3" fill={color} />
+      ))}
+
+      {/* Labels */}
+      {labels.map((label, i) => (
+        <text key={i} x={toX(i)} y={viewH - 2} textAnchor="middle" fontSize="10" fill="var(--muted)" fontFamily="Nunito, sans-serif">
+          {label}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+// ── Donut Chart (CSS conic-gradient) ──
+
+function DonutChart({ data, size = 200 }) {
+  const entries = Object.entries(data).filter(([k]) => k !== "ignore").sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+  if (!total) return <div style={{ width: size, height: size, borderRadius: "50%", background: "var(--border)" }} />;
+
+  let cumPct = 0;
+  const stops = [];
+  entries.forEach(([key, val]) => {
+    const color = INTENT_COLORS[key] || INTENT_COLORS.other;
+    const startPct = cumPct;
+    cumPct += (val / total) * 100;
+    stops.push(`${color} ${startPct}% ${cumPct}%`);
+  });
+
+  const gradient = `conic-gradient(${stops.join(", ")})`;
+
+  return (
+    <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{
+        width: size, height: size, borderRadius: "50%", background: gradient, position: "relative", flexShrink: 0,
+      }}>
+        <div style={{
+          position: "absolute", top: "25%", left: "25%", width: "50%", height: "50%",
+          borderRadius: "50%", background: "var(--white)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          flexDirection: "column",
+        }}>
+          <span style={{ fontSize: 22, fontWeight: 800, color: "var(--dark)" }}>{total}</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>actions</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {entries.map(([key, val]) => (
+          <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <span style={{
+              width: 12, height: 12, borderRadius: 3, flexShrink: 0,
+              background: INTENT_COLORS[key] || INTENT_COLORS.other,
+            }} />
+            <span style={{ color: "var(--dark)", fontWeight: 600 }}>{key.replace(/_/g, " ")}</span>
+            <span style={{ color: "var(--muted)" }}>{val} ({pct(val, total)})</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Stat Card ──
+
+function StatCard({ label, value, sub, color = "var(--dark)", small = false }) {
+  return (
+    <div style={{
+      background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+      padding: small ? "14px 16px" : "20px",
+      display: "flex", flexDirection: "column", gap: 4,
+    }}>
+      <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 500 }}>{label}</span>
+      <span style={{ fontSize: small ? 24 : 36, fontWeight: 800, color, lineHeight: 1.1 }}>{value}</span>
+      {sub && <span style={{ fontSize: 12, color: "var(--muted)" }}>{sub}</span>}
+    </div>
+  );
+}
+
+// ── Section Wrapper ──
+
+function Section({ title, subtitle, children }) {
+  return (
+    <div style={{ marginBottom: 32 }}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--dark)", margin: 0 }}>{title}</h2>
+        {subtitle && <p style={{ fontSize: 13, color: "var(--muted)", margin: "2px 0 0" }}>{subtitle}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── Table ──
+
+function DataTable({ columns, rows, emptyMsg = "No data" }) {
+  if (!rows || !rows.length) {
+    return <p style={{ fontSize: 13, color: "var(--muted)", padding: "12px 0" }}>{emptyMsg}</p>;
+  }
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, fontFamily: "'Nunito', sans-serif" }}>
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={col.key} style={{
+                textAlign: "left", padding: "8px 10px", borderBottom: "2px solid var(--border)",
+                color: "var(--muted)", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap",
+              }}>
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri}>
+              {columns.map((col) => (
+                <td key={col.key} style={{
+                  padding: "8px 10px", borderBottom: "1px solid var(--border)",
+                  color: "var(--dark)", whiteSpace: "nowrap",
+                }}>
+                  {col.render ? col.render(row) : row[col.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Main Component ──
+
+export default function AdminDashboard({ session, onBack }) {
+  const [overview, setOverview] = useState(null);
+  const [funnel, setFunnel] = useState(null);
+  const [features, setFeatures] = useState(null);
+  const [period, setPeriod] = useState(7);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const intervalRef = useRef(null);
+
+  const isAdmin = ADMIN_IDS.includes(session?.user?.id);
+
+  const fetchAll = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+
+    try {
+      const [overviewRes, funnelRes, featuresRes] = await Promise.all([
+        supabase.rpc("admin_dashboard_overview", { p_days: period }),
+        supabase.rpc("admin_funnel_stats"),
+        supabase.rpc("admin_feature_stats", { p_days: period }),
+      ]);
+
+      if (overviewRes.error) throw new Error(`Overview: ${overviewRes.error.message}`);
+      if (funnelRes.error) throw new Error(`Funnel: ${funnelRes.error.message}`);
+      if (featuresRes.error) throw new Error(`Features: ${featuresRes.error.message}`);
+
+      // Check for empty response (non-admin RLS)
+      const ov = overviewRes.data;
+      const fn = funnelRes.data;
+      const ft = featuresRes.data;
+
+      if (!ov || (typeof ov === "object" && !("period_days" in ov))) {
+        setError("Access denied. RPC returned empty data.");
+        return;
+      }
+
+      setOverview(ov);
+      setFunnel(fn);
+      setFeatures(ft);
+      setLastRefresh(new Date());
+    } catch (err) {
+      console.error("[AdminDashboard] fetch error:", err);
+      setError(err.message || "Failed to fetch data");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [period]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchAll();
+  }, [fetchAll, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    intervalRef.current = setInterval(() => fetchAll(true), REFRESH_INTERVAL);
+    return () => clearInterval(intervalRef.current);
+  }, [fetchAll, isAdmin]);
+
+  // ── Not authorized ──
+  if (!isAdmin) {
+    return (
+      <div style={{
+        fontFamily: "'Nunito', sans-serif", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", height: "100dvh",
+        background: "var(--cream)", color: "var(--dark)", gap: 16, padding: 24,
+      }}>
+        <div style={{ fontSize: 48 }}>&#128274;</div>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Not authorized</h1>
+        <p style={{ color: "var(--muted)", fontSize: 14 }}>You don't have admin access.</p>
+        <button onClick={onBack} style={btnStyle}>Back to app</button>
+      </div>
+    );
+  }
+
+  // ── Loading ──
+  if (loading && !overview) {
+    return (
+      <div style={{
+        fontFamily: "'Nunito', sans-serif", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", height: "100dvh",
+        background: "var(--cream)", color: "var(--dark)", gap: 16,
+      }}>
+        <div style={{ width: 40, height: 40, border: "3px solid var(--border)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "admSpin 0.8s linear infinite" }} />
+        <p style={{ color: "var(--muted)", fontSize: 14 }}>Loading dashboard...</p>
+        <style>{`@keyframes admSpin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // ── Error ──
+  if (error && !overview) {
+    return (
+      <div style={{
+        fontFamily: "'Nunito', sans-serif", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", height: "100dvh",
+        background: "var(--cream)", color: "var(--dark)", gap: 16, padding: 24,
+      }}>
+        <div style={{ fontSize: 48 }}>&#9888;&#65039;</div>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>Error</h1>
+        <p style={{ color: "var(--muted)", fontSize: 14, textAlign: "center", maxWidth: 400 }}>{error}</p>
+        <button onClick={() => fetchAll()} style={btnStyle}>Retry</button>
+        <button onClick={onBack} style={{ ...btnStyle, background: "transparent", color: "var(--muted)", border: "1px solid var(--border)" }}>Back to app</button>
+      </div>
+    );
+  }
+
+  // ── Data helpers ──
+  const ov = overview || {};
+  const fn = funnel || {};
+  const ft = features || {};
+
+  const msgDays = ov.messages_by_day || [];
+  const waData = msgDays.map((d) => d.wa || 0);
+  const webData = msgDays.map((d) => d.web || 0);
+  const msgLabels = msgDays.map((d) => fmtDate(d.day));
+
+  const weekTrend = ov.weekly_active_trend || [];
+  const weekData = weekTrend.map((w) => w.count || 0);
+  const weekLabels = weekTrend.map((w) => fmtDate(w.week));
+
+  const households = (ov.household_details || []).sort((a, b) => (b.wa_msgs + b.web_msgs) - (a.wa_msgs + a.web_msgs));
+
+  const funnelCounts = fn.funnel_counts || {};
+  const conversations = (fn.conversations || []).slice(0, 10);
+
+  const intents = ft.intent_distribution || {};
+  const aiCosts = ft.ai_costs || {};
+  const dailyCosts = ft.daily_ai_costs || [];
+  const costData = dailyCosts.map((d) => d.cost || 0);
+  const costLabels = dailyCosts.map((d) => fmtDate(d.day));
+  const hhFeatures = ft.household_features || [];
+  const referrals = ft.referrals || {};
+
+  // Bot heartbeat
+  const botAge = ov.bot_last_message_at ? Date.now() - new Date(ov.bot_last_message_at).getTime() : Infinity;
+  const botColor = botAge < 600000 ? "#2AB673" : botAge < 3600000 ? "#F5A623" : "#E8725C";
+  const botLabel = botAge < 600000 ? "Healthy" : botAge < 3600000 ? "Slow" : "Down";
+
+  // Funnel max for bar widths
+  const funnelMax = Math.max(...FUNNEL_STEPS.map((s) => funnelCounts[s]?.count || 0), 1);
+
+  return (
+    <div style={{
+      fontFamily: "'Nunito', sans-serif", background: "var(--cream)", minHeight: "100dvh",
+      overflowY: "auto", color: "var(--dark)",
+    }}>
+      <style>{`
+        @keyframes admSpin { to { transform: rotate(360deg); } }
+        @keyframes admPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .adm-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .adm-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        @media (max-width: 700px) {
+          .adm-grid3 { grid-template-columns: 1fr; }
+          .adm-grid4 { grid-template-columns: repeat(2, 1fr); }
+        }
+      `}</style>
+
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
+
+        {/* ── Header ── */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 28, flexWrap: "wrap", gap: 12,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={onBack} style={{
+              background: "none", border: "none", cursor: "pointer", fontSize: 22,
+              color: "var(--muted)", padding: "4px 8px", borderRadius: 8, lineHeight: 1,
+            }} title="Back to app">&larr;</button>
+            <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: "var(--dark)" }}>Sheli Admin</h1>
+            {refreshing && (
+              <div style={{
+                width: 16, height: 16, border: "2px solid var(--border)", borderTopColor: "var(--accent)",
+                borderRadius: "50%", animation: "admSpin 0.8s linear infinite",
+              }} />
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            {[7, 14, 30].map((d) => (
+              <button key={d} onClick={() => setPeriod(d)} style={{
+                padding: "6px 14px", borderRadius: 100, fontSize: 13, fontWeight: 600,
+                cursor: "pointer", border: "1.5px solid",
+                borderColor: period === d ? "var(--accent)" : "var(--border)",
+                background: period === d ? "var(--accent)" : "transparent",
+                color: period === d ? "#fff" : "var(--warm)",
+                fontFamily: "'Nunito', sans-serif",
+                transition: "all 0.15s",
+              }}>
+                {d}d
+              </button>
+            ))}
+            <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>
+              {lastRefresh ? `Updated ${fmtTime(lastRefresh)}` : ""} &middot; Auto-refresh: 60s
+            </span>
+          </div>
+        </div>
+
+        {/* ── Error banner (non-blocking) ── */}
+        {error && overview && (
+          <div style={{
+            background: "var(--primary-light)", border: "1px solid var(--primary)",
+            borderRadius: 8, padding: "10px 16px", marginBottom: 20,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+          }}>
+            <span style={{ fontSize: 13, color: "var(--primary)" }}>{error}</span>
+            <button onClick={() => fetchAll()} style={{
+              background: "var(--primary)", color: "#fff", border: "none", borderRadius: 6,
+              padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              fontFamily: "'Nunito', sans-serif",
+            }}>Retry</button>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════
+            Section 0: Family Health
+        ══════════════════════════════════════════════ */}
+        <Section title="Family Health" subtitle="Big picture">
+          <div className="adm-grid3" style={{ marginBottom: 20 }}>
+            <StatCard label="Total Families" value={ov.total_households || 0} sub="registered" color="var(--warm)" />
+            <StatCard
+              label="Active Families"
+              value={ov.active_households || 0}
+              sub={`${pct(ov.active_households, ov.total_households)} of total`}
+              color="var(--accent)"
+            />
+            <StatCard
+              label="Paying Families"
+              value={ov.paying_households || 0}
+              sub={ov.paying_households ? `${pct(ov.paying_households, ov.total_households)} of total` : "none yet"}
+              color={ov.paying_households ? "var(--primary)" : "var(--muted)"}
+            />
+          </div>
+
+          {weekData.length > 0 && (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+            }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Weekly Active Trend</h3>
+              <Sparkline data={weekData} height={120} color="var(--accent)" fillOpacity={0.12} labels={weekLabels} />
+            </div>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 1: Activity Pulse
+        ══════════════════════════════════════════════ */}
+        <Section title="Activity Pulse" subtitle="Is it working?">
+          <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+            {/* Bot heartbeat */}
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "16px 20px", display: "flex", alignItems: "center", gap: 12, minWidth: 180,
+            }}>
+              <div style={{
+                width: 14, height: 14, borderRadius: "50%", background: botColor,
+                animation: botAge < 600000 ? "admPulse 2s ease-in-out infinite" : "none",
+                boxShadow: `0 0 8px ${botColor}40`,
+              }} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--dark)" }}>Bot: {botLabel}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  Last msg: {relativeTime(ov.bot_last_message_at)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {waData.length > 0 && (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: 20, marginBottom: 20,
+            }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 4px" }}>Messages (14 days)</h3>
+              <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+                <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--accent)", marginRight: 4, verticalAlign: "middle" }} />WhatsApp</span>
+                <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--primary)", marginRight: 4, verticalAlign: "middle" }} />Web</span>
+              </div>
+              <Sparkline
+                data={waData}
+                secondData={webData}
+                secondColor="var(--primary)"
+                height={140}
+                color="var(--accent)"
+                fillOpacity={0.1}
+                labels={msgLabels}
+              />
+            </div>
+          )}
+
+          <div style={{
+            background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+          }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Per-Household Activity</h3>
+            <DataTable
+              columns={[
+                { key: "name", label: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.name || "Unnamed"}</span> },
+                { key: "wa_msgs", label: "WA Msgs" },
+                { key: "web_msgs", label: "Web Msgs" },
+                { key: "total", label: "Total", render: (r) => <span style={{ fontWeight: 700, color: "var(--accent)" }}>{(r.wa_msgs || 0) + (r.web_msgs || 0)}</span> },
+                { key: "last_active", label: "Last Active", render: (r) => relativeTime(r.last_active) },
+                { key: "member_count", label: "Members" },
+              ]}
+              rows={households}
+              emptyMsg="No household data"
+            />
+          </div>
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 2: Onboarding Funnel
+        ══════════════════════════════════════════════ */}
+        <Section title="Onboarding Funnel" subtitle="Is the funnel converting?">
+          <div style={{
+            background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+            padding: 20, marginBottom: 20,
+          }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {FUNNEL_STEPS.map((step, i) => {
+                const count = funnelCounts[step]?.count || 0;
+                const prev = i > 0 ? (funnelCounts[FUNNEL_STEPS[i - 1]]?.count || 0) : (fn.total_conversations || 0);
+                const barWidth = funnelMax ? (count / funnelMax) * 100 : 0;
+                const convRate = prev > 0 ? Math.round((count / prev) * 100) : 0;
+
+                return (
+                  <div key={step}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--dark)", textTransform: "capitalize" }}>{step}</span>
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                        {count} {i > 0 ? `(${convRate}% of prev)` : ""}
+                      </span>
+                    </div>
+                    <div style={{
+                      height: 28, borderRadius: 6, background: "var(--border)", overflow: "hidden",
+                    }}>
+                      <div style={{
+                        height: "100%", width: `${Math.max(barWidth, 2)}%`,
+                        background: FUNNEL_COLORS[i], borderRadius: 6,
+                        display: "flex", alignItems: "center", paddingLeft: 8,
+                        transition: "width 0.5s ease",
+                      }}>
+                        {barWidth > 15 && (
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{count}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{
+              display: "flex", gap: 24, marginTop: 20, paddingTop: 16,
+              borderTop: "1px solid var(--border)", flexWrap: "wrap",
+            }}>
+              <div>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Avg msgs to convert</span>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "var(--dark)" }}>
+                  {fn.avg_msgs_to_convert != null ? fn.avg_msgs_to_convert.toFixed(1) : "N/A"}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Avg hours to convert</span>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "var(--dark)" }}>
+                  {fn.avg_hours_to_convert != null ? fn.avg_hours_to_convert.toFixed(1) : "N/A"}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Total 1:1 conversations</span>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "var(--dark)" }}>{fn.total_conversations || 0}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+          }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Recent Conversations</h3>
+            <DataTable
+              columns={[
+                { key: "phone", label: "Phone", render: (r) => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.phone || "N/A"}</span> },
+                { key: "state", label: "State", render: (r) => (
+                  <span style={{
+                    display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11,
+                    fontWeight: 600, textTransform: "capitalize",
+                    background: r.state === "active" ? "var(--accent-soft)" : r.state === "onboarded" ? "#EBF5FF" : "var(--border)",
+                    color: r.state === "active" ? "var(--accent)" : r.state === "onboarded" ? "#5B8DEF" : "var(--warm)",
+                  }}>{r.state}</span>
+                )},
+                { key: "messages", label: "Msgs" },
+                { key: "referral", label: "Referral", render: (r) => r.referral || "-" },
+                { key: "started", label: "Started", render: (r) => relativeTime(r.started) },
+              ]}
+              rows={conversations}
+              emptyMsg="No conversations yet"
+            />
+          </div>
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 3: Feature Adoption
+        ══════════════════════════════════════════════ */}
+        <Section title="Feature Adoption" subtitle="What features do families use?">
+          <div style={{
+            background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+            padding: 20, marginBottom: 20,
+          }}>
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <DonutChart data={intents} />
+              {intents.ignore != null && (
+                <div style={{
+                  background: "var(--cream)", borderRadius: 12, padding: "12px 16px",
+                  display: "flex", flexDirection: "column", gap: 2, alignSelf: "center",
+                }}>
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Noise filtered (ignore)</span>
+                  <span style={{ fontSize: 24, fontWeight: 800, color: "var(--warm)" }}>{intents.ignore}</span>
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                    {pct(intents.ignore, Object.values(intents).reduce((s, v) => s + v, 0))} of all messages
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{
+            background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+          }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Per-Household Features</h3>
+            <DataTable
+              columns={[
+                { key: "name", label: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.name || "Unnamed"}</span> },
+                { key: "tasks", label: "Tasks" },
+                { key: "shopping", label: "Shopping" },
+                { key: "events", label: "Events" },
+                { key: "reminders", label: "Reminders" },
+                { key: "rotations", label: "Rotations" },
+                { key: "corrections", label: "Corrections" },
+              ]}
+              rows={hhFeatures}
+              emptyMsg="No feature data"
+            />
+          </div>
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 4: AI Cost Control
+        ══════════════════════════════════════════════ */}
+        <Section title="AI Cost Control" subtitle="Spending">
+          <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "stretch" }}>
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: 20, minWidth: 160,
+            }}>
+              <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 500 }}>Estimated Cost</span>
+              <div style={{
+                fontSize: 42, fontWeight: 800, lineHeight: 1.1, marginTop: 4,
+                color: (aiCosts.estimated_cost_usd || 0) < 0.5 ? "var(--accent)" : "var(--primary)",
+              }}>
+                ${(aiCosts.estimated_cost_usd || 0).toFixed(2)}
+              </div>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>last {period} days</span>
+            </div>
+
+            <div className="adm-grid4" style={{ flex: 1, minWidth: 280 }}>
+              <StatCard small label="Haiku Calls" value={aiCosts.haiku_calls || 0} color="var(--accent)" />
+              <StatCard small label="Sonnet Calls" value={aiCosts.sonnet_calls || 0} color="var(--primary)" />
+              <StatCard
+                small
+                label="Escalation Rate"
+                value={aiCosts.total_classified ? `${Math.round((aiCosts.sonnet_calls || 0) / aiCosts.total_classified * 100)}%` : "0%"}
+                color="#5B8DEF"
+              />
+              <StatCard
+                small
+                label="Ignore Rate"
+                value={aiCosts.ignore_rate_pct != null ? `${aiCosts.ignore_rate_pct.toFixed(0)}%` : "0%"}
+                color="var(--warm)"
+              />
+            </div>
+          </div>
+
+          {costData.length > 0 && (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+            }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Daily AI Cost</h3>
+              <Sparkline data={costData} height={120} color="var(--primary)" fillOpacity={0.08} labels={costLabels} />
+            </div>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 5: Referrals
+        ══════════════════════════════════════════════ */}
+        <Section title="Referrals" subtitle="Growth">
+          {(referrals.codes_generated || referrals.completed || referrals.total) ? (
+            <div className="adm-grid3">
+              <StatCard label="Codes Generated" value={referrals.codes_generated || 0} color="var(--accent)" />
+              <StatCard label="Completed" value={referrals.completed || 0} color="var(--primary)" />
+              <StatCard
+                label="Conversion Rate"
+                value={referrals.conversion_pct != null ? `${referrals.conversion_pct.toFixed(0)}%` : "0%"}
+                color="#5B8DEF"
+              />
+            </div>
+          ) : (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "40px 20px", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>&#127793;</div>
+              <p style={{ fontSize: 14, color: "var(--muted)" }}>No referral activity yet</p>
+              <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                Referral codes will appear here once families start sharing
+              </p>
+            </div>
+          )}
+        </Section>
+
+        {/* ── Footer ── */}
+        <div style={{ textAlign: "center", padding: "20px 0 40px", fontSize: 12, color: "var(--muted)" }}>
+          Sheli Admin Dashboard &middot; Period: {period} days &middot; {ov.total_households || 0} families
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const btnStyle = {
+  padding: "10px 24px",
+  borderRadius: 12,
+  border: "none",
+  background: "var(--accent)",
+  color: "#fff",
+  fontSize: 14,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontFamily: "'Nunito', sans-serif",
+};
