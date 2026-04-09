@@ -9,24 +9,19 @@ import { supabase } from "./supabase.js";
 const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
 
 export async function detectHousehold(userId, userEmail, userPhone) {
-  // Method 0: Check whatsapp_member_mapping by phone (highest priority for WA users)
-  if (userPhone) {
-    try {
-      // Normalize phone: strip +, leading 0 → 972
-      const digits = userPhone.replace(/\D/g, "");
-      const normalized = digits.startsWith("972") ? digits : digits.startsWith("0") ? "972" + digits.slice(1) : digits;
+  // Method 0: RPC link_user_to_household — SECURITY DEFINER, bypasses RLS
+  // Links auth user to their household member row via phone or created_by match
+  try {
+    const { data: linkedHhId } = await withTimeout(
+      supabase.rpc("link_user_to_household", { p_phone: userPhone || "", p_email: userEmail || "" }),
+      5000
+    ) || {};
 
-      const { data: phoneMapping } = await withTimeout(
-        supabase.from("whatsapp_member_mapping").select("household_id").eq("phone_number", normalized).limit(1).single(),
-        3000
-      ) || {};
-
-      if (phoneMapping?.household_id) {
-        return await withTimeout(loadHouseholdInfo(phoneMapping.household_id), 3000);
-      }
-    } catch {
-      // No phone mapping found — continue
+    if (linkedHhId) {
+      return await withTimeout(loadHouseholdInfo(linkedHhId), 3000);
     }
+  } catch (e) {
+    console.warn("[Detect] link_user_to_household failed:", e.message);
   }
 
   // Method 1: Check household_members for this user_id (3s timeout)
