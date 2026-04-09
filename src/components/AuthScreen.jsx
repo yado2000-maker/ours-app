@@ -378,21 +378,41 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         </p>
         <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", gap: 8, direction: "ltr" }}>
-            <select value={countryCode} onChange={e => setCountryCode(e.target.value)}
-              style={{ ...inputStyle, width: 90, flexShrink: 0, padding: "14px 8px", fontSize: 14, textAlign: "center" }}>
-              <option value="+972">🇮🇱 +972</option>
-              <option value="+1">🇺🇸 +1</option>
-              <option value="+44">🇬🇧 +44</option>
-              <option value="+33">🇫🇷 +33</option>
-              <option value="+49">🇩🇪 +49</option>
-              <option value="+351">🇵🇹 +351</option>
-              <option value="+34">🇪🇸 +34</option>
-              <option value="+39">🇮🇹 +39</option>
-              <option value="+61">🇦🇺 +61</option>
-              <option value="+91">🇮🇳 +91</option>
-              <option value="+380">🇺🇦 +380</option>
-              <option value="+7">🇷🇺 +7</option>
-            </select>
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <select value={countryCode} onChange={e => setCountryCode(e.target.value)}
+                style={{ ...inputStyle, width: 100, padding: "14px 24px 14px 12px", fontSize: 15, appearance: "none", WebkitAppearance: "none", cursor: "pointer", background: "var(--white)" }}>
+                <option value="+972">🇮🇱 +972</option>
+                <option value="+1">🇺🇸 +1</option>
+                <option value="+44">🇬🇧 +44</option>
+                <option value="+33">🇫🇷 +33</option>
+                <option value="+49">🇩🇪 +49</option>
+                <option value="+351">🇵🇹 +351</option>
+                <option value="+34">🇪🇸 +34</option>
+                <option value="+39">🇮🇹 +39</option>
+                <option value="+61">🇦🇺 +61</option>
+                <option value="+91">🇮🇳 +91</option>
+                <option value="+380">🇺🇦 +380</option>
+                <option value="+7">🇷🇺 +7</option>
+                <option value="+55">🇧🇷 +55</option>
+                <option value="+27">🇿🇦 +27</option>
+                <option value="+81">🇯🇵 +81</option>
+                <option value="+86">🇨🇳 +86</option>
+                <option value="+31">🇳🇱 +31</option>
+                <option value="+46">🇸🇪 +46</option>
+                <option value="+41">🇨🇭 +41</option>
+                <option value="+48">🇵🇱 +48</option>
+                <option value="+90">🇹🇷 +90</option>
+                <option value="+30">🇬🇷 +30</option>
+                <option value="+36">🇭🇺 +36</option>
+                <option value="+40">🇷🇴 +40</option>
+                <option value="+254">🇰🇪 +254</option>
+                <option value="+971">🇦🇪 +971</option>
+                <option value="+52">🇲🇽 +52</option>
+                <option value="+54">🇦🇷 +54</option>
+                <option value="+57">🇨🇴 +57</option>
+              </select>
+              <div style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", fontSize: 10, color: "var(--muted)" }}>▼</div>
+            </div>
             <input type="tel" placeholder={isHe ? "מספר טלפון" : "Phone number"} value={phone}
               onChange={(e) => setPhone(e.target.value)} dir="ltr" required
               autoComplete="tel" style={{ ...inputStyle, flex: 1 }}
