@@ -1,5 +1,6 @@
 import { useState } from "react";
 import T from "../locales/index.js";
+import { supabase } from "../lib/supabase.js";
 
 /**
  * JoinOrCreate — Household onboarding choice screen.
@@ -23,6 +24,8 @@ export default function JoinOrCreate({
   detectedHousehold,
 }) {
   const [code, setCode] = useState("");
+  const [phone, setPhone] = useState("");
+  const [phoneLinking, setPhoneLinking] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [joiningDetected, setJoiningDetected] = useState(false);
@@ -62,6 +65,25 @@ export default function JoinOrCreate({
       );
     }
     setLoading(false);
+  };
+
+  const handlePhoneLookup = async () => {
+    const trimmed = phone.trim().replace(/[\s\-()]/g, "");
+    if (!trimmed || trimmed.length < 9) return;
+    setPhoneLinking(true);
+    setError(null);
+    try {
+      const { data: hhId, error: rpcErr } = await supabase.rpc("link_user_to_household", { p_phone: trimmed, p_email: "" });
+      if (rpcErr) throw rpcErr;
+      if (hhId) {
+        await onJoinHousehold(hhId);
+      } else {
+        setError(isHe ? "לא מצאנו משפחה עם המספר הזה. נסו מספר אחר או צרו בית חדש" : "No family found with this number. Try another or create a new home");
+      }
+    } catch (e) {
+      setError(isHe ? "שגיאה — נסו שוב" : "Error — try again");
+    }
+    setPhoneLinking(false);
   };
 
   // ── Shared inline style helpers ──
@@ -349,6 +371,40 @@ export default function JoinOrCreate({
         >
           {isHe ? "צרו בית חדש ב-Sheli" : "Set up a new home"}
         </button>
+
+        {/* ── Divider ── */}
+        <div style={s.divider}>
+          <div style={s.dividerLine} />
+          <span style={s.dividerText}>{isHe ? "או" : "or"}</span>
+          <div style={s.dividerLine} />
+        </div>
+
+        {/* ── Path B2: Find by WhatsApp phone ── */}
+        <p style={s.sectionLabel}>
+          {isHe ? "כבר משתמשים בשלי בווטסאפ? הכניסו את מספר הטלפון" : "Already using Sheli on WhatsApp? Enter your phone"}
+        </p>
+        <div style={s.codeRow}>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => { setPhone(e.target.value); if (error) setError(null); }}
+            onKeyDown={(e) => e.key === "Enter" && handlePhoneLookup()}
+            placeholder={isHe ? "למשל 0525937316" : "e.g. 0525937316"}
+            style={s.codeInput}
+            dir="ltr"
+            onFocus={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
+            onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+          />
+          <button
+            style={s.codeBtn}
+            onClick={handlePhoneLookup}
+            disabled={phoneLinking || !phone.trim()}
+            onMouseEnter={(e) => { if (!phoneLinking) e.currentTarget.style.background = "var(--accent)"; }}
+            onMouseLeave={(e) => { if (!phoneLinking) e.currentTarget.style.background = "var(--dark)"; }}
+          >
+            {phoneLinking ? "..." : isHe ? "חפשו" : "Find"}
+          </button>
+        </div>
 
         {/* ── Divider ── */}
         <div style={s.divider}>
