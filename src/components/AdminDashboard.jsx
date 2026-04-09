@@ -430,17 +430,17 @@ export default function AdminDashboard({ session, onBack }) {
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            {[7, 14, 30].map((d) => (
-              <button key={d} onClick={() => setPeriod(d)} style={{
+            {[{v:1,l:"24h"},{v:7,l:"7d"},{v:14,l:"14d"},{v:30,l:"30d"}].map(({v,l}) => (
+              <button key={v} onClick={() => setPeriod(v)} style={{
                 padding: "6px 14px", borderRadius: 100, fontSize: 13, fontWeight: 600,
                 cursor: "pointer", border: "1.5px solid",
-                borderColor: period === d ? "var(--accent)" : "var(--border)",
-                background: period === d ? "var(--accent)" : "transparent",
-                color: period === d ? "#fff" : "var(--warm)",
+                borderColor: period === v ? "var(--accent)" : "var(--border)",
+                background: period === v ? "var(--accent)" : "transparent",
+                color: period === v ? "#fff" : "var(--warm)",
                 fontFamily: "'Nunito', sans-serif",
                 transition: "all 0.15s",
               }}>
-                {d}d
+                {l}
               </button>
             ))}
             <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>
