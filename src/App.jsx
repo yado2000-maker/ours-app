@@ -51,6 +51,7 @@ export default function Sheli() {
   const [tasks, setTasks]         = useState([]);
   const [shopping, setShopping]   = useState([]);
   const [events, setEvents]       = useState([]);
+  const [rotations, setRotationsS] = useState([]);
   const [input, setInput]         = useState("");
   const [busy, setBusy]           = useState(false);
   const [showMenu, setShowMenu]   = useState(false);
@@ -117,7 +118,7 @@ export default function Sheli() {
           const data = await loadData(joinId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []);
             if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             window.history.replaceState({}, "", window.location.pathname);
             setScreen("pick"); return;
@@ -131,7 +132,7 @@ export default function Sheli() {
           const data = await loadData(hhId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []);
             if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             const savedUser = lsGet("sheli-user");
             if (savedUser) {
@@ -166,7 +167,7 @@ export default function Sheli() {
           loadData(detected.id).then(data => {
             if (data) {
               setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-              setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []);
+              setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []);
               if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             }
           }).catch(e => console.warn("[Boot] Background load:", e));
@@ -277,12 +278,26 @@ export default function Sheli() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `household_id=eq.${hhId}` }, reloadMessages)
       .subscribe();
 
+    const reloadRotations = async () => {
+      if (Date.now() - lastSaveRef.current < 3000) return;
+      const { data } = await supabase.from("rotations").select("*").eq("household_id", hhId).eq("active", true);
+      if (data) setRotationsS(data.map(r => ({
+        ...r,
+        members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
+        frequency: r.frequency && typeof r.frequency === "string" ? JSON.parse(r.frequency) : r.frequency,
+      })));
+    };
+    const ch6 = supabase.channel(`rotations-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "rotations", filter: `household_id=eq.${hhId}` }, reloadRotations)
+      .subscribe();
+
     return () => {
       supabase.removeChannel(ch1);
       supabase.removeChannel(ch2);
       supabase.removeChannel(ch3);
       supabase.removeChannel(ch4);
       supabase.removeChannel(ch5);
+      supabase.removeChannel(ch6);
     };
   }, [screen]);
 
@@ -299,7 +314,7 @@ export default function Sheli() {
     setIsFounder(true);
 
     setHouseholdS(hh); setLang(hh.lang || "en");
-    setTasksS([]); setShoppingS([]); setEventsS([]);
+    setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]);
     const founder = hh.members[0];
     if (founder) {
       lsSet("sheli-user", founder);
@@ -346,7 +361,7 @@ export default function Sheli() {
     localStorage.removeItem("sheli-user");
     localStorage.removeItem("sheli-founder");
     localStorage.removeItem("sheli-onboarded");
-    setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setInput("");
+    setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setInput("");
     setShowMenu(false); setScreen("setup");
   };
 
@@ -729,7 +744,7 @@ export default function Sheli() {
             localStorage.removeItem("sheli-founder");
             localStorage.removeItem("sheli-onboarded");
             localStorage.removeItem("sheli-msgs");
-            setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setIsFounder(false);
+            setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setIsFounder(false);
             await signOut();
             setShowMenu(false); setScreen("welcome");
           }}
@@ -811,7 +826,7 @@ export default function Sheli() {
           )}
 
           {tab === "week" && (
-            <WeekView tasks={tasks} events={events} t={t} lang={lang} onDeleteEvent={deleteEventHandler} />
+            <WeekView tasks={tasks} events={events} rotations={rotations} t={t} lang={lang} onDeleteEvent={deleteEventHandler} />
           )}
 
         </div>

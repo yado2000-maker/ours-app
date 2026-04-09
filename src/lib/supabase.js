@@ -34,12 +34,13 @@ export const uid  = () => Math.random().toString(36).slice(2, 10);
 // ─── Normalized table functions (v2) ───
 
 export const loadHousehold = async (hhId) => {
-  const [hhRes, membersRes, tasksRes, shoppingRes, eventsRes] = await Promise.all([
+  const [hhRes, membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes] = await Promise.all([
     supabase.from("households_v2").select("*").eq("id", hhId).single(),
     supabase.from("household_members").select("*").eq("household_id", hhId),
     supabase.from("tasks").select("*").eq("household_id", hhId),
     supabase.from("shopping_items").select("*").eq("household_id", hhId),
     supabase.from("events").select("*").eq("household_id", hhId),
+    supabase.from("rotations").select("*").eq("household_id", hhId).eq("active", true),
   ]);
   if (!hhRes.data) return null;
   return {
@@ -53,6 +54,11 @@ export const loadHousehold = async (hhId) => {
     tasks: (tasksRes.data || []).map(t => fromDb(t, TASK_MAP)),
     shopping: shoppingRes.data || [],
     events: (eventsRes.data || []).map(e => fromDb(e, EVENT_MAP)),
+    rotations: (rotationsRes.data || []).map(r => ({
+      ...r,
+      members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
+      frequency: r.frequency && typeof r.frequency === "string" ? JSON.parse(r.frequency) : r.frequency,
+    })),
   };
 };
 

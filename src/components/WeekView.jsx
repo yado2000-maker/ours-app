@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { EmptyCalendarIcon, ChevronLeftIcon, ChevronRightIcon, DeleteIcon } from "./Icons.jsx";
 
-export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
+export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEvent }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const today = new Date();
 
@@ -42,13 +42,67 @@ export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
     if (!byDay[d]) byDay[d] = [];
     byDay[d].push({ ...ev, _type: "event" });
   });
+  // Compute rotation entries for the week
+  (rotations || []).forEach(rot => {
+    const members = Array.isArray(rot.members) ? rot.members :
+      (typeof rot.members === "string" ? JSON.parse(rot.members) : []);
+    if (!members.length) return;
+    const baseIndex = rot.current_index || 0;
+    const todayIdx = days.findIndex(d => d.toDateString() === new Date().toDateString());
+
+    days.forEach((day, dayIdx) => {
+      if (rot.type === "order") {
+        // Order rotations: show every day (who goes first)
+        const offset = dayIdx - (todayIdx >= 0 ? todayIdx : 0);
+        const memberIdx = ((baseIndex + offset) % members.length + members.length) % members.length;
+        const d = day.getDay();
+        if (!byDay[d]) byDay[d] = [];
+        byDay[d].push({
+          id: `rot-${rot.id}-${dayIdx}`,
+          title: rot.title,
+          assignedTo: members[memberIdx],
+          scheduledFor: day.toISOString(),
+          _type: "rotation",
+          _rotationType: rot.type,
+        });
+      }
+
+      if (rot.type === "duty" && rot.frequency) {
+        // Duty rotations with frequency: show on matching days
+        let showDay = false;
+        if (rot.frequency.type === "daily") showDay = true;
+        if (rot.frequency.type === "weekly") {
+          const dayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+          showDay = (rot.frequency.days || []).includes(dayNames[day.getDay()]);
+        }
+
+        if (showDay) {
+          const offset = dayIdx - (todayIdx >= 0 ? todayIdx : 0);
+          const memberIdx = ((baseIndex + offset) % members.length + members.length) % members.length;
+          const d = day.getDay();
+          if (!byDay[d]) byDay[d] = [];
+          byDay[d].push({
+            id: `rot-${rot.id}-${dayIdx}`,
+            title: rot.title,
+            assignedTo: members[memberIdx],
+            scheduledFor: day.toISOString(),
+            _type: "rotation",
+            _rotationType: rot.type,
+          });
+        }
+      }
+    });
+  });
+
   Object.values(byDay).forEach(arr => arr.sort((a, b) => {
     const aTime = a._type === "done" ? a.completedAt : a.scheduledFor;
     const bTime = b._type === "done" ? b.completedAt : b.scheduledFor;
     return new Date(aTime) - new Date(bTime);
   }));
 
+  const rotationCount = Object.values(byDay).reduce((sum, arr) => sum + arr.filter(x => x._type === "rotation").length, 0);
   const allWeekItems = [...doneTasks, ...weekEvents];
+  const hasContent = allWeekItems.length > 0 || rotationCount > 0;
   const pad = n => String(n).padStart(2, "0");
   const fmtTime = iso => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const isToday = d => weekOffset === 0 && d.toDateString() === today.toDateString();
@@ -80,7 +134,7 @@ export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
           </button>
         </div>
       </div>
-      {allWeekItems.length === 0 ? (
+      {!hasContent ? (
         <div className="week-empty">
           <div className="week-empty-icon"><EmptyCalendarIcon size={44} /></div>
           <p className="week-empty-text">{t.weekEmpty}</p>
@@ -92,7 +146,7 @@ export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
               <div className={`week-day-label ${isToday(day) ? "today" : ""}`}>{t.weekDays[i]}</div>
               <div className={`week-date ${isToday(day) ? "today" : ""}`}>{day.getDate()}</div>
               {(byDay[i] || []).map(item => (
-                <div key={item.id} className={`week-task-chip ${item._type === "event" ? "scheduled" : ""}`}>
+                <div key={item.id} className={`week-task-chip ${item._type === "rotation" ? "scheduled" : item._type === "event" ? "scheduled" : ""}`}>
                   <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:3}}>
                     <div className="week-task-name">{item.title}</div>
                     {item._type === "event" && (
@@ -104,7 +158,14 @@ export default function WeekView({ tasks, events, t, lang, onDeleteEvent }) {
                       </button>
                     )}
                   </div>
-                  {item._type === "event" ? (
+                  {item._type === "rotation" ? (
+                    <>
+                      {item.assignedTo && <div className="week-task-who">{item.assignedTo}</div>}
+                      <div className="week-task-time" style={{color: "var(--accent)", fontSize: 10, opacity: 0.8}}>
+                        {item._rotationType === "order" ? "סדר" : "תורנות"}
+                      </div>
+                    </>
+                  ) : item._type === "event" ? (
                     <>
                       {item.assignedTo && <div className="week-task-who">{item.assignedTo}</div>}
                       <div className="week-task-time" style={{color:"var(--accent)"}}>
