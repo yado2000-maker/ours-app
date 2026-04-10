@@ -161,7 +161,7 @@ export default function Sheli() {
       try {
         const detected = await Promise.race([
           detectHousehold(session.user.id, session.user.email, session.user.phone),
-          new Promise(resolve => setTimeout(() => { console.warn("[Boot] Auto-detect timeout"); resolve(null); }, 5000)),
+          new Promise(resolve => setTimeout(() => { console.warn("[Boot] Auto-detect timeout"); resolve(null); }, 12000)),
         ]);
         if (detected) {
           console.log("[Boot] Auto-detected household:", detected.name, detected.id);
@@ -191,7 +191,8 @@ export default function Sheli() {
       setScreen("join-or-create");
     };
 
-    // Run boot with 8s safety net — but only override if still on "loading"
+    // Run boot with 15s safety net — but only override if still on "loading"
+    // Must exceed detectHousehold timeout (12s) which includes RPC retry (2×5s) + loadInfo (3s)
     let bootDone = false;
     bootAsync().then(() => { bootDone = true; });
     setTimeout(() => {
@@ -199,7 +200,7 @@ export default function Sheli() {
         console.warn("[Boot] Global timeout — forcing join-or-create");
         setScreen(prev => prev === "loading" ? "join-or-create" : prev);
       }
-    }, 8000);
+    }, 15000);
 
   }, [authLoading, session]); // runs when auth resolves or session changes
 

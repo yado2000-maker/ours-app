@@ -11,17 +11,28 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() =
 export async function detectHousehold(userId, userEmail, userPhone) {
   // Method 0: RPC link_user_to_household — SECURITY DEFINER, bypasses RLS
   // Links auth user to their household member row via phone or created_by match
-  try {
-    const { data: linkedHhId } = await withTimeout(
-      supabase.rpc("link_user_to_household", { p_phone: userPhone || "", p_email: userEmail || "" }),
-      5000
-    ) || {};
+  // Retry once on failure/timeout (cold-start resilience)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { data: linkedHhId, error: rpcErr } = await withTimeout(
+        supabase.rpc("link_user_to_household", { p_phone: userPhone || "", p_email: userEmail || "" }),
+        5000
+      ) || {};
 
-    if (linkedHhId) {
-      return await withTimeout(loadHouseholdInfo(linkedHhId), 3000);
+      if (rpcErr) {
+        console.warn(`[Detect] RPC attempt ${attempt + 1} error:`, rpcErr.message);
+        if (attempt === 0) continue; // retry once
+      }
+
+      if (linkedHhId) {
+        console.log("[Detect] RPC linked to household:", linkedHhId);
+        return await withTimeout(loadHouseholdInfo(linkedHhId), 3000);
+      }
+      break; // null result = no match, don't retry
+    } catch (e) {
+      console.warn(`[Detect] RPC attempt ${attempt + 1} failed:`, e.message);
+      if (attempt === 0) continue; // retry once
     }
-  } catch (e) {
-    console.warn("[Detect] link_user_to_household failed:", e.message);
   }
 
   // Method 1: Check household_members for this user_id (3s timeout)

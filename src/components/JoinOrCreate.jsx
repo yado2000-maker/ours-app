@@ -362,26 +362,12 @@ export default function JoinOrCreate({
           </div>
         )}
 
-        {/* ── Path C: Create new (PRIMARY CTA) ── */}
-        <button
-          style={{...s.createBtn, background: "var(--dark)", color: "var(--white)", border: "1.5px solid var(--dark)", fontWeight: 500}}
-          onClick={onCreateNew}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent)"; e.currentTarget.style.borderColor = "var(--accent)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--dark)"; e.currentTarget.style.borderColor = "var(--dark)"; }}
-        >
-          {isHe ? "צרו בית חדש ב-Sheli" : "Set up a new home"}
-        </button>
-
-        {/* ── Divider ── */}
-        <div style={s.divider}>
-          <div style={s.dividerLine} />
-          <span style={s.dividerText}>{isHe ? "או" : "or"}</span>
-          <div style={s.dividerLine} />
-        </div>
-
-        {/* ── Path B2: Find by WhatsApp phone ── */}
-        <p style={s.sectionLabel}>
-          {isHe ? "כבר משתמשים בשלי בווטסאפ? הכניסו את מספר הטלפון" : "Already using Sheli on WhatsApp? Enter your phone"}
+        {/* ── Path B2: Find by WhatsApp phone (PRIMARY for WA users) ── */}
+        <p style={{...s.sectionLabel, fontSize: 14, fontWeight: 600, color: "var(--dark)"}}>
+          {isHe ? "כבר משתמשים בשלי בווטסאפ?" : "Already using Sheli on WhatsApp?"}
+        </p>
+        <p style={{fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4, textAlign: isHe ? "right" : "left"}}>
+          {isHe ? "הכניסו את מספר הטלפון שלכם ונמצא את המשפחה" : "Enter your phone number and we'll find your family"}
         </p>
         <div style={s.codeRow}>
           <input
@@ -392,15 +378,16 @@ export default function JoinOrCreate({
             placeholder={isHe ? "למשל 0521234567" : "e.g. 0521234567"}
             style={s.codeInput}
             dir="ltr"
+            autoFocus={!detectedHousehold}
             onFocus={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
             onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
           />
           <button
-            style={s.codeBtn}
+            style={{...s.codeBtn, background: "var(--accent)"}}
             onClick={handlePhoneLookup}
             disabled={phoneLinking || !phone.trim()}
-            onMouseEnter={(e) => { if (!phoneLinking) e.currentTarget.style.background = "var(--accent)"; }}
-            onMouseLeave={(e) => { if (!phoneLinking) e.currentTarget.style.background = "var(--dark)"; }}
+            onMouseEnter={(e) => { if (!phoneLinking) e.currentTarget.style.background = "var(--dark)"; }}
+            onMouseLeave={(e) => { if (!phoneLinking) e.currentTarget.style.background = "var(--accent)"; }}
           >
             {phoneLinking ? "..." : isHe ? "חפשו" : "Find"}
           </button>
@@ -413,7 +400,7 @@ export default function JoinOrCreate({
           <div style={s.dividerLine} />
         </div>
 
-        {/* ── Path B: Join by code (SECONDARY) ── */}
+        {/* ── Path B: Join by code ── */}
         <p style={s.sectionLabel}>
           {isHe ? "הצטרפו עם הקוד של הבית" : "Join with a home code"}
         </p>
@@ -458,6 +445,23 @@ export default function JoinOrCreate({
               : "Join"}
           </button>
         </div>
+
+        {/* ── Divider ── */}
+        <div style={s.divider}>
+          <div style={s.dividerLine} />
+          <span style={s.dividerText}>{isHe ? "או" : "or"}</span>
+          <div style={s.dividerLine} />
+        </div>
+
+        {/* ── Path C: Create new (LAST — prevents accidental duplicates) ── */}
+        <button
+          style={s.createBtn}
+          onClick={onCreateNew}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--cream)"; e.currentTarget.style.borderColor = "var(--warm)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "var(--border)"; }}
+        >
+          {isHe ? "צרו בית חדש ב-Sheli" : "Set up a new home"}
+        </button>
 
         {/* ── Hint text ── */}
         <p
