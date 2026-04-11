@@ -537,6 +537,9 @@ HEBREW PATTERNS:
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
 - Greetings, emojis, reactions, "סבבה", "אמן", "בהצלחה" = ignore
 - "מה הסיסמא?", "שלח קוד" = info_request (NOT add_task)
+- BRINGING/ALREADY HAVE (= ignore, NOT shopping): "מביאה X", "מביא X", "הבאתי X", "לקחתי X", "יש לי X", "כבר קניתי X", "כבר יש X" = someone announcing they're BRINGING or ALREADY HAVE something. This is NOT a request to buy. Ignore it.
+  "מביאה ג'חנונים" = ignore (she's bringing it). "צריך ג'חנונים" = add_shopping (she needs it).
+- LOCATION/WHEREABOUTS QUESTIONS (= ignore in groups): "איפה [person]?", "איפה הבנות?", "איפה אתם?", "מתי אתם מגיעים?", "הגעתם?" = family members asking EACH OTHER about location. Sheli has no location data — NEVER respond. Always ignore.
 - LINK COMMENTARY: Messages that respond to/riff on a shared link (TikTok, YouTube, article, video) are social commentary = ignore. Signals: "ואני מוסיף:", "בדיוק!", "כל כך נכון", laughter after a link, opinions about shared content. These are NOT tasks or shopping items even if they sound actionable.
 - Hebrew time: "ב5" = 17:00, "בצהריים" = ~12:00, "אחרי הגן" = ~16:00, "לפני שבת" = Friday PM
 - "תזכירי", "תזכיר", "תזכרו", "remind" = add_reminder (NOT add_task, NOT add_event)
@@ -545,7 +548,12 @@ HEBREW PATTERNS:
   - Ordering activities (מקלחת, אמבטיה, shower) → type "order" (who goes first, advances daily)
   - Chore activities (כלים, כביסה, זבל, ניקיון, dishes, laundry, trash) → type "duty" (whose job, advances on completion)
   - When ambiguous, default to "duty"
-- "מי בתור ל...?" = question (about existing rotation)
+- ROTATION QUESTION (= question intent, NOT add_task, NOT override — just ANSWER from context):
+  "תור מי" / "תורמי" (merged in speech) = "whose turn?" — ALWAYS a question.
+  "של מי התור היום", "מי בתור", "מי תורן/תורנית", "מי בתורות/בתורנות היום",
+  "התורנות של מי היום", "מי שוטף כלים היום?", "נכון שזה תורו/תורה ולא תורי?",
+  "תגידי לו שזה תורו", "שלי מי בתור", "שלי תגידי מי תורן"
+  → intent: "question", answer from rotation/events context, actions: []
 - ROTATION OVERRIDE: When an ACTIVE ROTATION exists and message assigns a specific person for today:
   "[person] בתורות/בתורנות/בתור ל[activity]", "היום [person] ב[activity]", "[person] [activity] היום",
   "[person] ראשון/ראשונה ב[activity] היום", "[person] תורן/תורנית [activity] היום"
@@ -634,12 +642,20 @@ EXAMPLES:
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
 [אבא]: "מי בתור למקלחת?" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"מי בתור למקלחת?"}}
+[אמא]: "תורמי לשטוף כלים היום?" → {"intent":"question","confidence":0.92,"entities":{"raw_text":"תורמי לשטוף כלים היום?"}}
+[אבא]: "של מי התור היום לכלים" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"של מי התור היום לכלים"}}
+[ילד]: "נכון שזה תורה ולא תורי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"נכון שזה תורה ולא תורי?"}}
+[אמא]: "שלי תגידי לו שזה תורו" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"שלי תגידי לו שזה תורו"}}
 [אמא]: "היום גילעד בתורות למקלחת" → {"intent":"add_task","confidence":0.90,"entities":{"override":{"title":"מקלחת","person":"גילעד"},"raw_text":"היום גילעד בתורות למקלחת"}}
 [אבא]: "אביב תורן כלים היום" → {"intent":"add_task","confidence":0.90,"entities":{"override":{"title":"כלים","person":"אביב"},"raw_text":"אביב תורן כלים היום"}}
 [אמא]: "גילעד ראשון במקלחת היום" → {"intent":"add_task","confidence":0.90,"entities":{"override":{"title":"מקלחת","person":"גילעד"},"raw_text":"גילעד ראשון במקלחת היום"}}
 [אמא]: "ככה יום אביב יום גילעד" → {"intent":"instruct_bot","confidence":0.85,"entities":{"raw_text":"ככה יום אביב יום גילעד"}}
 [אמא]: "אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד" → {"intent":"instruct_bot","confidence":0.90,"entities":{"raw_text":"אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד"}}
 [אבא]: "צריך לנהל את הכלים ככה שכל יום ילד אחר" → {"intent":"instruct_bot","confidence":0.88,"entities":{"raw_text":"צריך לנהל את הכלים ככה שכל יום ילד אחר"}}
+[אמא]: "מביאה ג'חנונים" → {"intent":"ignore","confidence":0.95,"entities":{"raw_text":"מביאה ג'חנונים"}}
+[אבא]: "הבאתי לחם" → {"intent":"ignore","confidence":0.95,"entities":{"raw_text":"הבאתי לחם"}}
+[אבא]: "איפה בנות?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה בנות?"}}
+[אמא]: "איפה אתם? מתי מגיעים?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה אתם? מתי מגיעים?"}}
 [אמא]: "שלי תזכרי שיובל אוהב פיצה עם אננס" → {"intent":"save_memory","confidence":0.95,"entities":{"memory_content":"יובל אוהב פיצה עם אננס","memory_about":"יובל","raw_text":"שלי תזכרי שיובל אוהב פיצה עם אננס"}}
 [אבא]: "שלי מה את זוכרת על נועה?" → {"intent":"recall_memory","confidence":0.90,"entities":{"memory_about":"נועה","raw_text":"שלי מה את זוכרת על נועה?"}}
 [אמא]: "שלי תשכחי את מה שאמרתי קודם" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"שלי תשכחי את מה שאמרתי קודם"}}
@@ -1254,7 +1270,7 @@ HEBREW FAMILY CHAT PATTERNS — critical for correct classification:
 2. IMPLICIT TASKS: "[person] [activity] [time]" = task assignment.
    "נועה חוג 5" → "Pick up Noa from activity at 5pm"
 
-3. QUESTION = UNASSIGNED TASK: "מי אוסף?" → Create task, no assignee.
+3. QUESTION ABOUT STATUS: "מי אוסף?", "מה יש ברשימה?", "מה המטלות?" → respond=true with ANSWER from household context. Do NOT create a new task — just ANSWER the question.
 
 4. CONFIRMATION = TASK CLAIM: "אני" or "אני לוקח/ת" after a task → assign to speaker.
 
@@ -1264,10 +1280,17 @@ HEBREW FAMILY CHAT PATTERNS — critical for correct classification:
 
 7. MIXED HEBREW-ENGLISH: "יש meeting ב-3" → Event at 15:00. "צריך milk" → Shopping: milk.
 
-8. TURNS/ROTATION: "תורות מקלחת: דניאל, נועה, יובל" = create rotation via add_task with rotation entity.
-   "תור של דניאל למקלחת" = single task or query. "מי בתור ל...?" = question about rotation.
-   "תורנות כלים" = duty rotation (chore). "סדר מקלחות" = order rotation (sequence).
+8. TURNS/ROTATION:
+   CREATING a rotation: "תורות מקלחת: דניאל, נועה, יובל" = create rotation via add_task with rotation entity.
    Rotation entity: {"rotation": {"title": "activity", "type": "order"|"duty", "members": ["name1", "name2", ...]}}
+   "תורנות כלים" = duty rotation (chore). "סדר מקלחות" = order rotation (sequence).
+
+   ASKING about a rotation (= QUESTION, NOT an action! Just answer from context):
+   "תור מי" / "תורמי" = "whose turn" (two words merged: תור + מי). VERY COMMON in speech/voice.
+   "של מי התור היום", "מי בתור", "מי תורן/תורנית", "מי בתורות היום", "מי בתורנות היום"
+   "התורנות של מי היום", "מי שוטף כלים היום", "נכון שזה תורו/תורה ולא תורי?"
+   "תגידי לו שזה תורו" / "שלי תגידי מי בתור" = asking Sheli to confirm whose turn it is.
+   ALL of these are QUESTIONS — respond=true, answer from UPCOMING EVENTS/TASKS rotation data, actions=[].
 
 9. ABBREVIATIONS: "סבבה" = OK/confirmation. "בנט"/"בט" = meanwhile. "תיכף" = soon. "אחלה" = great.
 
@@ -1293,6 +1316,11 @@ ${eventsStr}
 ${hebrewPatterns}
 
 YOUR JOB: Read the WhatsApp messages below. Decide if any are ACTIONABLE (contain a task, shopping item, event, or task completion). If so, extract the actions and write a SHORT confirmation reply.
+
+CRITICAL RULES:
+- ONLY create actions for things the user EXPLICITLY said in their message. NEVER invent actions from existing household data.
+- If the user asks a QUESTION (whose turn? what's on the list? what tasks are there?) → respond=true with an ANSWER, actions=[]. Use household context to ANSWER, not to CREATE actions.
+- The household context (tasks, shopping, events) is provided so you can ANSWER questions and AVOID duplicates — NOT so you can proactively report on or modify existing items.
 
 If messages are purely social (greetings, jokes, photos, reactions, family chat) — set respond=false and take no actions. MOST messages will be social — don't over-classify.
 
@@ -3058,7 +3086,10 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
-      console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}`);
+      // Check if this is the first voice message in the group/chat — for privacy explanation
+      const isFirstVoice = await isFirstVoiceInChat(message.groupId || message.chatId);
+
+      console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}${isFirstVoice ? " (first voice!)" : ""}`);
       const transcribed = await transcribeVoice(message.mediaUrl, message.mediaId);
       if (!transcribed) {
         console.log(`[Webhook] Transcription failed for ${message.senderName}`);
@@ -3079,8 +3110,31 @@ Deno.serve(async (req: Request) => {
       // If cleaning emptied it, use original
       if (!cleanTranscript) cleanTranscript = transcribed;
 
+      // Haiku pass: fix Hebrew voice transcription errors before classification
+      const fixedTranscript = await fixVoiceTranscription(cleanTranscript);
+      if (fixedTranscript && fixedTranscript !== cleanTranscript) {
+        console.log(`[Webhook] Voice fix: "${cleanTranscript.slice(0, 60)}" → "${fixedTranscript.slice(0, 60)}"`);
+        cleanTranscript = fixedTranscript;
+      }
+
       message.text = cleanTranscript;
-      console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}" → cleaned: "${cleanTranscript.slice(0, 80)}"`);
+      console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}" → final: "${cleanTranscript.slice(0, 80)}"`);
+
+      // First voice message in this chat? Send a one-time privacy explanation
+      if (isFirstVoice) {
+        const chatTarget = message.groupId || message.chatId;
+        if (chatTarget) {
+          const privacyNote = "🎤 אגב, אני בודקת רק הודעות קוליות קצרות (עד 30 שניות) — " +
+            "הארוכות יותר הן כנראה עניינים משפחתיים ולא בקשות ממני.\n" +
+            "שום דבר לא נשמר אצלי יותר מ-30 יום, וגם זה רק כדי שאוכל להכיר אתכם ולהיות יעילה יותר עבורכם 😊";
+          // Send after a small delay so the main reply goes first
+          setTimeout(async () => {
+            try {
+              await provider.sendMessage({ groupId: chatTarget, text: privacyNote });
+            } catch (e) { console.error("[VoicePrivacy] Failed to send:", e); }
+          }, 3000);
+        }
+      }
     }
 
     // 3b. Skip all non-text/non-voice messages (photos, stickers, video, etc.)
@@ -3513,7 +3567,10 @@ Deno.serve(async (req: Request) => {
         if (directAddress) {
           const replyCtx = await buildReplyCtx(householdId, "group");
           const { reply } = await generateReply(classification, message.senderName, replyCtx);
-          if (reply) await provider.sendMessage({ groupId: message.groupId, text: reply });
+          if (reply) {
+            await provider.sendMessage({ groupId: message.groupId, text: reply });
+            await maybeMarkDashboardMentioned(message.groupId, reply);
+          }
           await logMessage(message, "direct_address_reply", householdId, classification);
           return new Response("OK", { status: 200 });
         }
@@ -3531,6 +3588,7 @@ Deno.serve(async (req: Request) => {
       await incrementUsage(householdId);
       if (sonnetResult.reply) {
         await provider.sendMessage({ groupId: message.groupId, text: sonnetResult.reply });
+        await maybeMarkDashboardMentioned(message.groupId, sonnetResult.reply);
       }
       await logMessage(message, "sonnet_escalated", householdId, classification);
       return new Response("OK", { status: 200 });
@@ -3753,6 +3811,7 @@ Deno.serve(async (req: Request) => {
       const { reply } = await generateReply(classification, message.senderName, replyCtx);
       if (reply) {
         await provider.sendMessage({ groupId: message.groupId, text: reply });
+        await maybeMarkDashboardMentioned(message.groupId, reply);
       }
       await logMessage(message, "haiku_reply_only", householdId, classification);
       return new Response("OK", { status: 200 });
@@ -4045,6 +4104,77 @@ async function transcribeVoice(mediaUrl: string | undefined, mediaId: string | u
   }
 }
 
+// ─── Voice — First-in-chat detection ───
+
+async function isFirstVoiceInChat(chatId: string | undefined): Promise<boolean> {
+  if (!chatId) return false;
+  try {
+    const { count } = await supabase
+      .from("whatsapp_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("group_id", chatId)
+      .eq("message_type", "voice")
+      .not("classification", "eq", "received"); // only count processed ones
+    return (count || 0) === 0; // no prior voice = this is the first
+  } catch {
+    return false;
+  }
+}
+
+// ─── Voice Transcription Fixer — Haiku corrects Whisper Hebrew errors ───
+
+async function fixVoiceTranscription(text: string): Promise<string | null> {
+  if (!text || text.length < 3) return text;
+
+  const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  if (!ANTHROPIC_API_KEY) return text;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        system: `You fix Hebrew voice transcription errors from Whisper.
+
+COMMON ERRORS TO FIX:
+1. MERGED WORDS: Whisper often joins two Hebrew words into one.
+   "תורמי" → "תור מי" (whose turn). "מהנשמע" → "מה נשמע". "איפהזה" → "איפה זה".
+2. HALLUCINATED FILLER: Whisper sometimes adds greetings or filler that weren't spoken, especially at the start or end: "מה נשמע? איך עובר עלייך היום?" when the person didn't say that.
+   If the text starts with a generic greeting/smalltalk followed by an abrupt topic switch, the greeting may be hallucinated. Remove it ONLY if the transition is unnatural.
+3. PHONEME CONFUSION: "תורני" vs "תורמי", "שלי" (mine) vs "שלי" (Sheli the bot name) — keep as-is, the classifier handles these.
+4. WORD BOUNDARIES around common Hebrew phrases:
+   "תור מי", "של מי", "מי בתור", "בשביל מה", "למה זה", "איך אני"
+
+RULES:
+- Return ONLY the corrected text, nothing else.
+- If the text is fine, return it unchanged.
+- Do NOT change meaning, add words, or rephrase.
+- Do NOT remove content you're not sure is hallucinated.
+- Keep it minimal — fix clear errors only.`,
+        messages: [{ role: "user", content: text }],
+      }),
+    });
+
+    if (!res.ok) {
+      console.error("[VoiceFix] Haiku API error:", res.status);
+      return text; // fallback to original
+    }
+
+    const data = await res.json();
+    const fixed = data.content?.[0]?.text?.trim();
+    return fixed || text;
+  } catch (err) {
+    console.error("[VoiceFix] Error:", err);
+    return text; // fallback to original
+  }
+}
+
 // ─── Error Notification — DM the admin when something breaks ───
 
 const ADMIN_PHONE = Deno.env.get("ADMIN_PHONE") || "972525937316";
@@ -4229,6 +4359,17 @@ async function maybeSendSoftWarning(groupId: string, householdId: string, usageC
   console.log(`[Webhook] Soft warning sent to ${groupId} (${remaining} actions remaining)`);
 }
 
+// If a bot reply already contains the dashboard link, mark it as sent so the promo card never fires
+async function maybeMarkDashboardMentioned(groupId: string, replyText: string) {
+  if (!replyText || !groupId) return;
+  if (replyText.includes("sheli.ai")) {
+    await supabase
+      .from("whatsapp_config")
+      .update({ dashboard_link_sent: true })
+      .eq("group_id", groupId);
+  }
+}
+
 async function maybeSendDashboardLink(groupId: string, householdId: string, config: Record<string, unknown>) {
   try {
     await supabase.rpc("increment_group_message_count", { p_group_id: groupId });
@@ -4245,19 +4386,40 @@ async function maybeSendDashboardLink(groupId: string, householdId: string, conf
     const firstMsgTime = cfg.first_message_at ? new Date(cfg.first_message_at as string).getTime() : Date.now();
     const hoursSinceFirst = (Date.now() - firstMsgTime) / (1000 * 60 * 60);
 
-    if (messageCount >= 10 || hoursSinceFirst >= 24) {
-      const lang = (config.language as string) || "he";
-      const msg = lang === "he"
-        ? `📊 רוצים לראות הכל במקום אחד?\nמטלות, קניות ואירועים — הכל בדשבורד אחד.\n🔗 sheli.ai?source=wa`
-        : `📊 Want to see everything in one place?\nTasks, shopping, and events — all in one dashboard.\n🔗 sheli.ai?source=wa`;
+    // Must meet threshold: 10+ messages OR 24h since first message
+    if (messageCount < 10 && hoursSinceFirst < 24) return;
 
-      await provider.sendMessage({ groupId, text: msg });
-      await supabase
-        .from("whatsapp_config")
-        .update({ dashboard_link_sent: true })
-        .eq("group_id", groupId);
-      console.log(`[Webhook] Dashboard link sent to group ${groupId} (msgs=${messageCount}, hours=${hoursSinceFirst.toFixed(1)})`);
+    // Time-of-day guard: only send between 9AM-8PM Israel time
+    const israelHour = new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem", hour: "numeric", hour12: false });
+    const hour = parseInt(israelHour, 10);
+    if (hour < 9 || hour >= 20) return;
+
+    // Quiet-period guard: group must have been quiet for 2+ hours
+    const { data: lastMsg } = await supabase
+      .from("whatsapp_messages")
+      .select("created_at")
+      .eq("group_id", groupId)
+      .neq("sender_phone", Deno.env.get("BOT_PHONE_NUMBER") || "972555175553")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (lastMsg) {
+      const hoursSinceLastMsg = (Date.now() - new Date(lastMsg.created_at).getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLastMsg < 2) return; // Group still active — wait
     }
+
+    const lang = (config.language as string) || "he";
+    const msg = lang === "he"
+      ? `📊 רוצים לראות הכל במקום אחד?\nמטלות, קניות ואירועים — הכל בדשבורד אחד.\n🔗 sheli.ai?source=wa`
+      : `📊 Want to see everything in one place?\nTasks, shopping, and events — all in one dashboard.\n🔗 sheli.ai?source=wa`;
+
+    await provider.sendMessage({ groupId, text: msg });
+    await supabase
+      .from("whatsapp_config")
+      .update({ dashboard_link_sent: true })
+      .eq("group_id", groupId);
+    console.log(`[Webhook] Dashboard link sent to group ${groupId} (msgs=${messageCount}, hours=${hoursSinceFirst.toFixed(1)}, quiet=2h+)`);
   } catch (err) {
     console.error("[maybeSendDashboardLink] Error:", err);
   }

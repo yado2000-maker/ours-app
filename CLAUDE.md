@@ -281,4 +281,4 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **Implementation plan:** V3 active (`docs/implementation-plan-v3.md`), V2 superseded
 
 ## TODO
-- *(none — dynamic plan badge implemented 2026-04-11)*
+- **Whapi group removal webhook unreliable** — Ventura family removed Sheli from group but `handleBotRemoved` never fired (`bot_active` stayed true). Manually fixed. Investigate: does Whapi send `remove` events for bot removal? Check webhook payload format, event subtype matching, and add logging/alerting for missed removal events.

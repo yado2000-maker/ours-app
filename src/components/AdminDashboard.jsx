@@ -406,6 +406,13 @@ export default function AdminDashboard({ session, onBack }) {
   const hhFeatures = ft.household_features || [];
   const referrals = ft.referrals || {};
 
+  // Churned families + web traffic (new)
+  const churned = ov.churned_families || [];
+  const webTraffic = ov.web_traffic || {};
+  const webSessionsData = (webTraffic.sessions_by_day || []).map((d) => d.sessions || 0);
+  const webUsersData = (webTraffic.sessions_by_day || []).map((d) => d.users || 0);
+  const webTrafficLabels = (webTraffic.sessions_by_day || []).map((d) => fmtDate(d.day));
+
   // Bot heartbeat
   const botAge = ov.bot_last_message_at ? Date.now() - new Date(ov.bot_last_message_at).getTime() : Infinity;
   const botColor = botAge < 600000 ? "#2AB673" : botAge < 3600000 ? "#F5A623" : "#E8725C";
@@ -775,7 +782,90 @@ export default function AdminDashboard({ session, onBack }) {
         </Section>
 
         {/* ══════════════════════════════════════════════
-            Section 5: Referrals
+            Section 5: App Traffic
+        ══════════════════════════════════════════════ */}
+        <Section title="App Traffic" subtitle="Web app opens & unique users">
+          <div className="adm-grid3">
+            <StatCard label="App Opens" value={webTraffic.total_sessions || 0} color="var(--accent)" subtitle={`Last ${period}d`} />
+            <StatCard label="Unique Users" value={webTraffic.unique_users || 0} color="var(--primary)" subtitle={`Last ${period}d`} />
+            <StatCard
+              label="Opens/User"
+              value={webTraffic.unique_users ? (webTraffic.total_sessions / webTraffic.unique_users).toFixed(1) : "0"}
+              color="#5B8DEF"
+              subtitle="Avg frequency"
+            />
+          </div>
+          {webSessionsData.length > 0 && webSessionsData.some((v) => v > 0) && (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: 20, marginTop: 16,
+            }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 4px" }}>Sessions (14 days)</h3>
+              <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+                <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--accent)", marginRight: 4, verticalAlign: "middle" }} />Opens</span>
+                <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#5B8DEF", marginRight: 4, verticalAlign: "middle" }} />Unique Users</span>
+              </div>
+              <Sparkline
+                data={webSessionsData}
+                secondData={webUsersData}
+                secondColor="#5B8DEF"
+                height={120}
+                color="var(--accent)"
+                fillOpacity={0.1}
+                labels={webTrafficLabels}
+              />
+            </div>
+          )}
+          {(!webSessionsData.length || webSessionsData.every((v) => v === 0)) && (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "40px 20px", textAlign: "center", marginTop: 16,
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>&#128202;</div>
+              <p style={{ fontSize: 14, color: "var(--muted)" }}>No web traffic yet</p>
+              <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Sessions will appear after users open the app</p>
+            </div>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 6: Past Families (Churned)
+        ══════════════════════════════════════════════ */}
+        <Section title="Past Families" subtitle="Removed Sheli from group">
+          {churned.length > 0 ? (
+            <>
+              <div className="adm-grid3">
+                <StatCard label="Lost Families" value={churned.length} color="#E8725C" />
+              </div>
+              <div style={{
+                background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+                padding: 20, marginTop: 16,
+              }}>
+                <DataTable
+                  columns={[
+                    { key: "name", label: "Family", render: (r) => <span style={{ fontWeight: 600, color: "#E8725C" }}>{r.name || "Unnamed"}</span> },
+                    { key: "total_messages", label: "Messages" },
+                    { key: "last_message_at", label: "Last Active", render: (r) => relativeTime(r.last_message_at) },
+                    { key: "days_gone", label: "Days Gone", render: (r) => <span style={{ fontWeight: 600, color: "var(--muted)" }}>{r.days_gone || 0}d</span> },
+                  ]}
+                  rows={churned}
+                  emptyMsg="No churned families"
+                />
+              </div>
+            </>
+          ) : (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "40px 20px", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>&#127881;</div>
+              <p style={{ fontSize: 14, color: "var(--accent)", fontWeight: 600 }}>No families lost!</p>
+            </div>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 7: Referrals
         ══════════════════════════════════════════════ */}
         <Section title="Referrals" subtitle="Growth">
           {(referrals.codes_generated || referrals.completed || referrals.total) ? (

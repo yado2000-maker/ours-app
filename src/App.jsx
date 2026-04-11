@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import T from "./locales/index.js";
 import "./styles/app.css";
-import { supabase, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents, loadMessages, insertMessage } from "./lib/supabase.js";
+import { supabase, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents, loadMessages, insertMessage, trackWebSession } from "./lib/supabase.js";
 import buildPrompt from "./lib/prompt.js";
 import { analytics, identifyUser } from "./lib/analytics.js";
 import Setup from "./components/Setup.jsx";
@@ -93,7 +93,10 @@ export default function Sheli() {
 
     console.log("[Boot]", currentId ? `session: ${currentId}` : "no session");
 
-    if (session?.user) identifyUser(session.user.id, { email: session.user.email });
+    if (session?.user) {
+      identifyUser(session.user.id, { email: session.user.email });
+      trackWebSession(session.user.id, lsGet("sheli-hhid"));
+    }
 
     if (!session) {
       // ?source=wa → skip landing page, go straight to auth (Path B: WhatsApp dashboard users)

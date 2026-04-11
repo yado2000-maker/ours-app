@@ -215,3 +215,15 @@ export const insertMessage = async (hhId, userId, msg) => {
   });
   if (error) console.error("[insertMessage]", error);
 };
+
+// Track web app session (one per app boot)
+let sessionTracked = false;
+export const trackWebSession = async (userId, hhId) => {
+  if (sessionTracked || !userId) return;
+  sessionTracked = true;
+  const { error } = await supabase.from("web_sessions").insert({
+    user_id: userId,
+    household_id: hhId || null,
+  });
+  if (error) console.error("[trackWebSession]", error);
+};
