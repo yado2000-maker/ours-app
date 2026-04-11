@@ -34,7 +34,7 @@ Voice messages become text messages. The entire existing pipeline (Haiku classif
 - **API:** `POST https://api.groq.com/openai/v1/audio/transcriptions` (OpenAI-compatible)
 - **Model:** `whisper-large-v3`
 - **Audio format:** OGG/Opus (WhatsApp native, no conversion needed)
-- **Language hint:** `language: "he"` (improves Hebrew accuracy)
+- **Language hint:** None (auto-detect). Supports Hebrew, English, and mixed speech. Whisper-large-v3 auto-detection is highly accurate.
 - **Free tier:** 28,800 seconds/day (8 hours) - covers up to ~500 families
 - **Paid:** $0.003/min after free tier
 - **Env var:** `GROQ_API_KEY=gsk_...`
@@ -83,7 +83,7 @@ async function transcribeVoice(mediaUrl: string): Promise<string | null> {
   const formData = new FormData();
   formData.append("file", audioBlob, "voice.ogg");
   formData.append("model", "whisper-large-v3");
-  formData.append("language", "he");
+  // No language hint — auto-detect Hebrew/English/mixed
 
   // 3. Call Groq Whisper API
   const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
@@ -142,7 +142,7 @@ Add to Sheli's self-knowledge: "I can understand short voice messages in Hebrew.
 ## 8. Edge Cases
 
 - **Empty transcription:** Groq returns empty string (background noise, music) - treat as ignore, don't classify
-- **Non-Hebrew voice:** Whisper with `language: "he"` still attempts transcription - may produce garbage. Haiku classifier will likely mark as `ignore` (low confidence). Acceptable.
+- **Non-Hebrew voice:** Whisper auto-detects language — English voice messages transcribed accurately. Mixed Hebrew/English (common in Israel) also handled well.
 - **Whapi media URL expiry:** Whapi media URLs may expire. Download immediately on webhook receipt, before any async processing.
 - **Edge Function timeout (150s):** Download (~1s) + Groq API (~2-5s) + Haiku (~1s) = well within limit.
 - **Rate limiting:** Groq free tier is per-day, not per-minute. No burst concerns.

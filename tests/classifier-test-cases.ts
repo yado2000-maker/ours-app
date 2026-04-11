@@ -463,6 +463,99 @@ export const ADD_TASK_CASES: TestCase[] = [
     expectedIntent: "add_task",
     notes: "Can't forget — urgent task phrasing",
   },
+  // ─── Rotation patterns ───
+  {
+    input: "תורות מקלחת: דניאל ראשון, נועה, יובל",
+    sender: "אמא",
+    expectedIntent: "add_task",
+    expectedEntities: { rotation: { title: "מקלחת", type: "order", members: ["דניאל", "נועה", "יובל"] } },
+    notes: "Order rotation — shower turns for 3 kids",
+  },
+  {
+    input: "תורנות כלים: נועה, יובל, דניאל",
+    sender: "אבא",
+    expectedIntent: "add_task",
+    expectedEntities: { rotation: { title: "כלים", type: "duty", members: ["נועה", "יובל", "דניאל"] } },
+    notes: "Duty rotation — dishes chore",
+  },
+  {
+    input: "סדר מקלחות: נועה, יובל, דניאל",
+    sender: "אמא",
+    expectedIntent: "add_task",
+    expectedEntities: { rotation: { title: "מקלחת", type: "order", members: ["נועה", "יובל", "דניאל"] } },
+    notes: "Order rotation — alternative phrasing with סדר",
+  },
+  {
+    input: "מי בתור למקלחת?",
+    sender: "נועה",
+    expectedIntent: "question",
+    notes: "'Whose turn' is a question about rotation, not a task",
+  },
+  {
+    input: "היום יובל שוטף כלים",
+    sender: "אמא",
+    expectedIntent: "add_task",
+    notes: "Override — specific person for today's duty (when rotation exists)",
+  },
+  {
+    input: "כל יום שני ורביעי תורנות כביסה: דניאל, נועה",
+    sender: "אבא",
+    expectedIntent: "add_task",
+    expectedEntities: { rotation: { title: "כביסה", type: "duty", members: ["דניאל", "נועה"] } },
+    notes: "Duty rotation with weekly frequency",
+  },
+  // ─── Override patterns ───
+  {
+    input: "היום גילעד בתורות למקלחת",
+    sender: "אמא",
+    expectedIntent: "add_task",
+    expectedEntities: { override: { title: "מקלחת", person: "גילעד" } },
+    notes: "Override rotation — specific person for today (when rotation exists)",
+  },
+  {
+    input: "אביב תורן כלים היום",
+    sender: "אבא",
+    expectedIntent: "add_task",
+    expectedEntities: { override: { title: "כלים", person: "אביב" } },
+    notes: "Override using תורן synonym",
+  },
+  {
+    input: "גילעד ראשון במקלחת היום",
+    sender: "אמא",
+    expectedIntent: "add_task",
+    expectedEntities: { override: { title: "מקלחת", person: "גילעד" } },
+    notes: "Override — first in shower today",
+  },
+];
+
+// ─── INSTRUCT_BOT (4 cases) ───
+// Parent explaining rules/management preferences to Sheli
+
+export const INSTRUCT_BOT_CASES: TestCase[] = [
+  {
+    input: "ככה יום אביב יום גילעד",
+    sender: "אמא",
+    expectedIntent: "instruct_bot",
+    notes: "Explaining alternating daily pattern",
+  },
+  {
+    input: "אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד",
+    sender: "אמא",
+    expectedIntent: "instruct_bot",
+    notes: "Frustrated re-explanation of rotation rule",
+  },
+  {
+    input: "צריך לנהל את הכלים ככה שכל יום ילד אחר",
+    sender: "אבא",
+    expectedIntent: "instruct_bot",
+    notes: "Teaching daily chore rotation pattern",
+  },
+  {
+    input: "את אמורה לזכור מי בתור ולהחליף כל יום",
+    sender: "אמא",
+    expectedIntent: "instruct_bot",
+    notes: "Explaining expected bot behavior",
+  },
 ];
 
 // ─── ADD_EVENT (15 cases) ───
@@ -862,6 +955,7 @@ export const ALL_CASES: TestCase[] = [
   ...IGNORE_CASES,
   ...ADD_SHOPPING_CASES,
   ...ADD_TASK_CASES,
+  ...INSTRUCT_BOT_CASES,
   ...ADD_EVENT_CASES,
   ...COMPLETE_TASK_CASES,
   ...COMPLETE_SHOPPING_CASES,
@@ -874,6 +968,7 @@ export const CASE_COUNTS: Record<string, number> = {
   ignore: IGNORE_CASES.length,
   add_shopping: ADD_SHOPPING_CASES.length,
   add_task: ADD_TASK_CASES.length,
+  instruct_bot: INSTRUCT_BOT_CASES.length,
   add_event: ADD_EVENT_CASES.length,
   complete_task: COMPLETE_TASK_CASES.length,
   complete_shopping: COMPLETE_SHOPPING_CASES.length,

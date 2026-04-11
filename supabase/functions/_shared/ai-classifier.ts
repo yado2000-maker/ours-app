@@ -9,7 +9,7 @@ const supabase = createClient(
 );
 
 export interface ClassifiedAction {
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping";
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation";
   data: Record<string, unknown>;
 }
 

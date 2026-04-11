@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+VITE_ANTHROPIC_KEY
+
+# Claude Code local
+.claude/settings.local.json
+.claude/launch.json
+.claude/worktrees/
+
+# Python
+__pycache__/
+*.pyc
+
+# Word temp files
+~$*
+
+# Test/debug payloads (may contain real phone numbers)
+whapi_msg_*.json
+test_webhook.json
+tests/classifier-results.json
+
+# Env files
+.env
+.env.*
+!.env.local.example

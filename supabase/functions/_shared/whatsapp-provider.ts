@@ -3,12 +3,16 @@
 
 export interface IncomingMessage {
   messageId: string;
-  groupId: string;
+  groupId: string;          // Group JID for groups, phone number for direct messages (reply-to address)
   senderPhone: string;
   senderName: string;
   text: string;
   type: "text" | "image" | "sticker" | "voice" | "video" | "document" | "reaction" | "other";
   timestamp: number;
+  chatType: "group" | "direct";
+  mediaUrl?: string;
+  mediaId?: string;
+  mediaDuration?: number;
 }
 
 export interface OutgoingMessage {
@@ -65,8 +69,18 @@ export class WhapiProvider implements WhatsAppProvider {
       const msg = messages[0];
       const chatId = msg.chat_id as string || "";
 
-      // Only process group messages (group IDs end with @g.us)
-      if (!chatId.endsWith("@g.us")) return null;
+      // Determine chat type: group (@g.us) or direct (@s.whatsapp.net)
+      let chatType: "group" | "direct";
+      let groupId: string;
+      if (chatId.endsWith("@g.us")) {
+        chatType = "group";
+        groupId = chatId;
+      } else if (chatId.endsWith("@s.whatsapp.net")) {
+        chatType = "direct";
+        groupId = chatId.replace("@s.whatsapp.net", ""); // Phone number as reply-to address
+      } else {
+        return null; // Unknown chat format
+      }
 
       const from = msg.from as string || "";
       const fromName = msg.from_name as string || from;
@@ -75,6 +89,12 @@ export class WhapiProvider implements WhatsAppProvider {
       const id = msg.id as string || "";
       const timestamp = (msg.timestamp as number) || Math.floor(Date.now() / 1000);
 
+      // Extract media info for voice messages (ptt = push-to-talk, audio = audio file)
+      const audioData = (msg.ptt || msg.audio || msg.voice) as Record<string, unknown> | undefined;
+      const mediaUrl = (audioData?.link as string | undefined) || undefined;
+      const mediaId = audioData?.id as string | undefined;
+      const mediaDuration = (audioData?.seconds ?? audioData?.duration) as number | undefined;
+
       // Map Whapi message types to our types
       const typeMap: Record<string, IncomingMessage["type"]> = {
         text: "text",
@@ -82,6 +102,7 @@ export class WhapiProvider implements WhatsAppProvider {
         sticker: "sticker",
         ptt: "voice",
         audio: "voice",
+        voice: "voice",
         video: "video",
         document: "document",
         reaction: "reaction",
@@ -89,12 +110,16 @@ export class WhapiProvider implements WhatsAppProvider {
 
       return {
         messageId: id,
-        groupId: chatId,
+        groupId,
         senderPhone: from.replace("@s.whatsapp.net", ""),
         senderName: fromName,
         text: text,
         type: typeMap[type] || "other",
         timestamp,
+        chatType,
+        mediaUrl,
+        mediaId,
+        mediaDuration,
       };
     } catch (err) {
       console.error("[WhapiProvider] Parse error:", err);
