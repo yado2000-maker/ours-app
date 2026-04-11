@@ -31,8 +31,13 @@ const INTENT_COLORS = {
   other: "#8A9494",
 };
 
-const FUNNEL_STEPS = ["welcome", "waiting", "onboarded", "active"];
-const FUNNEL_COLORS = ["#3DC882", "#2AB673", "#1E9E5E", "#17804B"];
+const FUNNEL_STEPS = ["welcomed", "chatting", "invited", "joined", "personal", "nudging", "sleeping", "dormant"];
+const FUNNEL_COLORS = ["#3DC882", "#2AB673", "#5B8DEF", "#1E9E5E", "#17804B", "#F5A623", "#E8725C", "#95A5A6"];
+const FUNNEL_LABELS = {
+  welcomed: "Welcomed", chatting: "Chatting", invited: "Invited",
+  joined: "Joined", personal: "Personal Channel",
+  nudging: "Nudging", sleeping: "Sleeping", dormant: "Dormant",
+};
 
 // ── Helpers ──
 
@@ -587,16 +592,16 @@ export default function AdminDashboard({ session, onBack }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {FUNNEL_STEPS.map((step, i) => {
                 const count = funnelCounts[step]?.count || 0;
-                const prev = i > 0 ? (funnelCounts[FUNNEL_STEPS[i - 1]]?.count || 0) : (fn.total_conversations || 0);
+                if (count === 0) return null;
                 const barWidth = funnelMax ? (count / funnelMax) * 100 : 0;
-                const convRate = prev > 0 ? Math.round((count / prev) * 100) : 0;
+                const pctOfTotal = fn.total_conversations > 0 ? Math.round((count / fn.total_conversations) * 100) : 0;
 
                 return (
                   <div key={step}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--dark)", textTransform: "capitalize" }}>{step}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--dark)" }}>{FUNNEL_LABELS[step] || step}</span>
                       <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                        {count} {i > 0 ? `(${convRate}% of prev)` : ""}
+                        {count} ({pctOfTotal}%)
                       </span>
                     </div>
                     <div style={{
@@ -648,14 +653,25 @@ export default function AdminDashboard({ session, onBack }) {
             <DataTable
               columns={[
                 { key: "phone", label: "Phone", render: (r) => <span style={{ fontFamily: "monospace", fontSize: 12 }}>{r.phone || "N/A"}</span> },
-                { key: "state", label: "State", render: (r) => (
-                  <span style={{
-                    display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11,
-                    fontWeight: 600, textTransform: "capitalize",
-                    background: r.state === "active" ? "var(--accent-soft)" : r.state === "onboarded" ? "#EBF5FF" : "var(--border)",
-                    color: r.state === "active" ? "var(--accent)" : r.state === "onboarded" ? "#5B8DEF" : "var(--warm)",
-                  }}>{r.state}</span>
-                )},
+                { key: "state", label: "State", render: (r) => {
+                  const stateStyles = {
+                    welcomed: { bg: "var(--accent-soft)", color: "var(--accent)" },
+                    chatting: { bg: "#E8F5E9", color: "#2AB673" },
+                    invited: { bg: "#EBF5FF", color: "#5B8DEF" },
+                    joined: { bg: "#E0F2F1", color: "#1E9E5E" },
+                    personal: { bg: "#E8F5E9", color: "#17804B" },
+                    nudging: { bg: "#FFF3E0", color: "#F5A623" },
+                    sleeping: { bg: "#FBE9E7", color: "#E8725C" },
+                    dormant: { bg: "var(--border)", color: "var(--muted)" },
+                  };
+                  const s = stateStyles[r.state] || { bg: "var(--border)", color: "var(--warm)" };
+                  return (
+                    <span style={{
+                      display: "inline-block", padding: "2px 8px", borderRadius: 100, fontSize: 11,
+                      fontWeight: 600, textTransform: "capitalize", background: s.bg, color: s.color,
+                    }}>{FUNNEL_LABELS[r.state] || r.state}</span>
+                  );
+                }},
                 { key: "messages", label: "Msgs" },
                 { key: "referral", label: "Referral", render: (r) => r.referral || "-" },
                 { key: "started", label: "Started", render: (r) => relativeTime(r.started) },
