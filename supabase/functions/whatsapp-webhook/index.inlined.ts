@@ -627,6 +627,7 @@ EXAMPLES:
 [אמא]: "קניתי חלב וביצים" → {"intent":"complete_shopping","confidence":0.95,"entities":{"item_id":"s1a2","raw_text":"קניתי חלב וביצים"}}
 [אמא]: "התכוונתי לשמן זית, לא לשמן וזית" → {"intent":"correct_bot","confidence":0.95,"entities":{"correction_text":"שמן זית","raw_text":"התכוונתי לשמן זית, לא לשמן וזית"}}
 [אבא]: "שלי טעית, זה דבר אחד" → {"intent":"correct_bot","confidence":0.90,"entities":{"correction_text":"","raw_text":"שלי טעית, זה דבר אחד"}}
+[אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"מוצרי חלב"},{"name":"קפה טחון","category":"שתייה"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"לחם ומאפים"},{"name":"חומוס","category":"שימורים ומזון יבש"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
 [אמא]: "תזכירי לי ב-4 לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לאסוף את הילדים","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 לאסוף את הילדים"}}
 [אבא]: "בעוד שעה תזכירי לקחת את הכביסה" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לקחת את הכביסה","time_raw":"בעוד שעה","raw_text":"בעוד שעה תזכירי לקחת את הכביסה"}}
 [אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
@@ -746,7 +747,7 @@ async function classifyIntent(
 function fallbackIgnore(message: string): ClassificationOutput {
   return {
     intent: "ignore",
-    confidence: 0.0,
+    confidence: 0.75,  // Was 0.0 — caused unnecessary Sonnet escalations ($0.01 each). 0.75 routes through ignore path without escalation.
     entities: { raw_text: message },
   };
 }
@@ -1248,6 +1249,7 @@ HEBREW FAMILY CHAT PATTERNS — critical for correct classification:
 
 1. IMPLICIT SHOPPING: A bare noun or short phrase = "add to shopping list."
    "חלב" → add milk. "3 חלב" → add 3 milks. "עוד חלב" → add more milk.
+   CRITICAL: A comma-separated list of food/household items is ALWAYS add_shopping, even without "צריך" or any verb. "גזר, מלפפון, בצל, שום, תפוחים" = shopping list, NOT social chatter.
 
 2. IMPLICIT TASKS: "[person] [activity] [time]" = task assignment.
    "נועה חוג 5" → "Pick up Noa from activity at 5pm"
@@ -3198,6 +3200,19 @@ Deno.serve(async (req: Request) => {
     // 4. Standalone at end after punctuation: "מישהו? שלי?"
     const sheliStandaloneEnd = /[?!]\s+שלי[?!.\s]*$/.test(txt);
 
+    // 5. Voice-only: Whisper transcription variants (e.g. child says "שלי" → Whisper writes "שאלי")
+    // Safe because colloquial Hebrew uses "תשאלי" for "ask me", not bare "שאלי"
+    let voiceFuzzyMatch = false;
+    if (message.type === "voice") {
+      const shealiFirstWord = /^\s*שאלי[\s,!?]/.test(txt);
+      const shealiEnd = /(?:ביי|ביביי|להתראות|יאללה)\s+שאלי[!.\s]*$/i.test(txt);
+      const shealiAfterGreeting = /^(היי|הי|שלום|יו|הלו|בוקר טוב|ערב טוב)\s+שאלי\b/i.test(txt);
+      voiceFuzzyMatch = shealiFirstWord || shealiEnd || shealiAfterGreeting;
+      if (voiceFuzzyMatch) {
+        console.log(`[Webhook] Layer 1: Voice fuzzy match "שאלי"→"שלי" (first=${shealiFirstWord}, end=${shealiEnd}, greeting=${shealiAfterGreeting})`);
+      }
+    }
+
     // Check for "של מי" context — cross-message "mine!" detection
     let sheliIsMine = false;
     const isBareSheli = /^\s*שלי[!.\s]*$/.test(txt); // standalone "שלי!" message
@@ -3219,7 +3234,8 @@ Deno.serve(async (req: Request) => {
 
     const highConfidenceName = !sheliIsMine && (
       atMention || numericMention || englishMention ||
-      sheliFirstWord || sheliAfterGreeting || sheliAfterThanks || sheliStandaloneEnd
+      sheliFirstWord || sheliAfterGreeting || sheliAfterThanks || sheliStandaloneEnd ||
+      voiceFuzzyMatch
     );
     // For ambiguous cases (שלי mid-sentence), directAddress stays false — Haiku Layer 2 decides
     let directAddress = highConfidenceName;
@@ -3227,6 +3243,7 @@ Deno.serve(async (req: Request) => {
     const cleanedText = directAddress
       ? txt
           .replace(/@?שלי[\s,:]*/, "")
+          .replace(/@?שאלי[\s,:]*/, "") // voice transcription variant
           .replace(/@?she(?:li|lly|lli|ly|lei|ley|lee)[\s,:]*/i, "")
           .replace(new RegExp(`@${botPhone}\\s*`), "")
           .replace(new RegExp(`@${botLid}\\s*`), "")
@@ -3234,7 +3251,7 @@ Deno.serve(async (req: Request) => {
       : txt;
 
     if (directAddress) {
-      console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention})`);
+      console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention}, voiceFuzzy=${voiceFuzzyMatch})`);
     }
 
     // 6b. Check for pending confirmation response

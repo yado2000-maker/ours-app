@@ -248,7 +248,7 @@ export async function classifyIntent(
 function fallbackIgnore(message: string): ClassificationOutput {
   return {
     intent: "ignore",
-    confidence: 0.0,
+    confidence: 0.75,  // Was 0.0 — caused unnecessary Sonnet escalations. 0.75 routes through ignore path.
     entities: { raw_text: message },
   };
 }
