@@ -165,7 +165,7 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 - **Cost:** ~$0.50/household/month (down from ~$1.62 all-Sonnet). ~70% reduction.
 - **Accuracy:** 91.7% on 120 test cases (target was 85%). `ignore` 100%, `add_event` 100%, `question` 100%.
 
-### 10 Intent Types
+### 13 Intent Types
 | Intent | Action | DB Operation |
 |--------|--------|-------------|
 | `ignore` | No action, no reply | — |
@@ -178,6 +178,9 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 | `question` | Reply with household state | Sonnet reply only, no DB write |
 | `info_request` | Reply "I don't have that info" | Sonnet reply only, no DB write |
 | `correct_bot` | Undo wrong + redo correct | DELETE + INSERT + log to classification_corrections |
+| `save_memory` | Remember a family fact | INSERT family_memories (importance 0.8) |
+| `recall_memory` | Share what Sheli remembers | Sonnet reply from FAMILY MEMORIES context |
+| `delete_memory` | Forget something | UPDATE family_memories.active=false |
 
 ### Classification values in `whatsapp_messages.classification`
 `haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`, `skipped_long_voice`, `voice_transcription_failed`
