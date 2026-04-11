@@ -251,10 +251,8 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **GitHub repo:** yado2000-maker/ours-app (public, brand name: Sheli)
 - **Vercel auto-deploys from `main`** — push to main triggers build
 - **Vite SPA catch-all shadows API routes** — `api/r/[code].js` serves at `/api/r/:code`. For clean URLs like `/r/:code`, add rewrite in `vercel.json`: `{ "source": "/r/:code", "destination": "/api/r/:code" }`
-- **Canonical codebase:** `C:\Users\yarond\Downloads\claude code\ours-app\` — all editing happens here
-- **Git repo for commits:** `C:\Users\yarond\Downloads\claude code\ours-app-git\` — copy changed files here, commit, push
-- **Deploy process:** Edit in `ours-app` → copy changed files to `ours-app-git` → commit → push → Vercel auto-deploys
-- **Note:** `ours-app` has `.git` init'd but `ours-app-git` is the one connected to GitHub with full history. `ours-app-deploy` folder is superseded (merged into `ours-app` on 2026-04-02).
+- **Codebase + Git:** `C:\Users\yarond\Downloads\claude code\ours-app\` — single folder, edit + commit + push here. `ours-app-git` is retired (merged 2026-04-11).
+- **Deploy process:** Edit → commit → push → Vercel auto-deploys. Edge Functions: paste `index.inlined.ts` to Supabase Dashboard.
 - **PowerShell quirks:** `npm`/`git` not available in bash shell
 - **Browser cache aggressive** — always `Ctrl+Shift+R` after deploy, or `localStorage.clear(); location.reload()` for clean state
 
