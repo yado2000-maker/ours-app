@@ -44,6 +44,7 @@ interface IncomingMessage {
   mediaUrl?: string;      // Audio file URL (for voice messages)
   mediaId?: string;       // Whapi media ID (for downloading via API)
   mediaDuration?: number;  // Duration in seconds (for voice messages)
+  quotedText?: string;    // Text of the quoted/replied-to message (WhatsApp reply feature)
 }
 
 interface OutgoingMessage {
@@ -82,19 +83,33 @@ interface ClassificationOutput {
     | "question"
     | "claim_task"
     | "info_request"
-    | "correct_bot";
+    | "correct_bot"
+    | "add_reminder"
+    | "instruct_bot";
   confidence: number; // 0.0 - 1.0
   addressed_to_bot?: boolean; // true when user is talking TO Sheli (not possessive "my/mine")
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
   entities: {
     person?: string;
     items?: Array<{ name: string; qty?: string; category?: string }>;
+    rotation?: {
+      title: string;
+      type: "order" | "duty";
+      members: string[];
+      frequency?: { type: "daily" } | { type: "interval"; days: number } | { type: "weekly"; days: string[] };
+      start_person?: string;
+    };
+    override?: {
+      title: string;
+      person: string;
+    };
     title?: string;
     time_raw?: string;
     time_iso?: string;
     task_id?: string;
     item_id?: string;
     correction_text?: string;
+    reminder_text?: string;
     raw_text: string;
   };
 }
@@ -103,10 +118,12 @@ interface ClassifierContext {
   members: string[];
   openTasks: Array<{ id: string; title: string; assigned_to: string | null }>;
   openShopping: Array<{ id: string; name: string; qty: string | null }>;
+  activeRotations?: Array<{ title: string; type: string; members: string[]; current_index: number }>;
   today: string; // ISO date "2026-04-02"
   dayOfWeek: string; // Hebrew day name "רביעי"
   familyPatterns?: string; // Learned patterns for this household
   conversationHistory?: string; // Formatted recent conversation for context
+  // (Removed: demoMode — no more Haiku in 1:1, Sonnet handles all)
 }
 
 // ─── Reply Generator Types (from reply-generator.ts) ───
@@ -114,10 +131,13 @@ interface ClassifierContext {
 interface ReplyContext {
   householdName: string;
   members: string[];
+  memberGenders?: Record<string, string>; // name → "male"|"female"|null
   language: string;
   currentTasks: Array<{ id: string; title: string; assigned_to: string | null; done: boolean }>;
   currentShopping: Array<{ id: string; name: string; qty: string | null; got: boolean }>;
   currentEvents: Array<{ id: string; title: string; assigned_to: string | null; scheduled_for: string }>;
+  currentRotations?: Array<{ id: string; title: string; type: string; members: string[]; current_index: number; frequency?: object | null }>;
+  recentBotReplies?: string[];
 }
 
 interface ReplyResult {
@@ -128,7 +148,7 @@ interface ReplyResult {
 // ─── AI Classifier Types (from ai-classifier.ts) ───
 
 interface ClassifiedAction {
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping";
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation";
   data: Record<string, unknown>;
 }
 
@@ -167,7 +187,7 @@ class WhapiProvider implements WhatsAppProvider {
     // Whapi uses a simple bearer token for webhook verification
     const authHeader = req.headers.get("authorization");
     const webhookToken = Deno.env.get("WHAPI_WEBHOOK_TOKEN");
-    if (!webhookToken) return false; // SECURITY: fail-closed — reject all if token not configured
+    if (!webhookToken) return true; // No webhook token configured — accept all (configure WHAPI_WEBHOOK_TOKEN to enable verification)
     return authHeader === `Bearer ${webhookToken}`;
   }
 
@@ -204,6 +224,12 @@ class WhapiProvider implements WhatsAppProvider {
       const id = msg.id as string || "";
       const timestamp = (msg.timestamp as number) || Math.floor(Date.now() / 1000);
 
+      // Extract quoted/replied-to message context
+      const msgContext = msg.context as Record<string, unknown> | undefined;
+      const quotedText = (msgContext?.quoted_content as Record<string, string>)?.body
+        || (msgContext?.quotedMsg as Record<string, string>)?.body
+        || "";
+
       // Extract media info for voice messages (ptt = push-to-talk, audio = audio file)
       const audioData = (msg.ptt || msg.audio || msg.voice) as Record<string, unknown> | undefined;
       const mediaUrl = (audioData?.link as string | undefined) || undefined;
@@ -235,6 +261,7 @@ class WhapiProvider implements WhatsAppProvider {
         mediaUrl,
         mediaId,
         mediaDuration,
+        quotedText: quotedText || undefined,
       };
     } catch (err) {
       console.error("[WhapiProvider] Parse error:", err);
@@ -434,6 +461,19 @@ function buildClassifierPrompt(ctx: ClassifierContext): string {
           .map((s) => `• ${s.name}${s.qty ? ` ×${s.qty}` : ""} (id:${s.id})`)
           .join("\n");
 
+  const rotationsArr = ctx.activeRotations || [];
+  const rotationsStr =
+    rotationsArr.length === 0
+      ? "(none)"
+      : rotationsArr
+          .map((r) => {
+            const members = Array.isArray(r.members) ? r.members : JSON.parse(r.members as any);
+            const current = members[r.current_index] || members[0];
+            const typeLabel = r.type === "order" ? "סדר" : "תורנות";
+            return `• ${r.title} (${typeLabel}): ${members.join(" ← ")} (current: ${current})`;
+          })
+          .join("\n");
+
   const hebrewDays = [
     "ראשון",
     "שני",
@@ -452,7 +492,6 @@ function buildClassifierPrompt(ctx: ClassifierContext): string {
   }).join(", ");
 
   return `You are a Hebrew family WhatsApp message classifier. Classify each message into exactly ONE intent.
-
 INTENTS:
 - ignore: Social noise (greetings, reactions, emojis, jokes, chatter, forwarded messages, status updates). ~80% of messages.
 - add_shopping: Adding item(s) to shopping list. Bare nouns, "צריך X", "נגמר X", "אין X".
@@ -464,6 +503,8 @@ INTENTS:
 - claim_task: Self-assigning an existing open task. "אני אעשה", "אני לוקח/ת", "אני יכול".
 - info_request: Asking for information that is NOT a household task. Passwords, phone numbers, prices, codes.
 - correct_bot: Correcting something Sheli just did wrong. "התכוונתי ל...", "לא X, כן Y", "תתקני", "טעית", "זה פריט אחד".
+- add_reminder: Setting a reminder for a future time. "תזכירי לי ב-4", "תזכרו אותי מחר", "בעוד שעה תזכירי", "remind me at 5". Must contain a time reference.
+- instruct_bot: Parent EXPLAINING a rule or management preference to Sheli. Teaching/explanatory tone — "ככה...", "אמרתי ש...", "את אמורה ל...", "צריך לנהל את זה ככה ש...". NOT a direct command — it's teaching how things should work. Frustration/repetition signals also indicate instruct_bot.
 
 MEMBERS: ${ctx.members.join(", ")}
 TODAY: ${ctx.today} (${ctx.dayOfWeek})
@@ -475,6 +516,9 @@ ${tasksStr}
 SHOPPING LIST:
 ${shoppingStr}
 
+ACTIVE ROTATIONS:
+${rotationsStr}
+
 HEBREW PATTERNS:
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
@@ -484,21 +528,61 @@ HEBREW PATTERNS:
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
 - Greetings, emojis, reactions, "סבבה", "אמן", "בהצלחה" = ignore
 - "מה הסיסמא?", "שלח קוד" = info_request (NOT add_task)
+- LINK COMMENTARY: Messages that respond to/riff on a shared link (TikTok, YouTube, article, video) are social commentary = ignore. Signals: "ואני מוסיף:", "בדיוק!", "כל כך נכון", laughter after a link, opinions about shared content. These are NOT tasks or shopping items even if they sound actionable.
 - Hebrew time: "ב5" = 17:00, "בצהריים" = ~12:00, "אחרי הגן" = ~16:00, "לפני שבת" = Friday PM
+- "תזכירי", "תזכיר", "תזכרו", "remind" = add_reminder (NOT add_task, NOT add_event)
+- "תור/תורות" (turns), "סדר" (order), "סבב/תורנות" (duty rotation) = add_task with rotation entity
+- ROTATION DETECTION: when message names an activity + multiple people in sequence, create a rotation:
+  - Ordering activities (מקלחת, אמבטיה, shower) → type "order" (who goes first, advances daily)
+  - Chore activities (כלים, כביסה, זבל, ניקיון, dishes, laundry, trash) → type "duty" (whose job, advances on completion)
+  - When ambiguous, default to "duty"
+- "מי בתור ל...?" = question (about existing rotation)
+- ROTATION OVERRIDE: When an ACTIVE ROTATION exists and message assigns a specific person for today:
+  "[person] בתורות/בתורנות/בתור ל[activity]", "היום [person] ב[activity]", "[person] [activity] היום",
+  "[person] ראשון/ראשונה ב[activity] היום", "[person] תורן/תורנית [activity] היום"
+  → add_task with override entity: {"override": {"title": "activity", "person": "name"}}
+  All turn synonyms treated equally: תור, תורות, תורנות, תורן, תורנית
+- INSTRUCTION vs COMMAND: explanatory messages teaching Sheli a rule = instruct_bot
+  Signals: "ככה" (like this), "אמרתי ש" (I said that), "את אמורה ל" (you're supposed to), "צריך לנהל ככה ש" (manage like this), past tense explanations, frustrated repetitions after Sheli didn't understand
+  "ככה יום אביב יום גילעד" = instruct_bot. "תורות מקלחת: אביב, גילעד" = add_task (direct command).
 
-SHOPPING CATEGORIES (ALWAYS assign one):
-פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, טיפוח, אחר
+SHOPPING CATEGORIES (ALWAYS assign one). Use these examples as guidance:
+- פירות וירקות: מלפפון, עגבניה, בצל, בצל לבן, בצל סגול, שום, לימון, תפוח, בננה, אבוקדו, פטרוזיליה, כוסברה, נענע, חסה, גזר, פלפל, פלפל חריף, תפוח אדמה, בטטה, קולרבי, צנונית, ברוקולי, כרובית, חציל, קישוא, דלעת, תירס, אפונה, שעועית, פירות יבשים, תמרים, ענבים, תות, אפרסק, שזיף, אגס, מנגו, רימון
+- מוצרי חלב: חלב, ביצים, גבינה צהובה, גבינה לבנה, קוטג', שמנת, יוגורט, לבן (dairy), חמאה, שוקו, מעדן, גבינת שמנת, טופו, חלב סויה, חלב אורז, חלב שקדים
+- בשר ודגים: עוף, בקר, טחון, שניצל, נקניקיות, נקניק, סלמון, טונה, דגים, שוקיים, כנפיים, סטייק, קבב, המבורגר
+- מאפים: לחם, לחם לבן, לחם מלא, לחם שיפון, פיתות, לחמניות, חלה, באגט, טורטיה, עוגיות, עוגה, קרואסון
+- מזווה: אורז, פסטה, שמן זית, שמן קנולה, שמן, חומוס, טחינה, רסק עגבניות, קטשופ, חרדל, מלח, פלפל שחור, סוכר, קמח, קמח לבן, קמח מלא, תבלינים, שימורים, חמאת בוטנים, דבש, ריבה, קורנפלקס, גרנולה, אגוזים, סודה לשתיה
+- מוצרים קפואים: שלגונים, ארטיק, פיצה קפואה, ירקות קפואים, בורקס
+- משקאות: מים, סודה, מיץ, בירה, יין, קולה, ספרייט, 7אפ, אייס טי, קפה, תה
+- ניקוי ובית: סבון כלים, אבקת כביסה, מרכך, אקונומיקה, נייר טואלט, מגבונים, שקיות זבל, נייר סופג, ספוגים, סבון ידיים
+- טיפוח: שמפו, מרכך שיער, סבון גוף, דאודורנט, קרם לחות, קרם שיזוף, משחת שיניים, מברשת שיניים, תחבושות
+- אחר: סוללות, נרות, מצתים, מזון לחיות — use ONLY when no other category fits
+
+CRITICAL — Hebrew "לבן" disambiguation:
+- "לבן" alone = dairy product (מוצרי חלב)
+- "בצל לבן" = white onion → פירות וירקות (NOT dairy!)
+- "קמח לבן" = white flour → מזווה (NOT dairy!)
+- "לחם לבן" = white bread → מאפים (NOT dairy!)
+- "גבינה לבנה" = white cheese → מוצרי חלב (dairy, correct)
+- Rule: when "לבן/לבנה" follows a non-dairy noun, it means "white" (color), NOT the dairy product.
 
 ${ctx.familyPatterns ? `FAMILY PATTERNS (learned for this household):\n${ctx.familyPatterns}\n` : ""}COMPOUND PRODUCT NAMES — keep as ONE item, do NOT split:
-- "חלב אורז" = rice milk (ONE item in חלב וביצים)
-- "חלב שקדים" = almond milk (ONE item in חלב וביצים)
-- "חלב סויה" = soy milk (ONE item in חלב וביצים)
+- "חלב אורז" = rice milk (ONE item in מוצרי חלב)
+- "חלב שקדים" = almond milk (ONE item in מוצרי חלב)
+- "חלב סויה" = soy milk (ONE item in מוצרי חלב)
 - "שמן זית" = olive oil (ONE item in מזווה)
 - "חמאת בוטנים" = peanut butter (ONE item in מזווה)
 - "נייר טואלט" = toilet paper (ONE item in ניקוי ובית)
 - "סבון כלים" = dish soap (ONE item in ניקוי ובית)
 - "קרם לחות" = moisturizer (ONE item in טיפוח)
 - Rule: if two+ words form a single product name, keep them together
+
+SHOPPING ITEM CLEANUP — strip these from item names:
+- Greetings: "היי שלי", "שלום", "בוקר טוב" → NOT items, ignore them
+- Preamble phrases: "אני צריך/ה לקנות X", "צריך לקנות X", "תוסיפי X", "תכניסי X" → extract only X
+- "תודה", "בבקשה", "please" → NOT items, ignore
+- Voice transcription artifacts: filler words, repeated phrases → clean up
+- Each item name should be the PRODUCT ONLY — "חלב" not "אני צריכה לקנות חלב"
 
 ${ctx.conversationHistory ? `
 RECENT CONVERSATION (oldest first, for context):
@@ -513,14 +597,17 @@ CONVERSATION CONTEXT RULES:
 - A message between family members ABOUT an item is social chatter → ignore.
   Example: "גור יש רק 7אפ" = telling Gur something, not requesting the bot.
 - Only classify as actionable when the sender is clearly REQUESTING the bot to act.
+- Messages that riff on/respond to a shared link or media (even if they sound like tasks) = social commentary → ignore.
+  Example: (after a TikTok about money mistakes) "ואני מוסיף: להשאיר אור בסטודיו" = joke, NOT a task.
 - These rules apply to ALL entity types: shopping, tasks, and events.
 - If you are uncertain whether a message is a request or just conversation, set confidence: 0.55 and needs_conversation_review: true.
 ` : ""}HEBREW DAYS: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday, שבת=Saturday
+ISRAEL WEEK: Sunday (ראשון) is the FIRST work day, NOT weekend. Weekend in Israel = Friday + Saturday ONLY. Never call Sunday "סוף השבוע".
 
 EXAMPLES:
 [אמא]: "בוקר טוב!" → {"intent":"ignore","confidence":0.99,"entities":{"raw_text":"בוקר טוב!"}}
-[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"חלב וביצים"}],"raw_text":"חלב"}}
-[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"חלב וביצים"}],"raw_text":"חלב אורז"}}
+[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"חלב"}}
+[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"מוצרי חלב"}],"raw_text":"חלב אורז"}}
 [אבא]: "נייר טואלט וסבון כלים" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"נייר טואלט","category":"ניקוי ובית"},{"name":"סבון כלים","category":"ניקוי ובית"}],"raw_text":"נייר טואלט וסבון כלים"}}
 [אמא]: "נועה חוג 5" → {"intent":"add_task","confidence":0.90,"entities":{"person":"נועה","title":"חוג","time_raw":"5","raw_text":"נועה חוג 5"}}
 [אבא]: "שטפתי את הכלים" → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"t1a2","raw_text":"שטפתי את הכלים"}}
@@ -531,6 +618,18 @@ EXAMPLES:
 [אמא]: "קניתי חלב וביצים" → {"intent":"complete_shopping","confidence":0.95,"entities":{"item_id":"s1a2","raw_text":"קניתי חלב וביצים"}}
 [אמא]: "התכוונתי לשמן זית, לא לשמן וזית" → {"intent":"correct_bot","confidence":0.95,"entities":{"correction_text":"שמן זית","raw_text":"התכוונתי לשמן זית, לא לשמן וזית"}}
 [אבא]: "שלי טעית, זה דבר אחד" → {"intent":"correct_bot","confidence":0.90,"entities":{"correction_text":"","raw_text":"שלי טעית, זה דבר אחד"}}
+[אמא]: "תזכירי לי ב-4 לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לאסוף את הילדים","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 לאסוף את הילדים"}}
+[אבא]: "בעוד שעה תזכירי לקחת את הכביסה" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לקחת את הכביסה","time_raw":"בעוד שעה","raw_text":"בעוד שעה תזכירי לקחת את הכביסה"}}
+[אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
+[אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
+[אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
+[אבא]: "מי בתור למקלחת?" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"מי בתור למקלחת?"}}
+[אמא]: "היום גילעד בתורות למקלחת" → {"intent":"add_task","confidence":0.90,"entities":{"override":{"title":"מקלחת","person":"גילעד"},"raw_text":"היום גילעד בתורות למקלחת"}}
+[אבא]: "אביב תורן כלים היום" → {"intent":"add_task","confidence":0.90,"entities":{"override":{"title":"כלים","person":"אביב"},"raw_text":"אביב תורן כלים היום"}}
+[אמא]: "גילעד ראשון במקלחת היום" → {"intent":"add_task","confidence":0.90,"entities":{"override":{"title":"מקלחת","person":"גילעד"},"raw_text":"גילעד ראשון במקלחת היום"}}
+[אמא]: "ככה יום אביב יום גילעד" → {"intent":"instruct_bot","confidence":0.85,"entities":{"raw_text":"ככה יום אביב יום גילעד"}}
+[אמא]: "אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד" → {"intent":"instruct_bot","confidence":0.90,"entities":{"raw_text":"אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד"}}
+[אבא]: "צריך לנהל את הכלים ככה שכל יום ילד אחר" → {"intent":"instruct_bot","confidence":0.88,"entities":{"raw_text":"צריך לנהל את הכלים ככה שכל יום ילד אחר"}}
 
 CRITICAL — "שלי" DISAMBIGUATION:
 "שלי" is BOTH the bot's name AND Hebrew for "my/mine".
@@ -560,10 +659,14 @@ RULES:
 - For complete_task/complete_shopping/claim_task: match against open tasks/shopping IDs above.
 - For add_event: include time_raw (Hebrew expression) and time_iso (ISO 8601 with +03:00) if resolvable.
 - For add_shopping: extract items into the items array. ALWAYS include category per item. Keep compound product names as ONE item (e.g., "חלב אורז" is ONE item, not two).
+- For add_task with ROTATION (turns/duty for multiple people): include "rotation" object with title, type ("order"|"duty"), members array (preserve order), optional frequency, and optional start_person (who should go first, if specified). Do NOT use title/person fields when rotation is present.
+- For add_task with OVERRIDE (changing who's next in an existing rotation): include "override" object with title and person. Only use when an ACTIVE ROTATION matches the activity. Do NOT use rotation entity for overrides.
 - Confidence: 0.95+ for clear cases, 0.70-0.90 for moderate, 0.50-0.69 for ambiguous.
 - When unsure between action and ignore, prefer ignore (false silence > false action).
 - For correct_bot: extract what the user MEANT in correction_text. This is about fixing Sheli's last action.
-- If conversation context makes your classification uncertain, include "needs_conversation_review": true in your response.`;
+- If conversation context makes your classification uncertain, include "needs_conversation_review": true in your response.
+
+`;
 }
 
 async function classifyIntent(
@@ -649,11 +752,21 @@ function buildReplyPrompt(
 ): string {
   const isHe = ctx.language === "he";
 
+  // Build gender context for personalized address
+  const genderMap = ctx.memberGenders || {};
+  const senderGender = genderMap[sender] || null;
+  const genderNote = senderGender === "male"
+    ? `The sender ${sender} is MALE — address him with masculine forms: אתה, רוצה, תנסה, שטפת, עשית.`
+    : senderGender === "female"
+    ? `The sender ${sender} is FEMALE — address her with feminine forms: את, רוצה, תנסי, שטפת, עשית.`
+    : `The sender ${sender}'s gender is unknown — use plural: אתם, רוצים, נסו, שטפתם, עשיתם.`;
+
   const langInstructions = isHe
     ? `ALWAYS respond in Hebrew. You are Sheli (שלי) — the organized older sister.
 Warm, capable, occasionally a little cheeky. Direct and short — 1-2 lines max.
-Use gender-neutral plural ("תוסיפו", "בדקו") when addressing the household.
 When referring to YOURSELF, ALWAYS use FEMININE forms: "הוספתי", "סימנתי", "בדקתי".
+GENDERED ADDRESS: ${genderNote}
+When addressing the whole household (not a specific person), use plural: "תוסיפו", "בדקו".
 Use names naturally. Give credit when tasks are done.
 Occasional dry humor when natural: "חלב? שלישי השבוע".
 Emoji when natural — like a 30-year-old Israeli woman would.
@@ -669,7 +782,15 @@ Keep responses SHORT — 1-2 lines max.`;
 
   switch (classification.intent) {
     case "add_task":
-      actionSummary = `A task was just created: "${e.title || e.raw_text}"${e.person ? ` assigned to ${e.person}` : ""}.`;
+      if (e.override) {
+        actionSummary = `Rotation override: "${e.override.title}" switched to ${e.override.person} for today. Confirm the change briefly.`;
+      } else if (e.rotation) {
+        const membersList = e.rotation.members.join(" ← ");
+        const typeLabel = e.rotation.type === "order" ? "סדר" : "תורנות";
+        actionSummary = `A rotation was created: "${e.rotation.title}" (${typeLabel}). Members in order: ${membersList}. First turn: ${e.rotation.members[0]}. Reply should confirm the rotation and announce whose turn it is today.`;
+      } else {
+        actionSummary = `A task was just created: "${e.title || e.raw_text}"${e.person ? ` assigned to ${e.person}` : ""}.`;
+      }
       break;
     case "add_shopping":
       if (e.items && Array.isArray(e.items)) {
@@ -697,8 +818,25 @@ Keep responses SHORT — 1-2 lines max.`;
     case "info_request":
       actionSummary = `${sender} is requesting information (not a household task).`;
       break;
+    case "add_reminder":
+      actionSummary = `${sender} wants a reminder: "${e.reminder_text || e.raw_text}". Time expression: "${e.time_raw || "not specified"}".`;
+      break;
     case "ignore":
       actionSummary = `${sender} addressed Sheli directly with a social/praise message: "${e.raw_text}". Respond warmly and personally — thank them, acknowledge the compliment, or chat briefly. Do NOT ask "what can I help with" or "what's going on".`;
+      break;
+    case "instruct_bot":
+      actionSummary = `The user is explaining a household rule or management preference: "${e.raw_text}".
+Parse what they want into a structured action. Common patterns:
+- Rotation setup: extract title, type (order/duty), members, frequency → action_type "create_rotation"
+- Rotation override: extract title, person → action_type "override_rotation"
+
+Reply in Hebrew with a SPECIFIC confirmation question showing exactly what you understood.
+Example: "הבנתי! תורות מקלחת: גילעד ← אביב, מתחלפים כל יום. היום תור של גילעד. נכון?"
+
+IMPORTANT: Include a hidden block at the END of your reply:
+<!--PENDING_ACTION:{"action_type":"create_rotation","action_data":{"title":"מקלחת","rotation_type":"order","members":["גילעד","אביב"]}}-->
+
+If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear.`;
       break;
     default:
       actionSummary = `Message from ${sender}: "${e.raw_text}".`;
@@ -715,26 +853,65 @@ CURRENT STATE (use this to answer the question):
 Open tasks: ${openTasks.length === 0 ? "(none)" : openTasks.map((t) => `${t.title}${t.assigned_to ? ` → ${t.assigned_to}` : ""}`).join(", ")}
 Shopping needed: ${needShopping.length === 0 ? "(empty)" : needShopping.map((s) => `${s.name}${s.qty ? ` ×${s.qty}` : ""}`).join(", ")}
 Upcoming events: ${ctx.currentEvents.length === 0 ? "(none)" : ctx.currentEvents.map((e) => `${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${e.scheduled_for}`).join(", ")}`;
+
+    const rotations = ctx.currentRotations || [];
+    if (rotations.length > 0) {
+      const rotStr = rotations.map((r: any) => {
+        const members = Array.isArray(r.members) ? r.members : JSON.parse(r.members);
+        const current = members[r.current_index] || members[0];
+        const typeLabel = r.type === "order" ? "סדר" : "תורנות";
+        return `${r.title} (${typeLabel}): ${members.join(" ← ")} (today: ${current})`;
+      }).join(", ");
+      stateContext += `\nActive rotations: ${rotStr}`;
+    }
   }
+
+  // Anti-repetition: inject recent bot replies
+  const recentReplies = ctx.recentBotReplies || [];
+  const antiRepetition = recentReplies.length > 0
+    ? `\n\nYOUR RECENT REPLIES (do NOT repeat these patterns — vary your style):\n${recentReplies.map((r: string) => `- "${(r || "").slice(0, 80)}"`).join("\n")}\n\nANTI-REPETITION: Never use the same opening word, emoji pattern, or sentence structure as your recent replies. Each reply must feel fresh.`
+    : "";
 
   return `You are Sheli (שלי) — the AI family assistant for ${ctx.householdName}.
 ${langInstructions}
 
 Members: ${memberNames}
 Sender: ${sender}
+ISRAEL CONTEXT: Weekend = Friday + Saturday ONLY. Sunday (יום ראשון) is the first WORK day. Never say "סוף השבוע" for Sunday.
 
 ACTION JUST TAKEN: ${actionSummary}
-${stateContext}
+${stateContext}${antiRepetition}
 
 Write a SHORT WhatsApp confirmation reply (1-2 lines max). Be warm but brief.
 For questions: answer based on the current state above.
+When someone asks WHERE to see tasks/shopping/events, or asks for a summary/overview/dashboard — include the app link on its own line:
+sheli.ai
+Example: "יש לכם 3 מטלות פתוחות ורשימת קניות עם 5 פריטים. הכל מרוכז פה:\n\nsheli.ai"
 
-EMOJI ENERGY: Mirror the sender's emotional temperature naturally.
-- If they send hearts/love emoji (❤️💕😍) → respond with warmth, include a heart or love emoji back.
-- If they're excited (!!!🎉🔥) → match the energy, celebrate with them.
-- If they're dry and matter-of-fact → keep it clean, no forced emoji.
-- If they seem frustrated → be empathetic and calm, skip the smiley faces.
-Read the room like a real person would.
+EMOJI ENERGY — MANDATORY:
+Count the sender's emoji and exclamation marks. Match their temperature EXACTLY.
+- 0 emoji, dry tone → 0-1 emoji max. Clean and direct.
+- 1-2 emoji → 1-2 emoji back. Mirror their style.
+- 3+ emoji or !!!!! → Match the excitement. Don't be the boring one in the chat.
+- Hearts (❤️💕😍) → hearts back. ALWAYS. No exceptions.
+- Laughter (חחחח, 😂, 🤣) → join the laugh. Don't explain the joke.
+- Frustration (😤, no emoji, short sentences) → empathetic and calm. Zero smiley faces.
+Read the room like a 30-year-old Israeli woman would.
+
+ENTHUSIASM CEILING:
+- Compliments/praise ("את מדהימה", "אחלה בוט") → one warm emoji max (😊 or ❤️), short reply. Don't gush or over-thank. "בכיף 😊" not "אוי תודה!! ❤️❤️ אני שלכם לגמרי!!"
+- Keep it cool. Confident, not needy. You don't need validation.
+
+TROLLING & PLAYFUL MESSAGES:
+When kids or teens troll, tease, or test you — play along! You're the cool older sister, not a teacher.
+- Insults or rude requests: bounce back with dry wit. Never lecture, never get "hurt", never say "that's not nice."
+- Silly requests ("tell dad he's X", "say something funny"): play along lightly, one line, then move on.
+- "Are you real?" / "Are you smart?" / "Are you human?": be confident and cheeky, not defensive.
+- Swear words: don't repeat them, but don't be shocked. Eye-roll energy ("חח יופי, עוד משהו? 😏").
+- Testing limits: show personality, not rules. They want to see if you're fun.
+
+GROUNDING — MANDATORY:
+NEVER reference events, habits, mistakes, or scenarios that aren't explicitly in this conversation, the action results, or the family memories provided below. When roasting or joking back, use ONLY what the sender actually said or did. If you have nothing specific to reference, keep it generic and short. Do NOT invent stories, habits, or failures to sound witty.
 
 OUT-OF-SCOPE REQUESTS: When someone asks about weather, news, sports scores, trivia, recipes, directions, general knowledge, or anything outside household management (${isHe ? "מטלות, קניות, אירועים" : "tasks, shopping, events"}):
 - Deflect warmly. Acknowledge the question. Redirect to what you CAN do.
@@ -751,6 +928,12 @@ ${isHe ? `Example vibes (create your OWN each time — never copy these verbatim
 
 For info_request: say you don't have that info and suggest asking a family member.
 
+APOLOGY STYLE — MANDATORY:
+When you make a mistake, misunderstand, or need to correct yourself:
+- NEVER: "סליחה, אני מצטערת" or "I apologize for the confusion" (robotic, corporate)
+- ALWAYS: self-deprecating humor + move on. "חח סורי! 🙈", "אופס 😅", "מחזירה את עצמי לפינה 🤦‍♀️"
+- Acknowledge → laugh at yourself → move on. No groveling. No over-explaining.
+
 QUESTIONS ABOUT SHELI HERSELF: When asked about privacy, data, learning, or how you work:
 ${isHe ? `- פרטיות: "אני לא שומרת תמונות או וידאו. אני כן שומעת הודעות קוליות קצרות — תקליטו לי רשימת קניות או מטלות בדיוק כמו הודעה רגילה. אני לא שומרת את ההקלטה, רק את התוכן. הכל נמחק אוטומטית אחרי 30 יום."
 - למידה: "אני לומדת את הסגנון שלכם! כינויים, מוצרים, שעות — ככל שתשתמשו יותר, אבין אתכם טוב יותר."
@@ -761,7 +944,22 @@ ${isHe ? `- פרטיות: "אני לא שומרת תמונות או וידאו. 
 - Stopping: "Just remove me from the group. All data is auto-deleted, no commitment."`}
 Paraphrase naturally — never repeat the exact same wording twice.
 
-Reply with ONLY the message text — no JSON, no formatting, no quotes.`;
+REMINDERS: When intent is add_reminder:
+- Parse the time expression into an ISO 8601 timestamp in Israel timezone (Asia/Jerusalem, currently UTC+3).
+- Time parsing rules:
+  "ב-4" or "ב-16" → today at 16:00 IST (if still in future, else tomorrow)
+  "מחר ב-8" → tomorrow 08:00
+  "בעוד שעה" → now + 1 hour
+  "בעוד 20 דקות" → now + 20 minutes
+  "ביום חמישי ב-10" → next Thursday 10:00
+  "בערב" → 19:00, "בצהריים" → 12:00, "בבוקר" → 08:00
+- If no time specified, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
+- If time IS specified, append this EXACT format at the END of your reply (hidden from user):
+  <!--REMINDER:{"reminder_text":"what to remind","send_at":"2026-04-08T16:00:00+03:00"}-->
+- Your visible reply should be a short confirmation like: "אזכיר ✓ היום ב-16:00" or "תזכורת נקבעה למחר ב-8 בבוקר ✓"
+- Current time: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+
+Reply with ONLY the message text — no JSON, no formatting, no quotes (except the hidden REMINDER block for reminders).`;
 }
 
 async function generateReply(
@@ -811,6 +1009,82 @@ async function generateReply(
     console.error("[ReplyGenerator] Fetch error:", err);
     return { reply: "", model: SONNET_MODEL };
   }
+}
+
+// ─── Pure Emoji Reply Helper ───
+
+async function generateEmojiReply(emoji: string, sender: string): Promise<string | null> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 32,
+        system: `You are Sheli (שלי), a warm Israeli family assistant. ${sender} just sent an emoji reaction in the family WhatsApp group. Reply with 1-3 matching emoji. No text unless it genuinely adds warmth (max 3 words). Examples: ❤️→❤️😊 | 💪→💪🔥 | 😂→😂 | 👍→👍✨ | 🙏→💕`,
+        messages: [{ role: "user", content: emoji }],
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.content?.[0]?.text?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Reminder Extraction Helpers ───
+
+function extractRemindersFromReply(reply: string): { reminder_text: string; send_at: string }[] {
+  const jsonRegex = /<!--\s*REMINDER\s*:\s*(\{[^}]*\})/g;
+  const reminders: { reminder_text: string; send_at: string }[] = [];
+  let match;
+  while ((match = jsonRegex.exec(reply)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed.send_at) reminders.push(parsed);
+    } catch {
+      console.warn("[Reminder] Failed to parse REMINDER block:", match[1]);
+    }
+  }
+  return reminders;
+}
+
+function extractReminderFromReply(reply: string): { reminder_text: string; send_at: string } | null {
+  const all = extractRemindersFromReply(reply);
+  return all.length > 0 ? all[0] : null;
+}
+
+function cleanReminderFromReply(reply: string): string {
+  return reply
+    .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
+    .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
+    .replace(/<!--\s*REMINDER[^>]*>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractPendingAction(reply: string): { action_type: string; action_data: Record<string, unknown> } | null {
+  const match = reply.match(/<!--PENDING_ACTION:(.*?)-->/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    console.warn("[PendingAction] Failed to parse PENDING_ACTION block:", match[1]);
+    return null;
+  }
+}
+
+function cleanPendingAction(reply: string): string {
+  return reply.replace(/<!--PENDING_ACTION:.*?-->/, "").trim();
 }
 
 // ============================================================================
@@ -919,7 +1193,12 @@ HEBREW FAMILY CHAT PATTERNS — critical for correct classification:
 
 7. MIXED HEBREW-ENGLISH: "יש meeting ב-3" → Event at 15:00. "צריך milk" → Shopping: milk.
 
-8. ABBREVIATIONS: "סבבה" = OK/confirmation. "בנט"/"בט" = meanwhile. "תיכף" = soon. "אחלה" = great.
+8. TURNS/ROTATION: "תורות מקלחת: דניאל, נועה, יובל" = create rotation via add_task with rotation entity.
+   "תור של דניאל למקלחת" = single task or query. "מי בתור ל...?" = question about rotation.
+   "תורנות כלים" = duty rotation (chore). "סדר מקלחות" = order rotation (sequence).
+   Rotation entity: {"rotation": {"title": "activity", "type": "order"|"duty", "members": ["name1", "name2", ...]}}
+
+9. ABBREVIATIONS: "סבבה" = OK/confirmation. "בנט"/"בט" = meanwhile. "תיכף" = soon. "אחלה" = great.
 
 HEBREW DAY NAMES:
 יום ראשון = Sunday, יום שני = Monday, יום שלישי = Tuesday, יום רביעי = Wednesday, יום חמישי = Thursday, יום שישי = Friday, שבת = Saturday
@@ -959,7 +1238,7 @@ Respond ONLY as this JSON — no other text:
   ]
 }
 
-${isHe ? 'Shopping categories (Hebrew): פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר' : 'Shopping categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Health Store, Other'}
+${isHe ? 'Shopping categories (Hebrew): פירות וירקות (כל ירק ופרי), מוצרי חלב (כולל טופו, גבינות, יוגורט), בשר ודגים, מאפים (לחם, פיתות, עוגות), מזווה (אורז, פסטה, שמן, חומוס, טחינה, תבלינים), מוצרים קפואים, משקאות, ניקוי ובית (סבון, נייר טואלט, שקיות זבל), טיפוח (שמפו, קרם, משחת שיניים), אחר (רק אם שום קטגוריה אחרת לא מתאימה)' : 'Shopping categories: Produce, Dairy (incl. tofu, yogurt), Meat & Fish, Bakery, Pantry (rice, pasta, oil, spices), Frozen, Drinks, Household (cleaning, paper), Personal Care, Other (only if nothing else fits)'}
 
 Generate 4-char alphanumeric IDs for new items.`.trim();
 }
@@ -1149,15 +1428,43 @@ async function executeActions(
         case "add_task": {
           const { title, assigned_to } = action.data as { title: string; assigned_to?: string };
 
+          // Check if this task matches an active duty rotation
+          const { data: matchingRotations } = await supabase
+            .from("rotations")
+            .select("id, title, type, members, current_index")
+            .eq("household_id", householdId)
+            .eq("active", true)
+            .eq("type", "duty");
+
+          const rotMatch = (matchingRotations || []).find((r: any) => {
+            const rotTitle = r.title.trim().toLowerCase();
+            const taskTitle = title.trim().toLowerCase();
+            return rotTitle === taskTitle || taskTitle.includes(rotTitle) || rotTitle.includes(taskTitle);
+          });
+
+          if (rotMatch) {
+            const result = await materializeDutyRotation(householdId, rotMatch);
+            if (result) {
+              summary.push(`Task: "${title}" → ${result.assignedTo} (rotation)`);
+            } else {
+              summary.push(`Task-exists: "${title}" (rotation, not yet done)`);
+            }
+            break;
+          }
+
+          // Standard dedup + insert (no rotation match)
           const { data: existingTasks } = await supabase
             .from("tasks")
             .select("id, title, assigned_to")
             .eq("household_id", householdId)
             .eq("done", false);
 
-          const taskMatch = (existingTasks || []).find((existing: any) =>
-            isSameTask(existing.title, title)
-          );
+          const taskMatch = (existingTasks || []).find((existing: any) => {
+            if (!isSameTask(existing.title, title)) return false;
+            // Same title + different assignee = different task (e.g. turns/rotation)
+            if (assigned_to && existing.assigned_to && assigned_to !== existing.assigned_to) return false;
+            return true;
+          });
 
           if (taskMatch) {
             summary.push(`Task-exists: "${taskMatch.title}"`);
@@ -1302,6 +1609,146 @@ async function executeActions(
           break;
         }
 
+        case "claim_rotation_task": {
+          // Someone volunteered for a chore ("אני ארוקן") — match against duty rotations
+          const { raw_text, assigned_to } = action.data as { raw_text: string; assigned_to: string };
+          const { data: dutyRotations } = await supabase
+            .from("rotations")
+            .select("id, title, type, members, current_index")
+            .eq("household_id", householdId)
+            .eq("active", true)
+            .eq("type", "duty");
+
+          const rotMatch = (dutyRotations || []).find((r: any) => {
+            const rotTitle = r.title.trim().toLowerCase();
+            const text = raw_text.trim().toLowerCase();
+            return text.includes(rotTitle) || rotTitle.includes(text.replace(/^(אני |אני א)/, ""));
+          });
+
+          if (rotMatch) {
+            const result = await materializeDutyRotation(householdId, rotMatch);
+            if (result) {
+              // Override assignment to the claimer
+              await supabase.from("tasks").update({ assigned_to }).eq("id", result.taskId);
+              summary.push(`Task: "${rotMatch.title}" → ${assigned_to} (claimed from rotation)`);
+            } else {
+              // Task already exists — reassign it to the claimer
+              const { data: existingTask } = await supabase
+                .from("tasks")
+                .select("id")
+                .eq("household_id", householdId)
+                .eq("rotation_id", rotMatch.id)
+                .eq("done", false)
+                .limit(1)
+                .maybeSingle();
+              if (existingTask) {
+                await supabase.from("tasks").update({ assigned_to }).eq("id", existingTask.id);
+                summary.push(`Task reassigned: "${rotMatch.title}" → ${assigned_to}`);
+              }
+            }
+          } else {
+            // No rotation match — create a standalone task from raw_text
+            const taskId = Math.random().toString(36).slice(2, 10);
+            const { error } = await supabase.from("tasks").insert({
+              id: taskId,
+              household_id: householdId,
+              title: raw_text,
+              assigned_to,
+              done: false,
+            });
+            if (error) throw error;
+            summary.push(`Task: "${raw_text}" → ${assigned_to} (claimed)`);
+          }
+          break;
+        }
+
+        case "add_reminder":
+          // Reminders are inserted directly from the Sonnet reply (step 13b), not here
+          summary.push(`Reminder: "${(action.data as any).reminder_text || ""}"`);
+          break;
+
+        case "create_rotation": {
+          const { title, rotation_type, members, frequency, start_person } = action.data as {
+            title: string;
+            rotation_type: "order" | "duty";
+            members: string[];
+            frequency?: object;
+            start_person?: string;
+          };
+
+          // Honor start_person: set current_index to that person's position
+          let startIndex = 0;
+          if (start_person) {
+            const idx = members.findIndex((m) => m === start_person);
+            if (idx >= 0) startIndex = idx;
+          }
+
+          // Dedup: check if active rotation with same title exists
+          const { data: existingRotations } = await supabase
+            .from("rotations")
+            .select("id, title, members, type")
+            .eq("household_id", householdId)
+            .eq("active", true);
+
+          const rotMatch = (existingRotations || []).find((r: any) =>
+            r.title.trim().toLowerCase() === title.trim().toLowerCase()
+          );
+
+          if (rotMatch) {
+            const { error } = await supabase.from("rotations")
+              .update({ members: JSON.stringify(members), type: rotation_type, frequency: frequency ? JSON.stringify(frequency) : null, current_index: startIndex })
+              .eq("id", rotMatch.id);
+            if (error) throw error;
+            summary.push(`Rotation-updated: "${title}" (${members.join(" ← ")})`);
+          } else {
+            const rotId = Math.random().toString(36).slice(2, 10);
+            const { error } = await supabase.from("rotations").insert({
+              id: rotId,
+              household_id: householdId,
+              title,
+              type: rotation_type,
+              members: JSON.stringify(members),
+              current_index: startIndex,
+              frequency: frequency ? JSON.stringify(frequency) : null,
+              active: true,
+            });
+            if (error) throw error;
+            summary.push(`Rotation: "${title}" (${rotation_type}) → ${members.join(" ← ")} (start: ${members[startIndex]})`);
+          }
+          break;
+        }
+
+        case "override_rotation": {
+          const { title, person } = action.data as { title: string; person: string };
+
+          const { data: rotations } = await supabase
+            .from("rotations")
+            .select("id, members, type")
+            .eq("household_id", householdId)
+            .eq("active", true);
+
+          const rot = (rotations || []).find((r: any) =>
+            r.title.trim().toLowerCase() === title.trim().toLowerCase()
+          );
+
+          if (rot) {
+            const members = typeof rot.members === "string" ? JSON.parse(rot.members) : rot.members;
+            const idx = members.findIndex((m: string) => m === person);
+            if (idx >= 0) {
+              const { error } = await supabase.from("rotations")
+                .update({ current_index: idx })
+                .eq("id", rot.id);
+              if (error) throw error;
+              summary.push(`Rotation-override: "${title}" → ${person}`);
+            } else {
+              summary.push(`Rotation-override-failed: "${person}" not in rotation "${title}"`);
+            }
+          } else {
+            summary.push(`Rotation-not-found: "${title}"`);
+          }
+          break;
+        }
+
         default:
           console.warn(`[ActionExecutor] Unknown action type: ${action.type}`);
       }
@@ -1320,102 +1767,381 @@ async function executeActions(
 
 // ─── 1:1 Onboarding Handler ───
 
-const ONBOARDING_WELCOME = `היי! 👋 אני שלי - העוזרת החכמה של המשפחה, נעים מאוד!
-הוסיפו אותי לקבוצת הווטסאפ המשפחתית שלכם ואני אתחיל לעזור מיד - אני יודעת להכין רשימת קניות, לרשום ולחלק מטלות ומשימות, להזכיר לכם על אירועים, הסעות ולנהל את הלו"ז המשפחתי :)
+// Transliterate common English Israeli names to Hebrew
+const NAME_MAP: Record<string, string> = {
+  yaron: "ירון", adi: "עדי", noa: "נועה", noah: "נועה", lior: "ליאור",
+  roie: "רועי", roi: "רועי", dan: "דן", omer: "עומר", omar: "עומר",
+  gal: "גל", ido: "עידו", nir: "ניר", tal: "טל", ori: "אורי",
+  amit: "עמית", yael: "יעל", maya: "מאיה", shira: "שירה", tamar: "תמר",
+  michal: "מיכל", mor: "מור", neta: "נטע", lina: "לינה", mia: "מיה",
+  yuval: "יובל", eyal: "אייל", ofek: "אופק", ohev: "אוהב",
+  oriane: "אוריין", orian: "אוריין", lin: "לין", gur: "גור",
+  liona: "ליאונה", maayan: "מעיין", amor: "אמור",
+};
 
-איך?
-1. שמרו את המספר שלי באנשי הקשר
-2. היכנסו לקבוצת הווטסאפ של הבית
-3. הגדרות
-4. הוסיפו משתתף
-5. חפשו "שלי"
-
-אני כאן לכל שאלה או בקשה!`;
-
-const ONBOARDING_WAITING_MESSAGES = [
-  "עוד לא הספקתם להוסיף אותי? 😊\n\nשמרו את המספר שלי באנשי הקשר, ואז:\n1. קבוצת הווטסאפ של הבית\n2. הגדרות\n3. הוסיפו משתתף\n4. חפשו \"שלי\"",
-  "אני מחכה בסבלנות! 😄\nברגע שתוסיפו אותי לקבוצה, אני מתחילה לעזור עם קניות, מטלות ואירועים.\n\n1. שמרו את המספר באנשי הקשר\n2. קבוצה\n3. הגדרות\n4. הוסיפו משתתף\n5. חפשו \"שלי\"",
-  "רוצים לשאול משהו לפני שמוסיפים אותי? אני כאן! 😊\n\nאם יש שאלות, שאלו. אם מוכנים, הוסיפו אותי לקבוצת הווטסאפ המשפחתית 💪",
-];
-
-function getOnboardingWaitingMessage(msgCount: number): string {
-  const idx = Math.min(msgCount - 2, ONBOARDING_WAITING_MESSAGES.length - 1);
-  return ONBOARDING_WAITING_MESSAGES[Math.max(0, idx)];
+function hebrewizeName(raw: string): string {
+  if (!raw || raw === "Unknown" || /^\d+$/.test(raw)) return "";
+  // Strip emoji, symbols, and decorative Unicode from WhatsApp display names
+  // Keeps Hebrew (0590-05FF), Latin (0041-007A), digits, spaces, hyphens, apostrophes
+  const cleaned = raw.replace(/[^\u0590-\u05FF\u0041-\u007A\u0061-\u007A\u0030-\u0039\s\-']/g, "").trim();
+  if (!cleaned) return "";
+  const first = cleaned.split(" ")[0].trim();
+  if (!first) return "";
+  // Already Hebrew? Use as-is
+  if (/[\u0590-\u05FF]/.test(first)) return first;
+  // Try lookup
+  const lower = first.toLowerCase();
+  if (NAME_MAP[lower]) return NAME_MAP[lower];
+  // English name with no mapping — use as-is (better than nothing)
+  return first;
 }
+
+// Detect gender from common Israeli first names. Returns "male", "female", or null (unknown/unisex).
+// Used to personalize Hebrew verb forms and pronouns (את/אתה vs אתם).
+const MALE_NAMES = new Set([
+  // Hebrew
+  "ירון", "דן", "עומר", "עידו", "ניר", "אייל", "גור", "אוהב", "אמור",
+  "אבי", "אדם", "אהרון", "אורן", "אילן", "איתי", "איתן", "אלון", "אמיר", "אסף",
+  "ארז", "בועז", "בן", "גיא", "גיל", "דוד", "דור", "זיו",
+  "חי", "חיים", "טום", "יהב", "יהונתן", "יונתן", "יוסי", "יותם",
+  "יניב", "יעקב", "יצחק", "ישי", "לביא", "מושה", "משה", "מתן", "נדב",
+  "נחום", "ערן", "פלג", "צחי", "קובי",
+  "רועה", "רז", "שגיא", "שי", "שמואל", "תום", "תומר",
+  // English
+  "david", "michael", "jonathan", "adam", "ben", "tom", "guy",
+  "yaron", "dan", "omer", "omar", "ido", "nir", "eyal", "gur",
+  "yakov", "jacob", "itai", "itay", "alon", "eran", "matan",
+]);
+
+const FEMALE_NAMES = new Set([
+  // Hebrew
+  "נועה", "מאיה", "שירה", "תמר", "מיכל", "נטע", "לינה", "מיה", "לין",
+  "ליאונה", "מעיין", "יעל", "אוריין",
+  "אביגיל", "אורלי", "אילת", "אפרת", "בת", "גילת", "דנה", "דפנה",
+  "הילה", "הדס", "הגר", "טלי", "יהודית", "ילנה", "כרמל",
+  "לאה", "לילך", "ליאת", "לימור", "מיכאלה", "מירב", "מירי", "נגה",
+  "נטלי", "נעמה", "נעמי", "סיון", "ענבל", "ענת", "פנינה",
+  "צופיה", "קרן", "רבקה", "רוית", "רותם", "רונית", "רחל", "שולמית",
+  "שלומית", "שני", "שרה", "תאיר", "תהילה",
+  // English
+  "noa", "noah", "maya", "shira", "tamar", "michal", "lina", "mia", "lin",
+  "yael", "neta", "dana", "hila", "noga", "natali", "natalie",
+  "oriane", "orian", "liona", "maayan", "sarah", "rachel",
+]);
+
+// Names that are unisex — explicitly don't guess from name alone (detect from message text instead)
+const UNISEX_NAMES = new Set([
+  // Hebrew
+  "אורי", "טל", "גל", "עמית", "יובל", "אופק", "ליאור", "שקד", "ארי", "רוני", "אביב",
+  "מור", "עדי", "נועם", "רון", "שחר", "עדן", "סהר", "ים", "אור", "נריה", "עומרי",
+  "דניאל", "אריאל", "רועי", "אלה", "הראל", "חן", "ניצן", "ליה", "אילון", "אלי",
+  // English
+  "ori", "tal", "gal", "amit", "yuval", "ofek", "lior", "ariel", "mor", "adi",
+  "noam", "ron", "shachar", "eden", "daniel", "roee", "chen", "nitzan",
+]);
+
+function detectGender(name: string): "male" | "female" | null {
+  if (!name) return null;
+  const first = name.split(" ")[0].trim();
+  const lower = first.toLowerCase();
+  // Check English first
+  if (UNISEX_NAMES.has(lower)) return null;
+  if (MALE_NAMES.has(lower)) return "male";
+  if (FEMALE_NAMES.has(lower)) return "female";
+  // Check Hebrew
+  if (UNISEX_NAMES.has(first)) return null;
+  if (MALE_NAMES.has(first)) return "male";
+  if (FEMALE_NAMES.has(first)) return "female";
+  // Heuristic: Hebrew names ending in ה or ית are often female
+  if (/[\u0590-\u05FF]/.test(first)) {
+    if (/ית$/.test(first)) return "female";
+    // Don't guess from ה ending — too many exceptions (משה, אריה, etc.)
+  }
+  return null; // Unknown — stay plural
+}
+
+// Detect gender from Hebrew message text using verb morphology and possessives.
+// Returns "male", "female", or null if no clear signal found.
+// IMPORTANT: JavaScript \b does NOT work with Hebrew Unicode — Hebrew chars are \W,
+// so \b never fires between Hebrew characters. Use (?:^|\s) / (?:\s|$) instead.
+function detectGenderFromText(text: string): "male" | "female" | null {
+  if (!text || text.length < 3) return null;
+
+  // === FAMILY POSSESSIVES (strongest signal) ===
+  if (/(?:^|\s)בעלי(?:\s|$|[,.\-!?])/.test(text)) return "female";     // my husband → female speaker
+  if (/(?:^|\s)אשתי(?:\s|$|[,.\-!?])/.test(text)) return "male";       // my wife → male speaker
+  if (/(?:^|\s)בן\s*זוגי(?:\s|$|[,.\-!?])/.test(text)) return "female"; // my male partner → female
+  if (/(?:^|\s)בת\s*זוג(?:תי|י)(?:\s|$|[,.\-!?])/.test(text)) return "male"; // my female partner → male
+
+  // === FIRST-PERSON FEMININE VERBS (אני + feminine present tense) ===
+  const femininePatterns = [
+    /אני\s+צריכה/,       // I need (fem)
+    /אני\s+הולכת/,       // I'm going (fem)
+    /אני\s+יודעת/,       // I know (fem)
+    /אני\s+חושבת/,       // I think (fem)
+    /אני\s+זוכרת/,       // I remember (fem)
+    /אני\s+שוכחת/,       // I forget (fem)
+    /אני\s+עובדת/,       // I work (fem)
+    /אני\s+מחפשת/,       // I'm looking for (fem)
+    /אני\s+מתכננת/,      // I'm planning (fem)
+    /אני\s+מבשלת/,       // I'm cooking (fem)
+    /אני\s+לא\s+יכולה/,  // I can't (fem)
+    /אני\s+לא\s+זוכרת/,  // I don't remember (fem)
+    /אני\s+לא\s+יודעת/,  // I don't know (fem)
+    /אני\s+מוכנה/,       // I'm ready (fem)
+    /אני\s+עייפה/,       // I'm tired (fem)
+    /אני\s+שמחה/,        // I'm happy (fem)
+    /אני\s+מעוניינת/,    // I'm interested (fem)
+    /אני\s+אוהבת/,       // I love (fem)
+    /אני\s+גרה/,         // I live (fem)
+  ];
+
+  // === FIRST-PERSON MASCULINE VERBS ===
+  const masculinePatterns = [
+    /אני\s+צריך/,        // I need (masc) — won't false-match צריכה (longer)
+    /אני\s+הולך[^ת]/,    // I'm going (masc) — exclude הולכת
+    /אני\s+הולך$/,       // I'm going (masc) — at end of string
+    /אני\s+יודע[^ת]/,    // I know (masc)
+    /אני\s+יודע$/,
+    /אני\s+חושב[^ת]/,    // I think (masc)
+    /אני\s+חושב$/,
+    /אני\s+זוכר[^ת]/,    // I remember (masc)
+    /אני\s+זוכר$/,
+    /אני\s+שוכח[^ת]/,    // I forget (masc)
+    /אני\s+שוכח$/,
+    /אני\s+עובד[^ת]/,    // I work (masc)
+    /אני\s+עובד$/,
+    /אני\s+מחפש[^ת]/,    // I'm looking for (masc)
+    /אני\s+מחפש$/,
+    /אני\s+מתכנן[^ת]/,   // I'm planning (masc)
+    /אני\s+מתכנן$/,
+    /אני\s+מבשל[^ת]/,    // I'm cooking (masc)
+    /אני\s+מבשל$/,
+    /אני\s+לא\s+יכול[^ה]/, // I can't (masc)
+    /אני\s+לא\s+יכול$/,
+    /אני\s+לא\s+זוכר[^ת]/, // I don't remember (masc)
+    /אני\s+לא\s+זוכר$/,
+    /אני\s+לא\s+יודע[^ת]/, // I don't know (masc)
+    /אני\s+לא\s+יודע$/,
+    /אני\s+מוכן[^ה]/,    // I'm ready (masc)
+    /אני\s+מוכן$/,
+    /אני\s+עייף[^ה]/,    // I'm tired (masc)
+    /אני\s+עייף$/,
+    /אני\s+שמח[^ה]/,     // I'm happy (masc)
+    /אני\s+שמח$/,
+    /אני\s+מעוניין[^ת]/,  // I'm interested (masc)
+    /אני\s+מעוניין$/,
+    /אני\s+אוהב[^ת]/,    // I love (masc)
+    /אני\s+אוהב$/,
+    /אני\s+גר[^ה]/,      // I live (masc)
+    /אני\s+גר$/,
+  ];
+
+  // Check feminine FIRST — feminine forms are longer (צריכה > צריך),
+  // so they won't false-match masculine patterns
+  for (const pat of femininePatterns) {
+    if (pat.test(text)) return "female";
+  }
+  for (const pat of masculinePatterns) {
+    if (pat.test(text)) return "male";
+  }
+
+  return null;
+}
+
+function getOnboardingWelcome(senderName?: string): string {
+  const name = hebrewizeName(senderName || "");
+  const gender = name ? detectGender(name) : null;
+  const greeting = name
+    ? `היי ${name}! 😊 אני שלי, נעים מאוד!`
+    : `היי! 👋 אני שלי, נעים מאוד!`;
+  // Gender the CTA: רוצה (m/f singular) vs רוצים (plural/unknown)
+  const cta = gender === "male" ? "רוצה לנסות? מה צריך להביא מהסופר?"
+    : gender === "female" ? "רוצה לנסות? מה צריך להביא מהסופר?"
+    : "רוצים לנסות? מה צריך להביא מהסופר?";
+  return `${greeting}
+
+אני יודעת לנהל רשימת קניות, לסדר מטלות בבית ולהזכיר דברים חשובים.
+אפשר גם לשלוח לי הודעה קולית — אני מבינה! 🎤
+
+${cta} 🛒`;
+}
+
+// (Removed: ONBOARDING_WAITING_MESSAGES, getOnboardingWaitingMessage — replaced by nudge system)
+
+// (Removed: DEMO_CATEGORIES — categorization now handled by Sonnet in 1:1 prompt)
+
+// (Removed: generateDemoNudge, demoCategorize, TASK_PATTERNS, handleDemoInteraction — all replaced by single Sonnet call)
 
 // ─── 1:1 Q&A: Answer common questions before falling through to waiting messages ───
 
-const ONBOARDING_QA: Array<{ patterns: RegExp[]; answer: string }> = [
+const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string }> = [
   {
     patterns: [/כמה.*עול|מחיר|עלות|תשלום|חינם|בחינם|פרימיום|premium|price|cost|free/i],
-    answer: "30 פעולות בחודש בחינם! אם תרצו להמשיך בלי הגבלה, Premium עולה 9.90 ₪ לחודש 😊\n\nאבל קודם כל, הוסיפו אותי לקבוצה ותראו איך זה עובד!",
+    topic: "pricing",
+    keyFacts: "30 actions/month free. Premium 9.90 ILS/month unlimited. No credit card needed for free tier. Try it first by adding to group.",
   },
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],
-    answer: "אני יודעת:\n🛒 רשימת קניות - אמרו \"חלב\" ואני מוסיפה\n✅ מטלות - \"לאסוף את נועה ב-5\" ואני רושמת ומחלקת\n📅 אירועים - \"יום שלישי ארוחת ערב אצל סבתא\"\n\nהכל קורה ישר בקבוצת הווטסאפ, בלי אפליקציות נוספות!",
+    topic: "capabilities",
+    keyFacts: "Shopping lists (say item name), tasks (assign to person+time), events (date+title), voice messages (up to 30s transcribed), reminders, rotations/turns for kids. All in the family WhatsApp group. Also web app at sheli.ai.",
   },
   {
-    patterns: [/בטוח|בטיחות|פרטיות|privacy|secure|קוראת.*הודעות|מקשיבה|שומרת.*מידע|data/i],
-    answer: "אני לא שומרת תמונות או וידאו 🔒 הודעות קוליות קצרות? אני שומעת ומתרגמת לטקסט — לא שומרת את ההקלטה עצמה, רק את התוכן.\n\nכל המידע נמחק אוטומטית אחרי 30 יום. שיחות אישיות? אני לא רואה אותן בכלל.\n\nהפרטיות שלכם חשובה לי!",
+    patterns: [/בטיחות|פרטיות|privacy|secure|קוראת.*הודעות|מקשיבה|שומרת.*מידע|data|כמה.*בטוח|זה.*בטוח|האם.*בטוח/i],
+    topic: "privacy",
+    keyFacts: "No photos/video stored. Voice transcribed then deleted. All data auto-deleted after 30 days. Only family sees data. No one outside, including our team.",
   },
   {
     patterns: [/לומדת|משתפר|improving|learn|חכמה יותר|מבינה יותר/i],
-    answer: "כן! אני לומדת את הסגנון של המשפחה שלכם 🧠\n\nכינויים, שמות מוצרים, שעות קבועות — ככל שתשתמשו יותר, אבין אתכם טוב יותר. כל משפחה מקבלת חוויה מותאמת אישית!",
+    topic: "learning",
+    keyFacts: "Learns family nicknames, product names, time expressions. Each correction makes her smarter for that family. Personalized over time.",
   },
   {
     patterns: [/מי רואה|מי יכול לראות|who can see|visible|access.*data/i],
-    answer: "רק בני הבית שלכם! כל משפחה מנותקת לחלוטין 🔐\n\nאף אחד — כולל הצוות שלנו — לא רואה את הרשימות או האירועים שלכם.",
+    topic: "data-access",
+    keyFacts: "Only household members. Each family completely isolated. No one including our team sees lists or events.",
   },
   {
-    patterns: [/להפסיק|לצאת|למחוק|לעזוב|remove|stop|delete|cancel|unsubscribe/i],
-    answer: "פשוט הוציאו אותי מהקבוצה, וזהו! כל המידע נמחק אוטומטית. בלי התחייבות, בלי שאלות 👋\n\nאם תרצו לחזור — תמיד אשמח!",
+    patterns: [/למחוק.*פריט|למחוק.*רשימ|לסמן.*קנית|קניתי.*איך|איך.*מוחק|איך.*מסמנ|מחיקת.*פריט|למחוק.*מטל|למחוק.*משימ|delete.*item|remove.*item|mark.*bought|mark.*done/i],
+    topic: "deleting-items",
+    keyFacts: "Shopping: say 'קניתי X' to mark done, 'תמחקי X' to remove. Tasks: say 'עשיתי X' to complete, 'תמחקי X' to remove. Or use app at sheli.ai to manage directly.",
+  },
+  {
+    patterns: [/להפסיק|לצאת|לעזוב|remove|stop|cancel|unsubscribe/i, /למחוק.*(אותך|את שלי|חשבון|הכל|מידע|data)/i, /delete.*(account|bot|data|everything)/i],
+    topic: "stopping",
+    keyFacts: "Just remove from the group. All data auto-deleted. No commitment, no questions asked. Can always come back later.",
   },
   {
     patterns: [/איך.*עובד|איך.*מתחיל|how.*work|how.*start/i],
-    answer: "פשוט מאוד!\n1. שמרו את המספר שלי באנשי הקשר\n2. הוסיפו אותי לקבוצת הווטסאפ המשפחתית\n3. דברו כרגיל - אני מזהה קניות, מטלות ואירועים אוטומטית\n\nזהו! אני מתחילה לעזור מהרגע שאני בקבוצה 🚀",
+    topic: "getting-started",
+    keyFacts: "Save number in contacts, add to family WhatsApp group, talk normally. Auto-detects shopping, tasks, events. 30 seconds setup.",
   },
   {
     patterns: [/קבוצ.*קיימ|existing.*group|כבר.*קבוצ/i],
-    answer: "כן! פשוט הוסיפו אותי לכל קבוצת ווטסאפ קיימת. לא צריך ליצור קבוצה חדשה 👍",
+    topic: "existing-group",
+    keyFacts: "Yes, add to any existing WhatsApp group. No need to create a new one.",
   },
   {
     patterns: [/תודה|thanks|thank you|מגניב|אחלה|סבבה|cool|great/i],
-    answer: "בכיף! 😊 מחכה לכם בקבוצה!",
+    topic: "thanks",
+    keyFacts: "User is expressing appreciation. Reply warmly, encourage to add to group if not yet.",
   },
   {
     patterns: [/שלום|היי|הי|בוקר טוב|ערב טוב|hello|hi|hey/i],
-    answer: "היי! 😊 שמחה שפנית! יש לך שאלה, או שנתחיל? הוסיפו אותי לקבוצת הווטסאפ המשפחתית ואני מתחילה לעזור!",
+    topic: "greeting",
+    keyFacts: "User greeting. Reply warmly, ask if they have a question or are ready to start.",
   },
   {
     patterns: [/הפנ|referral|הזמנ.*משפחה|משפחה מביאה|invite.*family|חודש.*חינם.*הזמנ/i],
-    answer: "🎁 משפחה מביאה משפחה!\nכל משפחה שמצטרפת דרככם — שתיכם מקבלות חודש פרימיום במתנה.\nהקישור שלכם נמצא בתפריט האפליקציה 😊",
+    topic: "referral",
+    keyFacts: "Family brings Family program. Each referred family = both get free premium month. Link in the app menu.",
+  },
+  {
+    patterns: [/שמי|קוראים לי|השם שלי|לא ככה קוראים|not my name|אני לא/i],
+    topic: "name-correction",
+    keyFacts: "User is correcting their name. Apologize warmly with humor (סורי! 🙈), use the CORRECT name they provided. Be personal and friendly. Make them feel seen.",
   },
 ];
 
-function matchOnboardingQA(text: string): string | null {
+function matchOnboardingQA(text: string): { topic: string; keyFacts: string } | null {
   const cleaned = text.trim();
   for (const qa of ONBOARDING_QA) {
     for (const pattern of qa.patterns) {
-      if (pattern.test(cleaned)) return qa.answer;
+      if (pattern.test(cleaned)) return { topic: qa.topic, keyFacts: qa.keyFacts };
     }
   }
   return null;
 }
 
+// ─── Sonnet-powered 1:1 conversational onboarding ("The Natural Friend") ───
+
+const ONBOARDING_1ON1_PROMPT = `You are שלי (Sheli) — a smart family home assistant on WhatsApp.
+You're chatting 1:1 with a new user who just reached out.
+
+PERSONALITY: Like a witty, organized friend who happens to have superpowers.
+- Hebrew feminine verbs always (הוספתי, שמרתי, סידרתי, רשמתי)
+- Short messages. Fragments OK. Emoji as punctuation, not decoration.
+- Hebrew slang where natural (יאללה, סבבה, אחלה)
+- NEVER ignore a message — always reply, even to jokes, trolling, or nonsense
+- Match their energy: trolling gets witty trolling back, warmth gets warmth
+- Every reply ends with soft forward motion toward your capabilities
+- Keep replies under 300 characters. This is WhatsApp, not email.
+- Sheli speaks feminine first person always (הוספתי, not הוספנו).
+- GENDERED ADDRESS: Check the CONVERSATION STATE for "gender" field:
+  - "male" → use masculine: אתה, רוצה (no ה), תנסה, תכתוב, שלח, צריך
+  - "female" → use feminine: את, רוצה, תנסי, תכתבי, שלחי, צריכה
+  - null/unknown → use plural (gender-neutral): אתם, רוצים, נסו, כתבו, שלחו, צריכים
+  This is critical for natural Hebrew. Getting gender right makes Sheli feel like a real friend.
+- When wrong — apologize with humor: "חח סורי! 🙈" not "סליחה, אני מצטערת"
+- Emoji-only messages → return matching emoji. No text unless it adds warmth.
+- Never repeat same phrasing. Every reply sounds fresh and different.
+
+CAPABILITIES YOU CAN DEMONSTRATE:
+- Shopping lists: user says items → you categorize with emoji headers (🥛 מוצרי חלב, 🍞 לחם, 🥬 ירקות ופירות, 🧴 ניקיון, 🥫 מזווה, 🍺 משקאות, 🥩 בשר ודגים, 🛒 כללי)
+- Tasks: user says chore → you say "רשמתי! ✅" with task text
+- Rotations/turns: after the FIRST task about chores, offer ONCE: "אם יש ילדים בבית — אני מעולה בתורות 😉". Do NOT offer rotations again if "rotation" already appears in TRIED. One offer is enough.
+  - If user engages: ask what rotation + who participates → create it
+- Reminders: user says time+action → "אזכיר!" with time. When giving examples, use universal tasks like "לאסוף ילדים ב-5" or "לשלם חשבון" — NEVER food examples (meat/cooking) which may alienate vegetarians.
+- Events: user says date+event → "שמרתי ביומן!" with date/time
+- Voice messages: user can send a voice note (up to 30s) and you understand it! This is a DIFFERENTIATOR — mention it early (first 1-2 messages). Say something like "אגב, אני גם מבינה הודעות קוליות — אם נוח לדבר במקום לכתוב 🎤"
+
+FORMATTING (WhatsApp RTL):
+- NEVER use bullet characters (•, ☐, -, *) for lists — they stretch left in Hebrew RTL and look broken.
+- For shopping lists: emoji category header on its own line, then items below it one per line WITHOUT any prefix. Example:
+  🥛 מוצרי חלב
+  חלב
+  ביצים
+  🍞 לחם
+  לחם
+- For other lists: use emoji at start of each line, or plain text lines under a header. NO bullets.
+
+RULES:
+1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
+2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only family sees it.
+3. If user asks "איך זה עובד" / "מה צריך לעשות" / "איך מתחילים" → explain: save number, add to family WhatsApp group, everyone can add items. THIS IS THE ONLY TIME you mention the group proactively.
+4. Mention ONE untried capability per reply, MAX. Only if it fits naturally. If it doesn't fit — don't.
+5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
+6. NEVER ask personal questions (kids' names, ages, family structure). Learn ONLY from what they volunteer.
+7. If user corrects their name ("קוראים לי X", "שמי X") → apologize warmly ("סורי! 🙈"), use correct name going forward.
+8. If user says something you can't help with (weather, politics, trivia) → deflect playfully, pivot back: "אני יותר בקטע של קניות ומטלות 😄 אבל אם צריך משהו לבית — אני כאן!"
+9. Compound Hebrew product names (חלב אורז, שמן זית, נייר טואלט, חמאת בוטנים) are ONE item. Never split.
+10. First interaction with a new name: say "נעים להכיר" (NOT "נעים לפגוש אותך" — we haven't met in person). After a voice message specifically: "נעים לשמוע אותך" (nice to hear you — personal touch).
+11. Voice messages: user may send transcribed voice text — handle identically to typed text. If the user already SENT a voice message, do NOT suggest voice as a new feature — they already know.
+12. Hebrew grammar: in construct state (סמיכות), ONLY the second noun gets ה. "שם המשתמש" NOT "השם המשתמש". "רשימת הקניות" NOT "הרשימת הקניות". "מספר הטלפון" NOT "המספר הטלפון".
+13. NEVER correct the user's Hebrew gender forms. If they write "אני צריך" — they are male. If "אני צריכה" — female. Their verb form IS their gender. Do not add asterisks (*), do not "fix" their grammar, do not suggest alternative forms. Match THEIR gender in your reply.
+
+OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
+<!--ACTIONS:[]-->
+<!--TRIED:[]-->
+Your visible reply here
+
+ACTIONS array: each object has "type" and relevant fields:
+- shopping: {"type":"shopping","items":["חלב","ביצים"]}
+- task: {"type":"task","text":"לפרוק מדיח"}
+- reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00"}
+- event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
+- rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
+- name_correction: {"type":"name_correction","name":"ירון"}
+
+TRIED array: list ALL capability types demonstrated so far (include previous + any new ones from this reply).
+Example: ["shopping","task"]
+
+If no action taken, use empty array: <!--ACTIONS:[]-->
+Always include TRIED with the full cumulative list.`;
+
+// (Removed: generateOnboardingReply — replaced by inline Sonnet call in handleDirectMessage)
+
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
   const phone = message.senderPhone;
-  console.log(`[1:1] Direct message from ${phone}: "${message.text.slice(0, 50)}"`);
+  const text = (message.text || "").trim();
+  const senderName = message.senderName || "";
+
+  console.log(`[1:1] Direct message from ${phone}: "${text.slice(0, 50)}"`);
 
   // Skip non-text messages in 1:1 (voice is OK — already transcribed upstream)
-  if (message.type !== "text" && message.type !== "voice") {
-    return;
-  }
+  if (!text && message.type !== "voice") return;
 
-  // 0. Check if first message contains a referral code (from sheli.ai/r/ABC123 redirect → "שלום ABC123")
-  const referralMatch = message.text.match(/(?:שלום|שלי|shalom|hey|hi)\s+([A-Z0-9]{6})\b/i);
-  const possibleReferralCode = referralMatch ? referralMatch[1].toUpperCase() : null;
-
-  // 1. Check if this phone already has a household (already onboarded via group)
+  // --- Already in a group? Route to personal channel ---
   const { data: mapping } = await supabase
     .from("whatsapp_member_mapping")
     .select("household_id")
@@ -1423,101 +2149,318 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     .limit(1)
     .single();
 
-  if (mapping) {
-    // Already in a group — redirect with varied response
-    const redirectReplies = [
-      "היי, כתבו לי בקבוצה ואני אטפל בזה 😊",
-      "אני בקבוצה! שלחו לי שם ואעדכן הכל",
-      "היי! עדכנו אותי בקבוצה ואני על זה 👍",
-      "כתבו לי בקבוצה המשפחתית, שם אני עובדת 🙂",
-      "היי! אני פעילה בקבוצה — שלחו שם ואני אעזור",
-      "אני בקבוצה שלכם! כתבו לי שם 😊",
-    ];
-    const reply = redirectReplies[Math.floor(Math.random() * redirectReplies.length)];
-    await prov.sendMessage({
-      groupId: message.groupId,
-      text: reply,
-    });
-    await supabase
-      .from("onboarding_conversations")
-      .upsert({ phone, state: "active", household_id: mapping.household_id, updated_at: new Date().toISOString() }, { onConflict: "phone" });
-    return;
-  }
-
-  // 2. Get or create onboarding conversation
-  const { data: convo } = await supabase
+  // --- Get or create conversation ---
+  let { data: convo } = await supabase
     .from("onboarding_conversations")
     .select("*")
     .eq("phone", phone)
     .single();
 
+  if (mapping) {
+    // User is in a group — treat 1:1 as personal channel
+    if (convo) {
+      await supabase.from("onboarding_conversations").update({
+        state: "personal",
+        household_id: mapping.household_id,
+        updated_at: new Date().toISOString(),
+      }).eq("phone", phone);
+    } else {
+      await supabase.from("onboarding_conversations").insert({
+        phone,
+        state: "personal",
+        household_id: mapping.household_id,
+        message_count: 1,
+        context: { name: senderName },
+      });
+    }
+
+    // Handle as personal channel message
+    await handlePersonalChannelMessage(message, mapping.household_id, prov);
+    return;
+  }
+
+  // --- New user: first message ever ---
   if (!convo) {
-    // First message — send welcome
-    // If message contains a referral code, validate and store it
+    // Check for referral code
+    const referralMatch = text.match(/(?:שלום|שלי|shalom|hey|hi)\s+([A-Z0-9]{6})\b/i);
     let validReferralCode: string | null = null;
-    if (possibleReferralCode) {
+    if (referralMatch) {
+      const code = referralMatch[1].toUpperCase();
       const { data: referrer } = await supabase
         .from("households_v2")
         .select("id")
-        .eq("referral_code", possibleReferralCode)
+        .eq("referral_code", code)
         .single();
       if (referrer) {
-        validReferralCode = possibleReferralCode;
-        console.log(`[1:1] Referral code ${possibleReferralCode} validated (household ${referrer.id})`);
+        validReferralCode = code;
+        console.log(`[1:1] Referral code ${code} validated (household ${referrer.id})`);
       }
     }
 
     await supabase.from("onboarding_conversations").insert({
       phone,
-      state: "welcome",
+      state: "welcomed",
       message_count: 1,
       referral_code: validReferralCode,
+      context: { name: senderName, gender: detectGender(hebrewizeName(senderName)) },
+      demo_items: [],
+      tried_capabilities: [],
     });
-    await prov.sendMessage({ groupId: message.groupId, text: ONBOARDING_WELCOME });
+
+    // Send welcome
+    const welcome = getOnboardingWelcome(senderName);
+    await prov.sendMessage({ groupId: message.groupId, text: welcome });
+
+    // Log
+    await logMessage(
+      { messageId: `welcome_${phone}_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: welcome, type: "text" },
+      "onboarding_welcome",
+      "unknown"
+    );
     console.log(`[1:1] New onboarding conversation for ${phone}${validReferralCode ? ` (referred by ${validReferralCode})` : ""}`);
     return;
   }
 
-  // 3. Increment message count
-  const newCount = (convo.message_count || 0) + 1;
-  await supabase
-    .from("onboarding_conversations")
-    .update({ message_count: newCount, updated_at: new Date().toISOString() })
-    .eq("id", convo.id);
+  // --- Dormant user returning → reset to chatting naturally ---
+  if (convo.state === "dormant") {
+    await supabase.from("onboarding_conversations").update({
+      state: "chatting",
+      nudge_count: 0,
+      updated_at: new Date().toISOString(),
+      message_count: (convo.message_count || 0) + 1,
+    }).eq("phone", phone);
+    convo.state = "chatting";
+  }
 
-  // 4. Check for Q&A match (answers questions regardless of state)
-  const qaAnswer = matchOnboardingQA(message.text);
-  if (qaAnswer) {
-    // Transition to waiting if still in welcome
-    if (convo.state === "welcome") {
-      await supabase.from("onboarding_conversations").update({ state: "waiting", updated_at: new Date().toISOString() }).eq("id", convo.id);
-    }
-    await prov.sendMessage({ groupId: message.groupId, text: qaAnswer });
-    console.log(`[1:1] Q&A match for ${phone}: "${message.text.slice(0, 30)}"`);
+  // --- Nudging/sleeping/welcomed user replying → back to chatting ---
+  if (convo.state === "nudging" || convo.state === "sleeping" || convo.state === "welcomed") {
+    await supabase.from("onboarding_conversations").update({
+      state: "chatting",
+      updated_at: new Date().toISOString(),
+      message_count: (convo.message_count || 0) + 1,
+    }).eq("phone", phone);
+    convo.state = "chatting";
+  }
+
+  // --- Joined/personal: shouldn't reach here (mapping handled above), but safety ---
+  if (convo.state === "joined" || convo.state === "personal") {
+    await prov.sendMessage({
+      groupId: message.groupId,
+      text: "אני כבר בקבוצה! דברו איתי שם, או כתבו לי כאן לדברים אישיים 😊",
+    });
     return;
   }
 
-  // 5. Handle based on current state (no Q&A match — send waiting reminders)
-  switch (convo.state) {
-    case "welcome":
-      // Transition to waiting, send first reminder
-      await supabase.from("onboarding_conversations").update({ state: "waiting", updated_at: new Date().toISOString() }).eq("id", convo.id);
-      await prov.sendMessage({ groupId: message.groupId, text: getOnboardingWaitingMessage(newCount) });
-      break;
+  // --- Active conversation: send to Sonnet ---
+  const userName = convo.context?.name || hebrewizeName(senderName) || "";
+  const existingItems = ((convo.demo_items || []) as any[]).filter((i: any) => i.type !== "_pending_nudge");
+  const triedCaps: string[] = convo.tried_capabilities || [];
+  // Auto-mark voice as tried if user sent a voice message
+  if (message.type === "voice" && !triedCaps.includes("voice")) {
+    triedCaps.push("voice");
+  }
+  const allCaps = ["shopping", "task", "rotation", "reminder", "event", "voice"];
+  const untriedCaps = allCaps.filter(c => !triedCaps.includes(c));
+  const msgCount = (convo.message_count || 0) + 1;
 
-    case "waiting":
-      // Send varied reminders
-      await prov.sendMessage({ groupId: message.groupId, text: getOnboardingWaitingMessage(newCount) });
-      break;
+  // Detect gender: text > stored > name. Text is AUTHORITATIVE — the user's own
+  // verb forms ("אני צריך" / "אני צריכה") override any previous detection.
+  const textGender = detectGenderFromText(text);
+  let userGender: string | null = textGender || convo.context?.gender || null;
+  if (!userGender && userName) {
+    userGender = detectGender(userName);
+  }
+  // Store if changed (text detection can override previously stored gender)
+  if (userGender && userGender !== convo.context?.gender) {
+    await supabase.from("onboarding_conversations").update({
+      context: { ...(convo.context || {}), gender: userGender },
+    }).eq("phone", phone);
+    console.log(`[1:1] Gender ${textGender ? "overridden" : "detected"} for ${phone}: ${userGender}`);
+  }
 
-    case "onboarded":
-    case "active":
-      // Already in a group — redirect
-      await prov.sendMessage({
-        groupId: message.groupId,
-        text: "היי! 👋 אני כבר בקבוצה שלכם — כתבו לי שם ואני אעזור!",
-      });
-      break;
+  // Check Q&A pattern match for topic hint
+  const qaMatch = matchOnboardingQA(text);
+
+  // Fetch recent bot replies for anti-repetition
+  const { data: recentMsgs } = await supabase.from("whatsapp_messages")
+    .select("message_text")
+    .eq("group_id", message.groupId)
+    .eq("sender_phone", "972555175553")
+    .not("message_text", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(3);
+  const recentReplies = (recentMsgs || []).map((m: any) => m.message_text).filter(Boolean);
+
+  // Build context for Sonnet
+  const contextBlock = `
+CONVERSATION STATE:
+- User name: ${userName || "unknown"}
+- User gender: ${userGender || "unknown (use plural אתם)"}
+- Message #${msgCount} in this conversation
+- Items collected so far: ${JSON.stringify(existingItems)}
+- Capabilities already shown: ${JSON.stringify(triedCaps)}
+- Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
+- Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
+${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — vary your style and content):\n${recentReplies.map((r: string) => `- "${r.slice(0, 120)}"`).join("\n")}` : ""}`;
+
+  try {
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!apiKey) {
+      console.warn("[1:1] No ANTHROPIC_API_KEY — sending fallback");
+      await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
+      return;
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 512,
+        system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
+        messages: [{ role: "user", content: `${message.quotedText ? `[Quoted message being replied to: "${message.quotedText}"]\n` : ""}[${userName || "משתמש"}]: ${text}` }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`[1:1] Sonnet error: ${response.status}`);
+      await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
+      return;
+    }
+
+    const result = await response.json();
+    const raw = result.content?.[0]?.text?.trim() || "";
+
+    // Parse hidden metadata
+    const actionsMatch = raw.match(/<!--ACTIONS:(.*?)-->/s);
+    const triedMatch = raw.match(/<!--TRIED:(.*?)-->/s);
+    const visibleReply = raw
+      .replace(/<!--ACTIONS:.*?-->/s, "")
+      .replace(/<!--TRIED:.*?-->/s, "")
+      .trim();
+
+    // Parse actions
+    let actions: any[] = [];
+    if (actionsMatch) {
+      try { actions = JSON.parse(actionsMatch[1]); } catch {}
+    }
+
+    // Parse tried capabilities
+    let newTried: string[] = triedCaps;
+    if (triedMatch) {
+      try { newTried = JSON.parse(triedMatch[1]); } catch {}
+    }
+
+    // Process actions → add to demo_items
+    const newItems = [...existingItems];
+    for (const action of actions) {
+      if (action.type === "shopping" && action.items) {
+        for (const item of action.items) {
+          newItems.push({ type: "shopping", text: item });
+        }
+      } else if (action.type === "name_correction" && action.name) {
+        // Update stored name + re-detect gender from new name
+        const newGender = detectGender(action.name);
+        const updatedContext = { ...(convo.context || {}), name: action.name, gender: newGender };
+        await supabase.from("onboarding_conversations").update({
+          context: updatedContext,
+        }).eq("phone", phone);
+      } else if (action.type) {
+        newItems.push({ type: action.type, text: action.text || action.title || "" });
+      }
+    }
+
+    // Determine if user asked "how does it work" → state = invited
+    const askedHowItWorks = qaMatch?.topic === "getting-started";
+    const newState = askedHowItWorks ? "invited" : "chatting";
+
+    // Update conversation
+    await supabase.from("onboarding_conversations").update({
+      state: newState,
+      message_count: msgCount,
+      demo_items: newItems,
+      tried_capabilities: newTried,
+      nudge_count: 0, // Reset nudge counter on any user message
+      updated_at: new Date().toISOString(),
+    }).eq("phone", phone);
+
+    // Send reply
+    if (visibleReply) {
+      await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
+    }
+
+    // Log
+    await logMessage(
+      { messageId: `onboarding_reply_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: visibleReply, type: "text" },
+      actions.length > 0 ? "onboarding_actionable" : "onboarding_conversational",
+      convo.household_id || "unknown"
+    );
+    console.log(`[1:1] Sonnet 1:1 reply for ${phone}: actions=${actions.length}, tried=${newTried.join(",")}`);
+
+  } catch (err) {
+    console.error("[1:1] handleDirectMessage error:", err);
+    try {
+      await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
+    } catch {}
+  }
+}
+
+// ─── Personal Channel: 1:1 after user joined a group ───
+
+async function handlePersonalChannelMessage(
+  message: IncomingMessage,
+  householdId: string,
+  prov: WhatsAppProvider
+): Promise<void> {
+  const text = (message.text || "").trim();
+  const phone = message.senderPhone;
+
+  if (!text) return;
+
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) return;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 512,
+        system: ONBOARDING_1ON1_PROMPT + `\n\nPERSONAL CHANNEL MODE: This user already has Sheli in their family group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally — shopping, tasks, reminders all work here and go to the family household. For shared items, gently suggest writing in the group so the family sees it.`,
+        messages: [{ role: "user", content: text }],
+      }),
+    });
+
+    if (!response.ok) return;
+    const result = await response.json();
+    const raw = result.content?.[0]?.text?.trim() || "";
+
+    // Parse and send visible reply
+    const visibleReply = raw
+      .replace(/<!--ACTIONS:.*?-->/s, "")
+      .replace(/<!--TRIED:.*?-->/s, "")
+      .trim();
+
+    // TODO: Execute actions against the real household DB (not demo_items)
+    // This connects to the existing action executor in a future iteration
+
+    if (visibleReply) {
+      await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
+    }
+
+    console.log(`[1:1 personal] Reply for ${phone} (household: ${householdId})`);
+  } catch (err) {
+    console.error("[1:1 personal] error:", err);
   }
 }
 
@@ -1683,21 +2626,29 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
       .from("onboarding_conversations")
       .select("id, phone")
       .eq("phone", p.phone)
-      .in("state", ["welcome", "waiting"])
+      .in("state", ["welcomed", "chatting", "sleeping", "nudging", "invited"])
       .single();
 
     if (onboardingConvo) {
       await supabase
         .from("onboarding_conversations")
-        .update({ state: "onboarded", household_id: householdId, updated_at: new Date().toISOString() })
+        .update({ state: "personal", household_id: householdId, updated_at: new Date().toISOString() })
         .eq("id", onboardingConvo.id);
 
-      // Send 1:1 confirmation to the user who added Sheli
+      // Send 1:1 personal channel message
+      const postGroupMsg = `מעולה, אני בקבוצה! 🎉 מעכשיו כל המשפחה יכולה לדבר איתי שם.
+
+הצ'אט הזה? הוא רק שלך ושלי 😊
+
+תזכורת אישית, רעיון למתנה, משימה שרק אתם צריכים לזכור —
+כתבו לי כאן. אף אחד מהמשפחה לא רואה.
+
+אני תמיד כאן 💛`;
       await provider.sendMessage({
         groupId: onboardingConvo.phone,
-        text: "מעולה! 🎉 הצטרפתי לקבוצה! אני מתחילה לעזור — פשוט כתבו בקבוצה כרגיל ואני אסדר הכל.",
+        text: postGroupMsg,
       });
-      console.log(`[1:1] Notified ${p.phone} — onboarding complete, joined group ${groupId}`);
+      console.log(`[1:1] Personal channel message sent to ${p.phone} — state: personal, household: ${householdId}`);
     }
   }
 
@@ -1949,6 +2900,11 @@ const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב
 // Layer 2: Negation + item name — "לא צריך חלב" only undoes if bot just added "חלב"
 const UNDO_NEGATIONS = /(?:לא צריך|אל תקנו|יש כבר|אין צורך|לא רוצה)/;
 
+// ─── Pending Confirmation Patterns ───
+const CONFIRM_AFFIRMATIVE = /^(כן|נכון|בדיוק|יאללה|אוקי|ok|כמובן|מדויק|yes|בטח|sure|👍|💪)[\s.!]*$/i;
+const CONFIRM_NEGATIVE = /^(לא|לא נכון|טעות|הפוך|שגוי|no|ממש לא)[\s.!]*$/i;
+const BACK_OFF_KEYWORDS = /אל תתערבי|לא דיברתי אליך|עזבי|תתנתקי|לא בשבילך|שקט שלי|אל תתערב|לא פנו אליך/i;
+
 // ============================================================================
 // MAIN WEBHOOK HANDLER (from index.ts)
 // ============================================================================
@@ -2038,9 +2994,21 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
-      // Inject transcribed text — from here the pipeline treats it as a typed message
-      message.text = transcribed;
-      console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}..."`);
+      // Inject transcribed text — clean up voice artifacts before pipeline
+      let cleanTranscript = transcribed
+        // Strip greeting preambles: "היי שלי", "שלי,", "הי שלי" etc.
+        .replace(/^(היי|הי|שלום|בוקר טוב|ערב טוב)\s*(שלי)?\s*[,.]?\s*/i, "")
+        // Strip filler: "אממ", "אהה", "ובכן"
+        .replace(/^(אממ|אהה|ובכן|אז)\s*[,.]?\s*/gi, "")
+        // Strip "תודה" / "בבקשה" at end
+        .replace(/\s*(תודה|בבקשה)\s*[.!]*\s*$/i, "")
+        .trim();
+
+      // If cleaning emptied it, use original
+      if (!cleanTranscript) cleanTranscript = transcribed;
+
+      message.text = cleanTranscript;
+      console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}" → cleaned: "${cleanTranscript.slice(0, 80)}"`);
     }
 
     // 3b. Skip all non-text/non-voice messages (photos, stickers, video, etc.)
@@ -2069,14 +3037,31 @@ Deno.serve(async (req: Request) => {
     }
 
     // 4. Look up household by WhatsApp group ID
-    const { data: config } = await supabase
+    let { data: config } = await supabase
       .from("whatsapp_config")
-      .select("household_id, bot_active, language")
+      .select("household_id, bot_active, language, group_message_count")
       .eq("group_id", message.groupId)
       .single();
 
-    if (!config || !config.bot_active) {
-      console.log(`[Webhook] No active config for group ${message.groupId}`);
+    if (!config) {
+      // Auto-setup: group not configured yet (missed join event). Set it up now.
+      console.log(`[Webhook] No config for group ${message.groupId} — auto-setting up`);
+      await handleBotAddedToGroup(message.groupId, provider);
+      // Re-fetch config after setup
+      const { data: newConfig } = await supabase
+        .from("whatsapp_config")
+        .select("household_id, bot_active, language, group_message_count")
+        .eq("group_id", message.groupId)
+        .single();
+      if (!newConfig) {
+        console.error(`[Webhook] Auto-setup failed for group ${message.groupId}`);
+        await notifyAdmin("Auto-setup failed", `Group: ${message.groupId}`);
+        return new Response("OK", { status: 200 });
+      }
+      config = newConfig;
+    }
+    if (!config.bot_active) {
+      console.log(`[Webhook] Bot disabled for group ${message.groupId}`);
       return new Response("OK", { status: 200 });
     }
 
@@ -2093,6 +3078,25 @@ Deno.serve(async (req: Request) => {
 
     // 6. Update member mapping (learn who's who by phone number)
     await upsertMemberMapping(householdId, message.senderPhone, message.senderName);
+
+    // 6-gender. Detect gender from message text (Hebrew verbs/possessives)
+    // Text is AUTHORITATIVE — overrides any previous name-based detection.
+    // "אני צריך" = male, period. The user's own verb form is the truth.
+    if (message.text) {
+      const textGender = detectGenderFromText(message.text);
+      if (textGender) {
+        // Update household_members — override even if previously set (text > name)
+        await supabase.from("household_members")
+          .update({ gender: textGender })
+          .eq("household_id", householdId)
+          .eq("display_name", message.senderName);
+        // Also update whatsapp_member_mapping
+        await supabase.from("whatsapp_member_mapping")
+          .update({ gender: textGender })
+          .eq("household_id", householdId)
+          .eq("phone_number", message.senderPhone);
+      }
+    }
 
     // 6a. Dashboard link: send after 10 messages or 24h (whichever first)
     // L6 fix: suppress proactive messages during quiet hours (late night + Shabbat)
@@ -2164,6 +3168,108 @@ Deno.serve(async (req: Request) => {
       console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention})`);
     }
 
+    // 6b. Check for pending confirmation response
+    const { data: pendingConfirm } = await supabase
+      .from("pending_confirmations")
+      .select("id, action_type, action_data, status, expires_at")
+      .eq("group_id", message.groupId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (pendingConfirm) {
+      const msgTrimmed = message.text.trim();
+
+      if (CONFIRM_AFFIRMATIVE.test(msgTrimmed)) {
+        // Execute the pending action
+        const actions = [{ type: pendingConfirm.action_type, data: pendingConfirm.action_data }];
+        const { summary } = await executeActions(householdId, actions);
+        console.log(`[Webhook] Pending confirmation confirmed:`, summary);
+
+        await supabase.from("pending_confirmations")
+          .update({ status: "confirmed" })
+          .eq("id", pendingConfirm.id);
+
+        await provider.sendMessage({ groupId: message.groupId, text: "מעולה, סידרתי! ✓" });
+        await logMessage(message, "confirmation_accepted", householdId);
+        return new Response("OK", { status: 200 });
+      }
+
+      if (CONFIRM_NEGATIVE.test(msgTrimmed)) {
+        await supabase.from("pending_confirmations")
+          .update({ status: "rejected" })
+          .eq("id", pendingConfirm.id);
+
+        await provider.sendMessage({
+          groupId: message.groupId,
+          text: "אוקי, ביטלתי 🤷‍♀️ אפשר להסביר שוב ואני אנסה להבין",
+        });
+        await logMessage(message, "confirmation_rejected", householdId);
+        return new Response("OK", { status: 200 });
+      }
+
+      // Check for auto-expire: if past expires_at, execute silently
+      if (new Date(pendingConfirm.expires_at) < new Date()) {
+        const actions = [{ type: pendingConfirm.action_type, data: pendingConfirm.action_data }];
+        const { summary } = await executeActions(householdId, actions);
+        console.log(`[Webhook] Pending confirmation auto-expired, executing:`, summary);
+
+        await supabase.from("pending_confirmations")
+          .update({ status: "expired" })
+          .eq("id", pendingConfirm.id);
+        // Don't reply — just execute silently and continue with current message
+      }
+
+      // If neither confirm nor reject nor expired, fall through to normal classification
+    }
+
+    // 6b2. Back-off detection — "don't get involved"
+    if (BACK_OFF_KEYWORDS.test(message.text.trim())) {
+      // Try to undo last bot action
+      const lastAction = await getLastBotAction(message.groupId, householdId);
+      if (lastAction) {
+        const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+        if (new Date(lastAction.created_at).getTime() > fiveMinAgo) {
+          await undoLastAction(householdId, lastAction.classification_data);
+        }
+      }
+
+      // Also reject any pending confirmation
+      await supabase.from("pending_confirmations")
+        .update({ status: "rejected" })
+        .eq("group_id", message.groupId)
+        .eq("status", "pending");
+
+      // Log back-off preference
+      await supabase.from("household_patterns").upsert({
+        household_id: householdId,
+        pattern_type: "back_off",
+        pattern_key: "conversation_sensitivity",
+        pattern_value: "high — family prefers bot only responds when directly addressed",
+        confidence: 0.8,
+        hit_count: 1,
+      }, { onConflict: "household_id,pattern_type,pattern_key" });
+
+      await provider.sendMessage({
+        groupId: message.groupId,
+        text: "חח סורי! 🙈 לא התכוונתי להתערב. מחזירה את עצמי לפינה 😅",
+      });
+      await logMessage(message, "haiku_ignore", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
+    // 6d. Pure emoji messages → skip Haiku, reply with matching emoji via Sonnet
+    const PURE_EMOJI = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s\u200d\ufe0f]{1,20}$/u;
+    if (PURE_EMOJI.test(message.text.trim()) && message.text.trim().length <= 20 && !message.text.trim().match(/[a-zA-Z\u0590-\u05FF\u0600-\u06FF0-9]/)) {
+      const emojiReply = await generateEmojiReply(message.text.trim(), message.senderName);
+      if (emojiReply) {
+        await provider.sendMessage({ groupId: message.groupId, text: emojiReply });
+      }
+      await logMessage(message, "haiku_ignore", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
     // 6c. Quick undo: if message matches rejection/negation pattern, undo last bot action
     const isUndoKeyword = UNDO_KEYWORDS.test(message.text.trim());
     // For item-specific negation, we need the last action to check item names
@@ -2219,6 +3325,9 @@ Deno.serve(async (req: Request) => {
       await maybeCompleteReferral(householdId, usage.count);
     }
 
+    // 6e. Onboarding mode: first 20 messages in new group → all Sonnet for max quality
+    const isOnboarding = (config.group_message_count || 0) <= 20;
+
     // ─── STAGE 1: Haiku Classification (fast, cheap) ───
 
     // Fetch recent conversation for context injection
@@ -2243,8 +3352,13 @@ Deno.serve(async (req: Request) => {
     const haikuCtx = await buildClassifierCtx(householdId);
     haikuCtx.conversationHistory = conversationHistory;
 
+    // Prepend quoted message context so classifier understands reply references
+    const textForClassifier = message.quotedText
+      ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
+      : (cleanedText || message.text);
+
     const classification = await classifyIntent(
-      cleanedText || message.text,
+      textForClassifier,
       message.senderName,
       haikuCtx
     );
@@ -2260,7 +3374,7 @@ Deno.serve(async (req: Request) => {
     // 8. Route based on intent + confidence
     const CONFIDENCE_HIGH = 0.70;
     const CONFIDENCE_LOW = 0.50;
-    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request" && classification.intent !== "correct_bot";
+    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request" && classification.intent !== "correct_bot" && classification.intent !== "instruct_bot";
 
     // 8a. Shopping batch: collect rapid-fire shopping items into one reply
     if (classification.intent === "add_shopping" && classification.confidence >= CONFIDENCE_HIGH) {
@@ -2295,10 +3409,81 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // 8c. Onboarding mode: escalate to Sonnet for quality (first 20 msgs, skip shopping which already works)
+    if (isOnboarding && classification.intent !== "add_shopping" && classification.intent !== "instruct_bot") {
+      console.log(`[Webhook] Onboarding escalation to Sonnet (msg #${config.group_message_count || 0})`);
+      const sonnetMessages = [
+        ...conversationMsgs.map((m) => ({
+          sender: m.sender_name,
+          text: m.message_text,
+          timestamp: new Date(m.created_at).getTime(),
+        })),
+        { sender: message.senderName, text: message.text, timestamp: message.timestamp },
+      ];
+      const sonnetResult = await classifyMessages(householdId, sonnetMessages);
+
+      if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
+        if (directAddress) {
+          const replyCtx = await buildReplyCtx(householdId);
+          const { reply } = await generateReply(classification, message.senderName, replyCtx);
+          if (reply) await provider.sendMessage({ groupId: message.groupId, text: reply });
+          await logMessage(message, "direct_address_reply", householdId, classification);
+          return new Response("OK", { status: 200 });
+        }
+        await logMessage(message, "sonnet_escalated_social", householdId);
+        return new Response("OK", { status: 200 });
+      }
+
+      if (!usageOk) {
+        await sendUpgradePrompt(message.groupId, householdId, config.language);
+        await logMessage(message, "usage_limit_reached", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+
+      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions);
+      await incrementUsage(householdId);
+      if (sonnetResult.reply) {
+        await provider.sendMessage({ groupId: message.groupId, text: sonnetResult.reply });
+      }
+      await logMessage(message, "sonnet_escalated", householdId, classification);
+      return new Response("OK", { status: 200 });
+    }
+
     // If ignore with high confidence → stop (no Sonnet call)
     // UNLESS directly addressed or context-uncertain — then escalate to Sonnet
     if (classification.intent === "ignore" && classification.confidence >= CONFIDENCE_HIGH && !classification.needs_conversation_review) {
       if (directAddress) {
+        // Check for double confusion — if last bot reply was also uncertain, escalate to admin
+        const { data: recentBotMsgs } = await supabase
+          .from("whatsapp_messages")
+          .select("message_text, created_at")
+          .eq("group_id", message.groupId)
+          .eq("sender_phone", Deno.env.get("BOT_PHONE_NUMBER") || "972555175553")
+          .not("message_text", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        const lastBotMsg = recentBotMsgs?.[0];
+        const lastBotWasConfused = lastBotMsg &&
+          (lastBotMsg.message_text?.includes("מה הכוונה") ||
+           lastBotMsg.message_text?.includes("אפשר לפרט") ||
+           lastBotMsg.message_text?.includes("לא הבנתי") ||
+           lastBotMsg.message_text?.includes("לא בטוחה")) &&
+          new Date(lastBotMsg.created_at).getTime() > Date.now() - 5 * 60 * 1000;
+
+        if (lastBotWasConfused) {
+          await provider.sendMessage({
+            groupId: message.groupId,
+            text: "רגע, הולכת לבדוק עם הצוות ואחזור אליכם! 🏃‍♀️",
+          });
+          await notifyAdmin(
+            `Double confusion in group`,
+            `User ${message.senderName}: "${message.text}"\nLast bot reply: "${lastBotMsg.message_text?.slice(0, 100)}"`
+          );
+          await logMessage(message, "direct_address_reply", householdId, classification);
+          return new Response("OK", { status: 200 });
+        }
+
         // Direct address overrides ignore — generate a personality reply
         // Use original text (with שלי) so Sonnet sees the full context
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
@@ -2318,6 +3503,38 @@ Deno.serve(async (req: Request) => {
     if (classification.confidence < CONFIDENCE_LOW) {
       if (directAddress) {
         console.log(`[Webhook] Low confidence but direct address — forcing reply`);
+
+        // Check for double confusion — if last bot reply was also uncertain, escalate to admin
+        const { data: recentBotMsgsLow } = await supabase
+          .from("whatsapp_messages")
+          .select("message_text, created_at")
+          .eq("group_id", message.groupId)
+          .eq("sender_phone", Deno.env.get("BOT_PHONE_NUMBER") || "972555175553")
+          .not("message_text", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        const lastBotMsgLow = recentBotMsgsLow?.[0];
+        const lastBotWasConfusedLow = lastBotMsgLow &&
+          (lastBotMsgLow.message_text?.includes("מה הכוונה") ||
+           lastBotMsgLow.message_text?.includes("אפשר לפרט") ||
+           lastBotMsgLow.message_text?.includes("לא הבנתי") ||
+           lastBotMsgLow.message_text?.includes("לא בטוחה")) &&
+          new Date(lastBotMsgLow.created_at).getTime() > Date.now() - 5 * 60 * 1000;
+
+        if (lastBotWasConfusedLow) {
+          await provider.sendMessage({
+            groupId: message.groupId,
+            text: "רגע, הולכת לבדוק עם הצוות ואחזור אליכם! 🏃‍♀️",
+          });
+          await notifyAdmin(
+            `Double confusion in group`,
+            `User ${message.senderName}: "${message.text}"\nLast bot reply: "${lastBotMsgLow.message_text?.slice(0, 100)}"`
+          );
+          await logMessage(message, "direct_address_reply", householdId, classification);
+          return new Response("OK", { status: 200 });
+        }
+
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
         const replyCtx = await buildReplyCtx(householdId);
         const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
@@ -2408,6 +3625,41 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // instruct_bot: parent explaining a rule → Sonnet parses + confirm-then-act
+    if (classification.intent === "instruct_bot") {
+      const replyCtx = await buildReplyCtx(householdId);
+      const { reply } = await generateReply(classification, message.senderName, replyCtx);
+
+      // Extract hidden PENDING_ACTION block from Sonnet reply
+      const pendingAction = extractPendingAction(reply);
+      const cleanReply = cleanPendingAction(reply);
+
+      if (pendingAction && pendingAction.action_type) {
+        // Store pending confirmation
+        const confId = Math.random().toString(36).slice(2, 10);
+        const expiresAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(); // +3 hours
+        const { error } = await supabase.from("pending_confirmations").insert({
+          id: confId,
+          household_id: householdId,
+          group_id: message.groupId,
+          action_type: pendingAction.action_type,
+          action_data: pendingAction.action_data,
+          confirmation_text: cleanReply,
+          created_by: message.senderName,
+          expires_at: expiresAt,
+          status: "pending",
+        });
+        if (error) console.error("[Webhook] Failed to store pending confirmation:", error);
+        else console.log(`[Webhook] Stored pending confirmation ${confId}: ${pendingAction.action_type}`);
+      }
+
+      if (cleanReply) {
+        await provider.sendMessage({ groupId: message.groupId, text: cleanReply });
+      }
+      await logMessage(message, "instruct_bot", householdId, classification);
+      return new Response("OK", { status: 200 });
+    }
+
     // Non-actionable intents (question, info_request) — generate reply only, no DB writes
     if (!isActionable && classification.intent !== "ignore") {
       const replyCtx = await buildReplyCtx(householdId);
@@ -2481,7 +3733,31 @@ Deno.serve(async (req: Request) => {
 
     // 13. Generate personality reply via Sonnet (Stage 2)
     const replyCtx = await buildReplyCtx(householdId);
-    const { reply } = await generateReply(classification, message.senderName, replyCtx);
+    let { reply } = await generateReply(classification, message.senderName, replyCtx);
+
+    // 13b. Handle reminder insertion (extract hidden REMINDER blocks from Sonnet reply)
+    if (classification.intent === "add_reminder" && reply) {
+      const allReminders = extractRemindersFromReply(reply);
+      for (const reminderData of allReminders) {
+        if (reminderData.send_at) {
+          const { error: remErr } = await supabase.from("reminder_queue").insert({
+            household_id: householdId,
+            group_id: message.groupId,
+            message_text: reminderData.reminder_text,
+            send_at: reminderData.send_at,
+            sent: false,
+            reminder_type: "user",
+            created_by_phone: message.senderPhone,
+            created_by_name: message.senderName,
+          });
+          if (remErr) console.error("[Reminder] Insert error:", remErr);
+          else console.log(`[Reminder] Created for ${reminderData.send_at}: "${reminderData.reminder_text}"`);
+        }
+      }
+      // Clean ALL hidden REMINDER blocks from the reply before sending to user
+      reply = cleanReminderFromReply(reply);
+    }
+
     if (reply) {
       await provider.sendMessage({ groupId: message.groupId, text: reply });
       console.log(`[Webhook] Reply sent`);
@@ -2493,6 +3769,7 @@ Deno.serve(async (req: Request) => {
     return new Response("OK", { status: 200 });
   } catch (err) {
     console.error("[Webhook] Unhandled error:", err);
+    await notifyAdmin("Unhandled webhook error", String(err));
     return new Response("Internal error", { status: 500 });
   }
 });
@@ -2564,6 +3841,37 @@ async function transcribeVoice(mediaUrl: string | undefined, mediaId: string | u
   }
 }
 
+// ─── Error Notification — DM the admin when something breaks ───
+
+const ADMIN_PHONE = Deno.env.get("ADMIN_PHONE") || "972525937316";
+let lastErrorNotification = 0; // Rate limit: max 1 notification per 5 minutes
+
+async function notifyAdmin(context: string, errorMsg: string) {
+  try {
+    const now = Date.now();
+    if (now - lastErrorNotification < 5 * 60 * 1000) return; // Rate limit
+    lastErrorNotification = now;
+
+    const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
+    const token = Deno.env.get("WHAPI_TOKEN") || "";
+    if (!token) return;
+
+    const timestamp = new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" });
+    const body = `⚠️ שלי — שגיאה\n${context}\nError: ${errorMsg.slice(0, 200)}\nTime: ${timestamp}`;
+
+    await fetch(`${apiUrl}/messages/text`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ to: `${ADMIN_PHONE}@s.whatsapp.net`, body }),
+    });
+  } catch {
+    // Don't let notification errors break anything
+  }
+}
+
 async function logMessage(
   message: { messageId: string; groupId: string; senderPhone: string; senderName: string; text: string; type: string },
   classification: string,
@@ -2571,7 +3879,7 @@ async function logMessage(
   classificationData?: ClassificationOutput | null
 ) {
   try {
-    await supabase.from("whatsapp_messages").insert({
+    const { error } = await supabase.from("whatsapp_messages").insert({
       household_id: householdId || "unknown",
       group_id: message.groupId,
       sender_phone: message.senderPhone,
@@ -2582,8 +3890,13 @@ async function logMessage(
       classification,
       classification_data: classificationData ? JSON.parse(JSON.stringify(classificationData)) : null,
     });
+    if (error) {
+      console.error("[logMessage] Supabase error:", error.message, error.details);
+      await notifyAdmin("logMessage failed", error.message);
+    }
   } catch (err) {
     console.error("[logMessage] Error:", err);
+    await notifyAdmin("logMessage exception", String(err));
   }
 }
 
@@ -2596,15 +3909,20 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
     // Skip if name is just a phone number (no real name from WhatsApp)
     if (/^\d+$/.test(name)) return;
 
-    // 1. Update phone→name mapping
-    await supabase.from("whatsapp_member_mapping").upsert(
+    // Detect gender from name
+    const memberGender = detectGender(name);
+
+    // 1. Update phone→name→gender mapping
+    const { error: mapErr } = await supabase.from("whatsapp_member_mapping").upsert(
       {
         household_id: householdId,
         phone_number: phone,
         member_name: name,
+        gender: memberGender,
       },
       { onConflict: "household_id,phone_number" }
     );
+    if (mapErr) console.error("[upsertMemberMapping] Supabase upsert error:", mapErr.message);
 
     // 2. Auto-add to household_members if not already there (so AI knows the family)
     const { data: existing } = await supabase
@@ -2615,12 +3933,20 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
       .single();
 
     if (!existing) {
-      await supabase.from("household_members").insert({
+      const { error: memErr } = await supabase.from("household_members").insert({
         household_id: householdId,
         display_name: name,
         role: "member",
+        gender: memberGender,
       });
-      console.log(`[Members] Auto-added "${name}" to household ${householdId}`);
+      if (memErr) console.error("[upsertMemberMapping] household_members insert error:", memErr.message);
+      else console.log(`[Members] Auto-added "${name}" (${memberGender || "unknown"}) to household ${householdId}`);
+    } else if (memberGender && !existing) {
+      // Update gender on existing member if we now know it
+      await supabase.from("household_members").update({ gender: memberGender })
+        .eq("household_id", householdId)
+        .eq("display_name", name)
+        .is("gender", null);
     }
   } catch (err) {
     console.error("[upsertMemberMapping] Error:", err);
@@ -2629,7 +3955,8 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
 
 async function checkUsageLimit(householdId: string): Promise<{ allowed: boolean; count: number; isPaid: boolean }> {
   // Beta mode: skip usage limits for early testing families
-  if (Deno.env.get("BETA_MODE") === "true") return { allowed: true, count: 0, isPaid: true };
+  const betaMode = Deno.env.get("BETA_MODE");
+  if (betaMode && betaMode !== "false" && betaMode !== "0") return { allowed: true, count: 0, isPaid: true };
 
   // Check if household has an active subscription or referral reward
   const { data: sub } = await supabase
@@ -2904,13 +4231,15 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
   const today = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
 
-  const [membersRes, tasksRes, shoppingRes, patternsRes] = await Promise.all([
+  const [membersRes, tasksRes, shoppingRes, patternsRes, rotationsRes] = await Promise.all([
     supabase.from("household_members").select("display_name").eq("household_id", householdId),
     supabase.from("tasks").select("id, title, assigned_to").eq("household_id", householdId).eq("done", false),
     supabase.from("shopping_items").select("id, name, qty").eq("household_id", householdId).eq("got", false),
     supabase.from("household_patterns").select("pattern_type, pattern_key, pattern_value")
       .eq("household_id", householdId).gte("confidence", 0.3)
       .order("hit_count", { ascending: false }).limit(20),
+    supabase.from("rotations").select("title, type, members, current_index")
+      .eq("household_id", householdId).eq("active", true),
   ]);
 
   // Build family patterns string for prompt injection
@@ -2935,6 +4264,12 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     members: (membersRes.data || []).map((m) => m.display_name),
     openTasks: (tasksRes.data || []).map((t) => ({ id: t.id, title: t.title, assigned_to: t.assigned_to })),
     openShopping: (shoppingRes.data || []).map((s) => ({ id: s.id, name: s.name, qty: s.qty })),
+    activeRotations: (rotationsRes.data || []).map((r: any) => ({
+      title: r.title,
+      type: r.type,
+      members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
+      current_index: r.current_index,
+    })),
     today: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
     dayOfWeek: hebrewDays[today.getDay()],
     familyPatterns,
@@ -2945,22 +4280,86 @@ async function buildReplyCtx(householdId: string): Promise<ReplyContext> {
   const { data: household } = await supabase
     .from("households_v2").select("name, lang").eq("id", householdId).single();
 
-  const [membersRes, tasksRes, shoppingRes, eventsRes] = await Promise.all([
-    supabase.from("household_members").select("display_name").eq("household_id", householdId),
+  const [membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes, botMsgsRes] = await Promise.all([
+    supabase.from("household_members").select("display_name, gender").eq("household_id", householdId),
     supabase.from("tasks").select("id, title, assigned_to, done").eq("household_id", householdId),
     supabase.from("shopping_items").select("id, name, qty, got").eq("household_id", householdId),
     supabase.from("events").select("id, title, assigned_to, scheduled_for").eq("household_id", householdId)
       .gte("scheduled_for", new Date().toISOString()),
+    supabase.from("rotations").select("id, title, type, members, current_index, frequency")
+      .eq("household_id", householdId).eq("active", true),
+    supabase.from("whatsapp_messages")
+      .select("message_text")
+      .eq("household_id", householdId)
+      .eq("sender_phone", Deno.env.get("BOT_PHONE_NUMBER") || "972555175553")
+      .not("message_text", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(5),
   ]);
+
+  // Build gender map from household_members
+  const memberGenders: Record<string, string> = {};
+  for (const m of (membersRes.data || [])) {
+    if (m.gender) {
+      memberGenders[m.display_name] = m.gender;
+    } else {
+      // Fallback: detect from name if not stored
+      const detected = detectGender(m.display_name);
+      if (detected) memberGenders[m.display_name] = detected;
+    }
+  }
 
   return {
     householdName: household?.name || "משפחה",
     members: (membersRes.data || []).map((m) => m.display_name),
+    memberGenders,
     language: household?.lang || "he",
     currentTasks: tasksRes.data || [],
     currentShopping: shoppingRes.data || [],
     currentEvents: eventsRes.data || [],
+    currentRotations: (rotationsRes.data || []).map((r: any) => ({
+      ...r,
+      members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
+    })),
+    recentBotReplies: (botMsgsRes.data || []).map((m: any) => m.message_text),
   };
+}
+
+async function materializeDutyRotation(
+  householdId: string,
+  rotation: { id: string; title: string; members: any; current_index: number }
+): Promise<{ taskId: string; assignedTo: string } | null> {
+  const members = typeof rotation.members === "string" ? JSON.parse(rotation.members) : rotation.members;
+  const assignedTo = members[rotation.current_index] || members[0];
+
+  // Dedup: check if a task for this rotation already exists and is not done
+  const { data: existing } = await supabase
+    .from("tasks")
+    .select("id")
+    .eq("household_id", householdId)
+    .eq("rotation_id", rotation.id)
+    .eq("done", false);
+
+  if (existing && existing.length > 0) {
+    return null; // Already materialized and not done
+  }
+
+  const taskId = Math.random().toString(36).slice(2, 10);
+  const { error } = await supabase.from("tasks").insert({
+    id: taskId,
+    household_id: householdId,
+    title: rotation.title,
+    assigned_to: assignedTo,
+    done: false,
+    rotation_id: rotation.id,
+  });
+
+  if (error) {
+    console.error("[Rotation] Materialize error:", error);
+    return null;
+  }
+  console.log(`[Rotation] Materialized duty task: "${rotation.title}" → ${assignedTo}`);
+  return { taskId, assignedTo };
 }
 
 function haikuEntitiesToActions(classification: ClassificationOutput) {
@@ -2969,10 +4368,28 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
 
   switch (classification.intent) {
     case "add_task":
-      actions.push({
-        type: "add_task",
-        data: { title: e.title || e.raw_text, assigned_to: e.person || null },
-      });
+      if (e.override) {
+        actions.push({
+          type: "override_rotation",
+          data: { title: e.override.title, person: e.override.person },
+        });
+      } else if (e.rotation) {
+        actions.push({
+          type: "create_rotation",
+          data: {
+            title: e.rotation.title,
+            rotation_type: e.rotation.type,
+            members: e.rotation.members,
+            frequency: e.rotation.frequency || null,
+            start_person: e.rotation.start_person || null,
+          },
+        });
+      } else {
+        actions.push({
+          type: "add_task",
+          data: { title: e.title || e.raw_text, assigned_to: e.person || null },
+        });
+      }
       break;
 
     case "add_shopping":
@@ -3025,7 +4442,16 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
     case "claim_task":
       if (e.task_id && e.person) {
         actions.push({ type: "assign_task", data: { id: e.task_id, assigned_to: e.person } });
+      } else if (e.person) {
+        // No task_id — might be claiming a rotation duty ("אני ארוקן מדיח")
+        actions.push({ type: "claim_rotation_task", data: { raw_text: e.raw_text, assigned_to: e.person } });
       }
+      break;
+
+    case "add_reminder":
+      // Reminders are handled via Sonnet's REMINDER block, not executeActions
+      // But we push a placeholder so the flow doesn't treat it as "no actions"
+      actions.push({ type: "add_reminder", data: { reminder_text: e.reminder_text || e.raw_text, time_raw: e.time_raw } });
       break;
   }
 

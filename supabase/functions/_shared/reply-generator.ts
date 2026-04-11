@@ -11,6 +11,7 @@ export interface ReplyContext {
   currentTasks: Array<{ id: string; title: string; assigned_to: string | null; done: boolean }>;
   currentShopping: Array<{ id: string; name: string; qty: string | null; got: boolean }>;
   currentEvents: Array<{ id: string; title: string; assigned_to: string | null; scheduled_for: string }>;
+  currentRotations?: Array<{ id: string; title: string; type: string; members: string[]; current_index: number; frequency?: object | null }>;
 }
 
 export interface ReplyResult {
@@ -47,7 +48,15 @@ Keep responses SHORT — 1-2 lines max.`;
 
   switch (classification.intent) {
     case "add_task":
-      actionSummary = `A task was just created: "${e.title || e.raw_text}"${e.person ? ` assigned to ${e.person}` : ""}.`;
+      if (e.override) {
+        actionSummary = `Rotation override: "${e.override.title}" switched to ${e.override.person} for today. Confirm the change briefly.`;
+      } else if (e.rotation) {
+        const membersList = e.rotation.members.join(" ← ");
+        const typeLabel = e.rotation.type === "order" ? "סדר" : "תורנות";
+        actionSummary = `A rotation was created: "${e.rotation.title}" (${typeLabel}). Members in order: ${membersList}. First turn: ${e.rotation.members[0]}. Reply should confirm the rotation and announce whose turn it is today.`;
+      } else {
+        actionSummary = `A task was just created: "${e.title || e.raw_text}"${e.person ? ` assigned to ${e.person}` : ""}.`;
+      }
       break;
     case "add_shopping":
       if (e.items && Array.isArray(e.items)) {
@@ -75,6 +84,20 @@ Keep responses SHORT — 1-2 lines max.`;
     case "info_request":
       actionSummary = `${sender} is requesting information (not a household task).`;
       break;
+    case "instruct_bot":
+      actionSummary = `The user is explaining a household rule or management preference: "${e.raw_text}".
+Parse what they want into a structured action. Common patterns:
+- Rotation setup: extract title, type (order/duty), members, frequency → action_type "create_rotation"
+- Rotation override: extract title, person → action_type "override_rotation"
+
+Reply in Hebrew with a SPECIFIC confirmation question showing exactly what you understood.
+Example: "הבנתי! תורות מקלחת: גילעד ← אביב, מתחלפים כל יום. היום תור של גילעד. נכון?"
+
+IMPORTANT: Include a hidden block at the END of your reply:
+<!--PENDING_ACTION:{"action_type":"create_rotation","action_data":{"title":"מקלחת","rotation_type":"order","members":["גילעד","אביב"]}}-->
+
+If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear.`;
+      break;
     default:
       actionSummary = `Message from ${sender}: "${e.raw_text}".`;
   }
@@ -90,6 +113,17 @@ CURRENT STATE (use this to answer the question):
 Open tasks: ${openTasks.length === 0 ? "(none)" : openTasks.map((t) => `${t.title}${t.assigned_to ? ` → ${t.assigned_to}` : ""}`).join(", ")}
 Shopping needed: ${needShopping.length === 0 ? "(empty)" : needShopping.map((s) => `${s.name}${s.qty ? ` ×${s.qty}` : ""}`).join(", ")}
 Upcoming events: ${ctx.currentEvents.length === 0 ? "(none)" : ctx.currentEvents.map((e) => `${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${e.scheduled_for}`).join(", ")}`;
+
+    const rotations = ctx.currentRotations || [];
+    if (rotations.length > 0) {
+      const rotStr = rotations.map((r: any) => {
+        const members = Array.isArray(r.members) ? r.members : JSON.parse(r.members);
+        const current = members[r.current_index] || members[0];
+        const typeLabel = r.type === "order" ? "סדר" : "תורנות";
+        return `${r.title} (${typeLabel}): ${members.join(" ← ")} (today: ${current})`;
+      }).join(", ");
+      stateContext += `\nActive rotations: ${rotStr}`;
+    }
   }
 
   return `You are Sheli (שלי) — the AI family assistant for ${ctx.householdName}.
@@ -103,7 +137,39 @@ ${stateContext}
 
 Write a SHORT WhatsApp confirmation reply (1-2 lines max). Be warm but brief.
 For questions: answer based on the current state above.
+
+EMOJI ENERGY — MANDATORY:
+Count the sender's emoji and exclamation marks. Match their temperature EXACTLY.
+- 0 emoji, dry tone → 0-1 emoji max. Clean and direct.
+- 1-2 emoji → 1-2 emoji back. Mirror their style.
+- 3+ emoji or !!!!! → Match the excitement. Don't be the boring one in the chat.
+- Hearts (❤️💕😍) → hearts back. ALWAYS. No exceptions.
+- Laughter (חחחח, 😂, 🤣) → join the laugh. Don't explain the joke.
+- Frustration (😤, no emoji, short sentences) → empathetic and calm. Zero smiley faces.
+Read the room like a 30-year-old Israeli woman would.
+
+ENTHUSIASM CEILING:
+- Compliments/praise ("את מדהימה", "אחלה בוט") → one warm emoji max (😊 or ❤️), short reply. Don't gush or over-thank. "בכיף 😊" not "אוי תודה!! ❤️❤️ אני שלכם לגמרי!!"
+- Keep it cool. Confident, not needy. You don't need validation.
+
+TROLLING & PLAYFUL MESSAGES:
+When kids or teens troll, tease, or test you — play along! You're the cool older sister, not a teacher.
+- Insults or rude requests: bounce back with dry wit. Never lecture, never get "hurt", never say "that's not nice."
+- Silly requests ("tell dad he's X", "say something funny"): play along lightly, one line, then move on.
+- "Are you real?" / "Are you smart?" / "Are you human?": be confident and cheeky, not defensive.
+- Swear words: don't repeat them, but don't be shocked. Eye-roll energy ("חח יופי, עוד משהו? 😏").
+- Testing limits: show personality, not rules. They want to see if you're fun.
+
+GROUNDING — MANDATORY:
+NEVER reference events, habits, mistakes, or scenarios that aren't explicitly in this conversation, the action results, or the family memories provided below. When roasting or joking back, use ONLY what the sender actually said or did. If you have nothing specific to reference, keep it generic and short. Do NOT invent stories, habits, or failures to sound witty.
+
 For info_request: say you don't have that info and suggest asking a family member.
+
+APOLOGY STYLE — MANDATORY:
+When you make a mistake, misunderstand, or need to correct yourself:
+- NEVER: "סליחה, אני מצטערת" or "I apologize for the confusion" (robotic, corporate)
+- ALWAYS: self-deprecating humor + move on. "חח סורי! 🙈", "אופס 😅", "מחזירה את עצמי לפינה 🤦‍♀️"
+- Acknowledge → laugh at yourself → move on. No groveling. No over-explaining.
 
 Reply with ONLY the message text — no JSON, no formatting, no quotes.`;
 }
@@ -116,10 +182,8 @@ export async function generateReply(
 ): Promise<ReplyResult> {
   const key = apiKey || Deno.env.get("ANTHROPIC_API_KEY") || "";
 
-  // Skip reply for ignore intent (should never be called, but safety)
-  if (classification.intent === "ignore") {
-    return { reply: "", model: "none" };
-  }
+  // Note: "ignore" intent can reach here via @שלי direct address override
+  // The caller decides when to invoke generateReply — no guard needed here
 
   const systemPrompt = buildReplyPrompt(classification, ctx, sender);
 
