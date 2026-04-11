@@ -90,7 +90,7 @@ function buildSystemPrompt(ctx: HouseholdContext): string {
 
   const langInstructions = isHe
     ? `ALWAYS respond in Hebrew. Warm and direct, like a helpful family member.
-Use plural imperative: "הוספתי", "סימנתי", "הזכרתי" — not singular.
+Use plural imperative: "הוספתי", "סימנתי", "עדכנתי" — not singular. For FUTURE reminders say "אזכיר" (I will remind), not "הזכרתי" (I reminded).
 Keep responses SHORT — 1-2 lines max. No filler. This is WhatsApp, not email.`
     : `Respond in English. Warm and direct, like a helpful family member.
 Keep responses SHORT — 1-2 lines max. This is WhatsApp, not email.`;

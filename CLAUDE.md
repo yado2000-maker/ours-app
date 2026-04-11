@@ -280,5 +280,5 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **Referral system:** "Family brings Family" — referral code on `households_v2`, Vercel redirect `/r/:code` → WhatsApp, bot detects code in 1:1, rewards both families 30 days free at 10 actions. Design: `docs/plans/2026-04-07-family-brings-family-design.md`
 - **Implementation plan:** V3 active (`docs/implementation-plan-v3.md`), V2 superseded
 
-## TODO (wire when first paying user)
-- **Dynamic plan badge in MenuPanel** — Currently static "חינם". Query `subscriptions` client-side: if `plan !== "free"` OR `free_until > now()`, show "פרימיום" badge + hide upgrade CTA. `free_until` from referrals already works bot-side.
+## TODO
+- *(none — dynamic plan badge implemented 2026-04-11)*

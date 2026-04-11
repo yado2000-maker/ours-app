@@ -460,9 +460,15 @@ export default function Sheli() {
     if (hhId && updated) saveTask(hhId, updated);
   };
   const toggleShop = async (id) => {
-    const n = shopping.map(x => x.id === id ? { ...x, got: !x.got } : x);
+    const toggling = !shopping.find(x => x.id === id)?.got;
+    const n = shopping.map(x => x.id === id ? {
+      ...x,
+      got: !x.got,
+      gotBy: toggling ? (user?.name || null) : null,
+      gotAt: toggling ? new Date().toISOString() : null,
+    } : x);
     setShoppingS(n);
-    if (n.find(x => x.id === id)?.got) analytics.shoppingItemGot();
+    if (toggling) analytics.shoppingItemGot();
     const hhId = lsGet("sheli-hhid");
     lastSaveRef.current = Date.now();
     const updated = n.find(x => x.id === id);

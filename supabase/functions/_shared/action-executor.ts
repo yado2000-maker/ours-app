@@ -95,7 +95,8 @@ function isSameEvent(
 
 export async function executeActions(
   householdId: string,
-  actions: ClassifiedAction[]
+  actions: ClassifiedAction[],
+  senderName?: string
 ): Promise<{ success: boolean; summary: string[] }> {
   const summary: string[] = [];
   let success = true;
@@ -236,7 +237,7 @@ export async function executeActions(
           const { id } = action.data as { id: string };
           const { error } = await supabase
             .from("tasks")
-            .update({ done: true, completed_at: new Date().toISOString() })
+            .update({ done: true, completed_by: senderName || null, completed_at: new Date().toISOString() })
             .eq("id", id)
             .eq("household_id", householdId);
           if (error) throw error;
@@ -248,7 +249,7 @@ export async function executeActions(
           const { id } = action.data as { id: string };
           const { error } = await supabase
             .from("shopping_items")
-            .update({ got: true })
+            .update({ got: true, got_by: senderName || null, got_at: new Date().toISOString() })
             .eq("id", id)
             .eq("household_id", householdId);
           if (error) throw error;

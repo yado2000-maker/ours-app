@@ -72,6 +72,21 @@ export const loadReferralStats = async (hhId) => {
   return { sent: rows.length, completed: rows.filter(r => r.status === "completed").length };
 };
 
+export const loadSubscription = async (hhId) => {
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .select("plan, status, free_until")
+    .eq("household_id", hhId)
+    .maybeSingle();
+  if (error) { console.error("[loadSubscription]", error); return null; }
+  if (!data) return null;
+  // Referral reward: free_until in the future counts as premium
+  const isFreeReward = data.free_until && new Date(data.free_until) > new Date();
+  const effectivePlan = (data.status === "active" && data.plan !== "free") ? data.plan
+    : isFreeReward ? "premium" : "free";
+  return { ...data, effectivePlan };
+};
+
 export const saveTask = async (hhId, task) => {
   const row = { household_id: hhId, ...toDb(task, TASK_MAP) };
   if (!row.done) row.done = false;
@@ -80,14 +95,23 @@ export const saveTask = async (hhId, task) => {
 };
 
 export const saveShoppingItem = async (hhId, item) => {
-  const { error } = await supabase.from("shopping_items").upsert({
+  const row = {
     id: item.id,
     household_id: hhId,
     name: item.name,
     qty: item.qty || null,
     category: item.category || "אחר",
     got: item.got || false,
-  });
+  };
+  // Audit trail: who checked off this item and when
+  if (item.got) {
+    row.got_by = item.gotBy || null;
+    row.got_at = item.gotAt || new Date().toISOString();
+  } else {
+    row.got_by = null;
+    row.got_at = null;
+  }
+  const { error } = await supabase.from("shopping_items").upsert(row);
   if (error) console.error("[saveShoppingItem]", error);
 };
 
@@ -146,6 +170,8 @@ export const saveAllShopping = async (hhId, items) => {
   const rows = items.map(s => ({
     id: s.id, household_id: hhId, name: s.name,
     qty: s.qty || null, category: s.category || "אחר", got: s.got || false,
+    got_by: s.got ? (s.gotBy || null) : null,
+    got_at: s.got ? (s.gotAt || null) : null,
   }));
   const { error: upsertErr } = await supabase.from("shopping_items").upsert(rows);
   if (upsertErr) { console.error("[saveAllShopping] upsert failed:", upsertErr); return; }

@@ -1223,7 +1223,7 @@ function buildSonnetClassifierPrompt(ctx: HouseholdContext): string {
 
   const langInstructions = isHe
     ? `ALWAYS respond in Hebrew. Warm and direct, like a helpful family member.
-Use plural imperative: "הוספתי", "סימנתי", "הזכרתי" — not singular.
+Use plural imperative: "הוספתי", "סימנתי", "עדכנתי" — not singular. For FUTURE reminders say "אזכיר" (I will remind), not "הזכרתי" (I reminded).
 Keep responses SHORT — 1-2 lines max. No filler. This is WhatsApp, not email.`
     : `Respond in English. Warm and direct, like a helpful family member.
 Keep responses SHORT — 1-2 lines max. This is WhatsApp, not email.`;
@@ -1488,7 +1488,8 @@ async function fetchRecentConversation(
 
 async function executeActions(
   householdId: string,
-  actions: ClassifiedAction[]
+  actions: ClassifiedAction[],
+  senderName?: string
 ): Promise<{ success: boolean; summary: string[] }> {
   const summary: string[] = [];
   let success = true;
@@ -1648,7 +1649,7 @@ async function executeActions(
           const { id } = action.data as { id: string };
           const { error } = await supabase
             .from("tasks")
-            .update({ done: true, completed_at: new Date().toISOString() })
+            .update({ done: true, completed_by: senderName || null, completed_at: new Date().toISOString() })
             .eq("id", id)
             .eq("household_id", householdId);
           if (error) throw error;
@@ -1660,7 +1661,7 @@ async function executeActions(
           const { id } = action.data as { id: string };
           const { error } = await supabase
             .from("shopping_items")
-            .update({ got: true })
+            .update({ got: true, got_by: senderName || null, got_at: new Date().toISOString() })
             .eq("id", id)
             .eq("household_id", householdId);
           if (error) throw error;
@@ -3270,7 +3271,7 @@ Deno.serve(async (req: Request) => {
       if (CONFIRM_AFFIRMATIVE.test(msgTrimmed)) {
         // Execute the pending action
         const actions = [{ type: pendingConfirm.action_type, data: pendingConfirm.action_data }];
-        const { summary } = await executeActions(householdId, actions);
+        const { summary } = await executeActions(householdId, actions, message.senderName);
         console.log(`[Webhook] Pending confirmation confirmed:`, summary);
 
         await supabase.from("pending_confirmations")
@@ -3298,7 +3299,7 @@ Deno.serve(async (req: Request) => {
       // Check for auto-expire: if past expires_at, execute silently
       if (new Date(pendingConfirm.expires_at) < new Date()) {
         const actions = [{ type: pendingConfirm.action_type, data: pendingConfirm.action_data }];
-        const { summary } = await executeActions(householdId, actions);
+        const { summary } = await executeActions(householdId, actions, message.senderName);
         console.log(`[Webhook] Pending confirmation auto-expired, executing:`, summary);
 
         await supabase.from("pending_confirmations")
@@ -3526,7 +3527,7 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
-      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions);
+      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName);
       await incrementUsage(householdId);
       if (sonnetResult.reply) {
         await provider.sendMessage({ groupId: message.groupId, text: sonnetResult.reply });
@@ -3674,7 +3675,7 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
-      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions);
+      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName);
       console.log(`[Webhook] Sonnet escalation executed ${sonnetSummary.length} actions:`, sonnetSummary);
 
       // Check if all actions were deduped
@@ -3782,7 +3783,7 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    const { summary } = await executeActions(householdId, actions);
+    const { summary } = await executeActions(householdId, actions, message.senderName);
     console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
 
     // 11. Check for dedup outcomes
@@ -4836,7 +4837,7 @@ async function handleCorrection(
 
     if (reclassified.intent !== "ignore" && reclassified.intent !== "correct_bot") {
       const actions = haikuEntitiesToActions(reclassified);
-      const result = await executeActions(householdId, actions);
+      const result = await executeActions(householdId, actions, message.senderName);
       redone = result.summary;
     }
   }

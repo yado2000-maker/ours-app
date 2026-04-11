@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import T from "../../locales/index.js";
 import { analytics, track } from "../../lib/analytics.js";
-import { loadReferralStats } from "../../lib/supabase.js";
+import { loadReferralStats, loadSubscription } from "../../lib/supabase.js";
 
 export default function MenuPanel({
   user,
@@ -34,6 +34,7 @@ export default function MenuPanel({
   const [editMemberName, setEditMemberName] = useState("");
   const [referralCopied, setReferralCopied] = useState(false);
   const [referralStats, setReferralStats] = useState({ sent: 0, completed: 0 });
+  const [subscription, setSubscription] = useState(null);
 
   const t = T[lang] || T.en;
   const dir = lang === "he" ? "rtl" : "ltr";
@@ -51,6 +52,7 @@ export default function MenuPanel({
   useEffect(() => {
     if (household?.id) {
       loadReferralStats(household.id).then(setReferralStats);
+      loadSubscription(household.id).then(setSubscription);
     }
   }, [household?.id]);
 
@@ -794,44 +796,57 @@ export default function MenuPanel({
           )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontSize: 12, color: "var(--muted)" }}>{t.menuPlan}</div>
-            <div style={{
-              fontSize: 12,
-              fontWeight: 600,
-              padding: "2px 10px",
-              borderRadius: 999,
-              background: "var(--green-light)",
-              color: "var(--green)",
-            }}>
-              {t.menuPlanFree}
-            </div>
+            {(() => {
+              const plan = subscription?.effectivePlan || "free";
+              const isPaid = plan !== "free";
+              const label = plan === "family_plus" ? t.menuPlanFamily
+                : plan === "premium" ? t.menuPlanPremium
+                : t.menuPlanFree;
+              return (
+                <div style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: "2px 10px",
+                  borderRadius: 999,
+                  background: isPaid ? "var(--coral-light, #FFF0ED)" : "var(--green-light)",
+                  color: isPaid ? "var(--coral, #E8725C)" : "var(--green)",
+                }}>
+                  {label}
+                </div>
+              );
+            })()}
           </div>
         </div>
-        <a
-          href="https://sheli.ai/upgrade"
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => track("upgrade_cta_clicked")}
-          style={{
-            display: "block",
-            width: "100%",
-            padding: "12px",
-            borderRadius: 10,
-            background: "var(--coral, #E8725C)",
-            color: "#fff",
-            fontSize: 14,
-            fontWeight: 600,
-            textAlign: "center",
-            textDecoration: "none",
-            fontFamily: "inherit",
-            marginBottom: 4,
-            boxSizing: "border-box",
-          }}
-        >
-          {t.menuUpgrade}
-        </a>
-        <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", marginBottom: 12 }}>
-          {t.menuUpgradeDesc}
-        </div>
+        {(!subscription || subscription.effectivePlan === "free") && (
+          <>
+            <a
+              href="https://sheli.ai/upgrade"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => track("upgrade_cta_clicked")}
+              style={{
+                display: "block",
+                width: "100%",
+                padding: "12px",
+                borderRadius: 10,
+                background: "var(--coral, #E8725C)",
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 600,
+                textAlign: "center",
+                textDecoration: "none",
+                fontFamily: "inherit",
+                marginBottom: 4,
+                boxSizing: "border-box",
+              }}
+            >
+              {t.menuUpgrade}
+            </a>
+            <div style={{ fontSize: 11, color: "var(--muted)", textAlign: "center", marginBottom: 12 }}>
+              {t.menuUpgradeDesc}
+            </div>
+          </>
+        )}
         <button
           onClick={() => {
             onSignOut();
