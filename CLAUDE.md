@@ -108,7 +108,7 @@
 ## WhatsApp Bot Gotchas
 - **Whapi.Cloud:** Developer Premium ($12/mo), unlimited messages/chats. Paid until 2026-05-07.
 - **1-on-1 AND group support (v8)** — Bot accepts both `@g.us` (group) and `@s.whatsapp.net` (direct). Different AI behavior per chat type:
-  - **Direct (1-on-1):** Respond to EVERY message — personal assistant mode. Resolve household via `whatsapp_member_mapping` phone lookup.
+  - **Direct (1-on-1):** Respond to EVERY message — personal assistant mode. Resolve household via `whatsapp_member_mapping` phone lookup. **Full capabilities active (2026-04-12):** auto-creates household on first action, writes to real DB tables (tasks, shopping_items, events, reminder_queue), reminders fire via pg_cron to `phone@s.whatsapp.net`.
   - **Group:** Only respond when mentioned by name ("שלי"), message is actionable (task/shopping/event), or question directed at bot. Skip social noise.
   - **Unknown direct user:** Gets welcome message explaining how to connect via group or app.
 - **Whapi.Cloud sends outgoing messages back as webhooks** — must skip bot's own phone number early in handler

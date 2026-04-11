@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "hebrew-tailwind-preset": {
+      "source": "skills-il/localization",
+      "sourceType": "github",
+      "computedHash": "9530ccc684dd299e9dea533c3dd37ab707a42fc6f6d290a32a9fb1fcdec0ab5f"
+    },
+    "hebrew-voice-bot-builder": {
+      "source": "skills-il/developer-tools",
+      "sourceType": "github",
+      "computedHash": "80b07aa21fa6add60d7e0bcfdab34b555c0ef6875c14f2f1ca80d78de0b636f5"
+    },
+    "israeli-chatbot-analytics": {
+      "source": "skills-il/developer-tools",
+      "sourceType": "github",
+      "computedHash": "824c5fbefabae448259e02ce04d117f1bcd5522859ba04b704e28eb02efd96fb"
+    },
+    "israeli-product-launch": {
+      "source": "skills-il/marketing-growth",
+      "sourceType": "github",
+      "computedHash": "f215a59479b4afd623a18a092b220f5fec0dcf9a5f6b3c65b35f86bf9f30ea37"
+    },
+    "israeli-ui-design-system": {
+      "source": "skills-il/localization",
+      "sourceType": "github",
+      "computedHash": "40824c32dd1ddc0b56752f0a77fb09adc11c450a1ff9dcdd74566b4240bcee88"
+    },
+    "israeli-whatsapp-business": {
+      "source": "skills-il/communication",
+      "sourceType": "github",
+      "computedHash": "d34c31c86fddc783a92777f8444c8713be388ccaaf8b286764db3c1b0caa94eb"
+    }
+  }
+}
