@@ -48,6 +48,8 @@ The bot is live and working. This plan focuses on completing the monetization lo
 - ✅ PostHog analytics — 20+ custom events
 - ✅ Sentry error tracking
 - ✅ Vercel auto-deploy from main branch
+- ✅ Fabrication guardrail — GROUNDING rule prevents Sheli from inventing fake events (2026-04-11)
+- ✅ Family memory system — auto-capture, explicit save/recall/delete, scope filtering, eviction (2026-04-11)
 
 ---
 

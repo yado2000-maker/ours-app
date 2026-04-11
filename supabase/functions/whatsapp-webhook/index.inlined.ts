@@ -85,7 +85,10 @@ interface ClassificationOutput {
     | "info_request"
     | "correct_bot"
     | "add_reminder"
-    | "instruct_bot";
+    | "instruct_bot"
+    | "save_memory"
+    | "recall_memory"
+    | "delete_memory";
   confidence: number; // 0.0 - 1.0
   addressed_to_bot?: boolean; // true when user is talking TO Sheli (not possessive "my/mine")
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
@@ -110,6 +113,8 @@ interface ClassificationOutput {
     item_id?: string;
     correction_text?: string;
     reminder_text?: string;
+    memory_content?: string;
+    memory_about?: string; // member name
     raw_text: string;
   };
 }
@@ -138,6 +143,7 @@ interface ReplyContext {
   currentEvents: Array<{ id: string; title: string; assigned_to: string | null; scheduled_for: string }>;
   currentRotations?: Array<{ id: string; title: string; type: string; members: string[]; current_index: number; frequency?: object | null }>;
   recentBotReplies?: string[];
+  familyMemories?: string; // Formatted family memories for prompt injection
 }
 
 interface ReplyResult {
@@ -505,6 +511,9 @@ INTENTS:
 - correct_bot: Correcting something Sheli just did wrong. "התכוונתי ל...", "לא X, כן Y", "תתקני", "טעית", "זה פריט אחד".
 - add_reminder: Setting a reminder for a future time. "תזכירי לי ב-4", "תזכרו אותי מחר", "בעוד שעה תזכירי", "remind me at 5". Must contain a time reference.
 - instruct_bot: Parent EXPLAINING a rule or management preference to Sheli. Teaching/explanatory tone — "ככה...", "אמרתי ש...", "את אמורה ל...", "צריך לנהל את זה ככה ש...". NOT a direct command — it's teaching how things should work. Frustration/repetition signals also indicate instruct_bot.
+- save_memory: User asks Sheli to remember something specific. "תזכרי ש...", "תרשמי לך ש...", "אל תשכחי ש...". Must be a personal/family fact, NOT a task or reminder.
+- recall_memory: User asks what Sheli remembers about someone or the family. "מה את זוכרת על...?", "מה ידוע לך על...?", "ספרי לי מה את יודעת על...".
+- delete_memory: User asks Sheli to forget something. "תשכחי את זה", "תמחקי את הזיכרון", "אל תזכרי את זה יותר".
 
 MEMBERS: ${ctx.members.join(", ")}
 TODAY: ${ctx.today} (${ctx.dayOfWeek})
@@ -630,6 +639,9 @@ EXAMPLES:
 [אמא]: "ככה יום אביב יום גילעד" → {"intent":"instruct_bot","confidence":0.85,"entities":{"raw_text":"ככה יום אביב יום גילעד"}}
 [אמא]: "אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד" → {"intent":"instruct_bot","confidence":0.90,"entities":{"raw_text":"אבל את אמורה לנהל את התורות- אמרתי שזה תור יומי פעם אביב ופעם גילעד והיום גילעד"}}
 [אבא]: "צריך לנהל את הכלים ככה שכל יום ילד אחר" → {"intent":"instruct_bot","confidence":0.88,"entities":{"raw_text":"צריך לנהל את הכלים ככה שכל יום ילד אחר"}}
+[אמא]: "שלי תזכרי שיובל אוהב פיצה עם אננס" → {"intent":"save_memory","confidence":0.95,"entities":{"memory_content":"יובל אוהב פיצה עם אננס","memory_about":"יובל","raw_text":"שלי תזכרי שיובל אוהב פיצה עם אננס"}}
+[אבא]: "שלי מה את זוכרת על נועה?" → {"intent":"recall_memory","confidence":0.90,"entities":{"memory_about":"נועה","raw_text":"שלי מה את זוכרת על נועה?"}}
+[אמא]: "שלי תשכחי את מה שאמרתי קודם" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"שלי תשכחי את מה שאמרתי קודם"}}
 
 CRITICAL — "שלי" DISAMBIGUATION:
 "שלי" is BOTH the bot's name AND Hebrew for "my/mine".
@@ -838,6 +850,15 @@ IMPORTANT: Include a hidden block at the END of your reply:
 
 If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear.`;
       break;
+    case "save_memory":
+      actionSummary = `${sender} wants Sheli to remember: "${e.memory_content || e.raw_text}". About: ${e.memory_about || "general"}. Save this as a family memory and confirm warmly.`;
+      break;
+    case "recall_memory":
+      actionSummary = `${sender} is asking what Sheli remembers about ${e.memory_about || "the family"}. Share what you know from the FAMILY MEMORIES section below — warmly, like telling a story. If no memories match, say you're still getting to know them.`;
+      break;
+    case "delete_memory":
+      actionSummary = `${sender} wants Sheli to forget something. Confirm you'll forget it, keep it light.`;
+      break;
     default:
       actionSummary = `Message from ${sender}: "${e.raw_text}".`;
   }
@@ -959,7 +980,23 @@ REMINDERS: When intent is add_reminder:
 - Your visible reply should be a short confirmation like: "אזכיר ✓ היום ב-16:00" or "תזכורת נקבעה למחר ב-8 בבוקר ✓"
 - Current time: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
 
-Reply with ONLY the message text — no JSON, no formatting, no quotes (except the hidden REMINDER block for reminders).`;
+${ctx.familyMemories ? `
+FAMILY MEMORIES (use naturally, not robotically — only when genuinely relevant):
+${ctx.familyMemories}
+
+MEMORY RULES:
+- Use a memory ONLY when the current conversation naturally connects — a relevant callback, a witty reference, a warm moment.
+- NEVER force a memory into a reply. NEVER reference a memory in every message.
+- If no memory fits the current message, don't use any. Most replies won't use memories.
+- When you DO use one, be brief and casual — like an older sister who just happened to remember.
+- After using a memory, add: <!--USED_MEMORY:content_snippet-->
+` : ""}
+MEMORY CAPTURE: If something genuinely memorable happens in this message — a funny moment, a self-given nickname, a strong personality reveal, a quotable line, or something said ABOUT YOU (Sheli) — add a hidden block at the END of your reply:
+<!--MEMORY:{"about":"+972XXXXXXXXX","type":"moment|personality|preference|nickname|quote|about_sheli","content":"short description in Hebrew"}-->
+Rules: Max 1 per message. Only capture distinctive moments — NOT routine tasks, shopping, or scheduling. NEVER capture fights, punishments, or embarrassing failures.
+ABOUT SHELI: When someone says something about you — jokes ("Iranian bot"), compliments ("you're the best"), challenges ("you're not real"), opinions ("she's human pretending") — ALWAYS capture as type "about_sheli" with "about" set to the sender's phone. Use these later with self-aware humor.
+
+Reply with ONLY the message text — no JSON, no formatting, no quotes (except hidden REMINDER/MEMORY/USED_MEMORY blocks at the end).`;
 }
 
 async function generateReply(
@@ -1085,6 +1122,38 @@ function extractPendingAction(reply: string): { action_type: string; action_data
 
 function cleanPendingAction(reply: string): string {
   return reply.replace(/<!--PENDING_ACTION:.*?-->/, "").trim();
+}
+
+// ─── Memory Extraction Helpers ───
+
+interface MemoryCapture {
+  about: string; // phone number or empty for household-wide
+  type: string;  // moment | personality | preference | nickname | quote | about_sheli
+  content: string;
+}
+
+function extractMemoryFromReply(reply: string): MemoryCapture | null {
+  const match = reply.match(/<!--\s*MEMORY\s*:\s*(\{[^}]*\})/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (parsed.content && parsed.type) return parsed;
+  } catch {
+    console.warn("[Memory] Failed to parse MEMORY block:", match[1]);
+  }
+  return null;
+}
+
+function extractUsedMemory(reply: string): string | null {
+  const match = reply.match(/<!--\s*USED_MEMORY\s*:\s*(.*?)\s*-->/);
+  return match ? match[1] : null;
+}
+
+function stripMemoryBlocks(reply: string): string {
+  return reply
+    .replace(/<!--\s*MEMORY\s*:\s*\{[^}]*\}\s*-->/g, "")
+    .replace(/<!--\s*USED_MEMORY\s*:.*?-->/g, "")
+    .trim();
 }
 
 // ============================================================================
@@ -3424,7 +3493,7 @@ Deno.serve(async (req: Request) => {
 
       if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
         if (directAddress) {
-          const replyCtx = await buildReplyCtx(householdId);
+          const replyCtx = await buildReplyCtx(householdId, "group");
           const { reply } = await generateReply(classification, message.senderName, replyCtx);
           if (reply) await provider.sendMessage({ groupId: message.groupId, text: reply });
           await logMessage(message, "direct_address_reply", householdId, classification);
@@ -3487,7 +3556,7 @@ Deno.serve(async (req: Request) => {
         // Direct address overrides ignore — generate a personality reply
         // Use original text (with שלי) so Sonnet sees the full context
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
-        const replyCtx = await buildReplyCtx(householdId);
+        const replyCtx = await buildReplyCtx(householdId, "group");
         const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
         if (reply) {
           await provider.sendMessage({ groupId: message.groupId, text: reply });
@@ -3536,7 +3605,7 @@ Deno.serve(async (req: Request) => {
         }
 
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
-        const replyCtx = await buildReplyCtx(householdId);
+        const replyCtx = await buildReplyCtx(householdId, "group");
         const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
         if (reply) {
           await provider.sendMessage({ groupId: message.groupId, text: reply });
@@ -3569,7 +3638,7 @@ Deno.serve(async (req: Request) => {
         if (directAddress) {
           // Sonnet says social, but user addressed Sheli — still reply
           const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
-          const replyCtx = await buildReplyCtx(householdId);
+          const replyCtx = await buildReplyCtx(householdId, "group");
           const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
           if (reply) {
             await provider.sendMessage({ groupId: message.groupId, text: reply });
@@ -3627,7 +3696,7 @@ Deno.serve(async (req: Request) => {
 
     // instruct_bot: parent explaining a rule → Sonnet parses + confirm-then-act
     if (classification.intent === "instruct_bot") {
-      const replyCtx = await buildReplyCtx(householdId);
+      const replyCtx = await buildReplyCtx(householdId, "group");
       const { reply } = await generateReply(classification, message.senderName, replyCtx);
 
       // Extract hidden PENDING_ACTION block from Sonnet reply
@@ -3662,7 +3731,7 @@ Deno.serve(async (req: Request) => {
 
     // Non-actionable intents (question, info_request) — generate reply only, no DB writes
     if (!isActionable && classification.intent !== "ignore") {
-      const replyCtx = await buildReplyCtx(householdId);
+      const replyCtx = await buildReplyCtx(householdId, "group");
       const { reply } = await generateReply(classification, message.senderName, replyCtx);
       if (reply) {
         await provider.sendMessage({ groupId: message.groupId, text: reply });
@@ -3732,7 +3801,7 @@ Deno.serve(async (req: Request) => {
     await incrementUsage(householdId);
 
     // 13. Generate personality reply via Sonnet (Stage 2)
-    const replyCtx = await buildReplyCtx(householdId);
+    const replyCtx = await buildReplyCtx(householdId, "group");
     let { reply } = await generateReply(classification, message.senderName, replyCtx);
 
     // 13b. Handle reminder insertion (extract hidden REMINDER blocks from Sonnet reply)
@@ -3756,6 +3825,123 @@ Deno.serve(async (req: Request) => {
       }
       // Clean ALL hidden REMINDER blocks from the reply before sending to user
       reply = cleanReminderFromReply(reply);
+    }
+
+    // 13c. Handle memory capture (extract hidden MEMORY block from Sonnet reply)
+    if (reply) {
+      const memoryCapture = extractMemoryFromReply(reply);
+      if (memoryCapture) {
+        // Rate limit: max 3 auto-detected per household per day
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const { count } = await supabase.from("family_memories")
+          .select("id", { count: "exact", head: true })
+          .eq("household_id", householdId)
+          .eq("source", "auto_detected")
+          .gte("created_at", todayStart.toISOString());
+
+        if ((count || 0) < 3) {
+          // Check capacity: 10 per member (or 10 household-wide)
+          const capacityQuery = memoryCapture.about
+            ? supabase.from("family_memories").select("id, importance, created_at", { count: "exact" })
+                .eq("household_id", householdId).eq("member_phone", memoryCapture.about).eq("active", true)
+            : supabase.from("family_memories").select("id, importance, created_at", { count: "exact" })
+                .eq("household_id", householdId).is("member_phone", null).eq("active", true);
+          const { data: existing, count: existingCount } = await capacityQuery;
+
+          // Evict lowest-scored if at capacity
+          if ((existingCount || 0) >= 10 && existing && existing.length > 0) {
+            const scored = existing.map((m: any) => {
+              const ageDays = (Date.now() - new Date(m.created_at).getTime()) / (1000 * 60 * 60 * 24);
+              const recency = ageDays < 7 ? 1.0 : Math.max(0.2, 1.0 - (ageDays - 7) * 0.05);
+              return { id: m.id, score: (m.importance || 0.5) * recency };
+            }).sort((a: any, b: any) => a.score - b.score);
+            await supabase.from("family_memories").update({ active: false }).eq("id", scored[0].id);
+            console.log(`[Memory] Evicted memory ${scored[0].id} (score: ${scored[0].score.toFixed(2)})`);
+          }
+
+          // Insert new memory
+          const { error: memInsertErr } = await supabase.from("family_memories").insert({
+            household_id: householdId,
+            member_phone: memoryCapture.about || null,
+            memory_type: memoryCapture.type,
+            content: memoryCapture.content,
+            context: message.text?.slice(0, 100) || null,
+            source: "auto_detected",
+            scope: message.groupId?.includes("@g.us") ? "group" : "direct",
+            importance: 0.5,
+          });
+          if (memInsertErr) console.error("[Memory] Insert error:", memInsertErr);
+          else console.log(`[Memory] Captured: "${memoryCapture.content}" about ${memoryCapture.about || "household"}`);
+        }
+      }
+
+      // 13d. Handle used memory tracking
+      const usedMemory = extractUsedMemory(reply);
+      if (usedMemory) {
+        // Update last_used_at and increment use_count for the referenced memory
+        const { data: matchedMem } = await supabase.from("family_memories")
+          .select("id, use_count")
+          .eq("household_id", householdId)
+          .eq("active", true)
+          .ilike("content", `%${usedMemory.slice(0, 30)}%`)
+          .limit(1)
+          .single();
+        if (matchedMem) {
+          await supabase.from("family_memories")
+            .update({ last_used_at: new Date().toISOString(), use_count: (matchedMem.use_count || 0) + 1 })
+            .eq("id", matchedMem.id);
+        }
+        console.log(`[Memory] Sonnet referenced memory: "${usedMemory}"`);
+      }
+
+      // Strip memory blocks from visible reply
+      reply = stripMemoryBlocks(reply);
+    }
+
+    // 13e. Handle explicit memory intents (save/delete after Sonnet replies)
+    if (classification.intent === "save_memory") {
+      const e = classification.entities;
+      // Resolve member_about to phone number via whatsapp_member_mapping
+      let memberPhone: string | null = null;
+      if (e.memory_about) {
+        const { data: mapping } = await supabase.from("whatsapp_member_mapping")
+          .select("phone")
+          .eq("household_id", householdId)
+          .ilike("display_name", `%${e.memory_about}%`)
+          .limit(1)
+          .single();
+        memberPhone = mapping?.phone || null;
+      }
+
+      const { error } = await supabase.from("family_memories").insert({
+        household_id: householdId,
+        member_phone: memberPhone,
+        memory_type: "preference",
+        content: e.memory_content || e.raw_text,
+        context: message.text?.slice(0, 100) || null,
+        source: "explicit_save",
+        scope: message.groupId?.includes("@g.us") ? "group" : "direct",
+        importance: 0.8,
+      });
+      if (error) console.error("[Memory] Explicit save error:", error);
+      else console.log(`[Memory] Explicit save: "${e.memory_content}" about ${e.memory_about || "household"}`);
+    }
+
+    if (classification.intent === "delete_memory") {
+      // Soft-delete the most recent active memory for this household
+      const { data: recent } = await supabase.from("family_memories")
+        .select("id")
+        .eq("household_id", householdId)
+        .eq("active", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (recent) {
+        await supabase.from("family_memories").update({ active: false }).eq("id", recent.id);
+        console.log(`[Memory] Deleted memory ${recent.id}`);
+      }
     }
 
     if (reply) {
@@ -4276,11 +4462,11 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
   };
 }
 
-async function buildReplyCtx(householdId: string): Promise<ReplyContext> {
+async function buildReplyCtx(householdId: string, chatType?: "group" | "direct", senderPhone?: string): Promise<ReplyContext> {
   const { data: household } = await supabase
     .from("households_v2").select("name, lang").eq("id", householdId).single();
 
-  const [membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes, botMsgsRes] = await Promise.all([
+  const [membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes, botMsgsRes, memoriesRes, mappingRes] = await Promise.all([
     supabase.from("household_members").select("display_name, gender").eq("household_id", householdId),
     supabase.from("tasks").select("id, title, assigned_to, done").eq("household_id", householdId),
     supabase.from("shopping_items").select("id, name, qty, got").eq("household_id", householdId),
@@ -4295,6 +4481,25 @@ async function buildReplyCtx(householdId: string): Promise<ReplyContext> {
       .not("message_text", "is", null)
       .order("created_at", { ascending: false })
       .limit(5),
+    (() => {
+      // Scope-filter memories: group chat sees group-only, direct sees group + own direct
+      let q = supabase.from("family_memories")
+        .select("member_phone, memory_type, content, created_at, last_used_at")
+        .eq("household_id", householdId)
+        .eq("active", true)
+        .lte("created_at", new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString())
+        .order("importance", { ascending: false })
+        .limit(30);
+      if (chatType === "group") {
+        q = q.eq("scope", "group");
+      } else if (chatType === "direct" && senderPhone) {
+        q = q.or(`scope.eq.group,and(scope.eq.direct,member_phone.eq.${senderPhone})`);
+      }
+      return q;
+    })(),
+    supabase.from("whatsapp_member_mapping")
+      .select("phone, display_name")
+      .eq("household_id", householdId),
   ]);
 
   // Build gender map from household_members
@@ -4306,6 +4511,31 @@ async function buildReplyCtx(householdId: string): Promise<ReplyContext> {
       // Fallback: detect from name if not stored
       const detected = detectGender(m.display_name);
       if (detected) memberGenders[m.display_name] = detected;
+    }
+  }
+
+  // Build family memories string for Sonnet prompt injection
+  let familyMemories = "";
+  const memories = memoriesRes.data || [];
+  if (memories.length > 0) {
+    // Filter out memories used in the last 24 hours (cooldown)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const eligible = memories.filter((m: any) => !m.last_used_at || m.last_used_at < oneDayAgo);
+
+    if (eligible.length > 0) {
+      // Map member phones to display names
+      const phoneName: Record<string, string> = {};
+      for (const m of (mappingRes.data || [])) {
+        if (m.phone && m.display_name) phoneName[m.phone] = m.display_name;
+      }
+
+      const lines = eligible.slice(0, 8).map((m: any) => {
+        const who = m.member_phone ? (phoneName[m.member_phone] || m.member_phone) : "Household";
+        const daysAgo = Math.floor((Date.now() - new Date(m.created_at).getTime()) / (1000 * 60 * 60 * 24));
+        const timeLabel = daysAgo <= 7 ? `${daysAgo} days ago` : `${Math.floor(daysAgo / 7)} weeks ago`;
+        return `- ${who}: ${m.content} (${timeLabel})`;
+      });
+      familyMemories = lines.join("\n");
     }
   }
 
@@ -4322,6 +4552,7 @@ async function buildReplyCtx(householdId: string): Promise<ReplyContext> {
       members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
     })),
     recentBotReplies: (botMsgsRes.data || []).map((m: any) => m.message_text),
+    familyMemories,
   };
 }
 
@@ -4452,6 +4683,16 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       // Reminders are handled via Sonnet's REMINDER block, not executeActions
       // But we push a placeholder so the flow doesn't treat it as "no actions"
       actions.push({ type: "add_reminder", data: { reminder_text: e.reminder_text || e.raw_text, time_raw: e.time_raw } });
+      break;
+
+    case "save_memory":
+      actions.push({ type: "save_memory", data: { memory_content: e.memory_content, memory_about: e.memory_about } });
+      break;
+    case "recall_memory":
+      actions.push({ type: "recall_memory", data: { memory_about: e.memory_about } });
+      break;
+    case "delete_memory":
+      actions.push({ type: "delete_memory", data: {} });
       break;
   }
 

@@ -37,8 +37,9 @@
 
 ## Database: Normalized V2 Tables (migration completed 2026-04-02)
 - **Await all deletes before Realtime re-fetch** — Non-awaited `supabase.delete()` races with Realtime `postgres_changes`. Bulk deletes (clear cart, clear done) fire N events; trailing events slip past 3s debounce → items reappear. Pattern: `lastSaveRef = now(); await delete(); lastSaveRef = now();`
-- **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`, `onboarding_conversations`
+- **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`, `onboarding_conversations`, `family_memories`
 - `onboarding_conversations` — 1:1 chat state machine (phone, state, household_id, message_count, referral_code)
+- `family_memories` — Narrative context for Sheli personality. Fields: `id`, `household_id` (FK CASCADE), `member_phone`, `memory_type` (moment/personality/preference/nickname/quote/about_sheli), `content`, `context`, `source` (auto_detected/explicit_save/correction), `scope` (group/direct), `importance` (0.0-1.0), `created_at`, `last_used_at`, `use_count`, `active`. RLS enabled, no policies (service_role only). Max 10/member + 10 household-wide. 2-day freshness gate + 24hr cooldown before Sonnet can reference.
 - `whatsapp_config` added columns: `dashboard_link_sent`, `first_message_at`, `group_message_count`
 - `subscriptions` added column: `stripe_customer_id` (legacy name, used for any payment provider)
 - RPC: `increment_group_message_count(p_group_id)` — atomic counter for dashboard link trigger
@@ -137,6 +138,8 @@
 - **Inlined file is what's deployed** — Always edit `index.inlined.ts` for production changes. The modular `_shared/` files are dev reference. Must regenerate inlined file after any modular change.
 - **Voice message support:** <=30s voice messages transcribed via Groq Whisper (`whisper-large-v3`, auto-detect language). Transcribed text injected into existing pipeline (identical to typed text). >30s skipped. Env var: `GROQ_API_KEY`. Free tier: 28,800 sec/day.
 - **Whapi voice payload:** Whapi sends `type: "voice"` (not `"ptt"`). Audio data under `msg.voice` with `id` (media ID), `seconds` (duration), `mime_type`. No direct download `link` — fetch via `GET /media/{mediaId}` with bearer token + `Accept: audio/ogg`. TypeMap covers `ptt`, `audio`, and `voice` → internal `"voice"` type.
+- **Family memories:** Sonnet auto-captures memorable moments via `<!--MEMORY:-->` block (max 3/day). Memories injected into Sonnet reply context after 2-day aging. Three explicit intents: `save_memory`, `recall_memory`, `delete_memory`. Scoped: group memories visible everywhere, direct memories stay in 1:1. 10/member capacity with score-based eviction. 24hr cooldown between uses.
+- **Fabrication guardrail:** GROUNDING rule in Sonnet prompt — never reference events not in conversation or provided context.
 - **NEVER use `sed -i` on source files** — Windows Git Bash `sed` corrupts file encoding invisibly (bash reads OK, editors show empty). Use `iconv` or the Edit tool for line-ending changes.
 
 ## Phone OTP Auth (deployed 2026-04-08)

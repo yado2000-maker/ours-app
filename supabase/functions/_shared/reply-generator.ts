@@ -12,6 +12,8 @@ export interface ReplyContext {
   currentShopping: Array<{ id: string; name: string; qty: string | null; got: boolean }>;
   currentEvents: Array<{ id: string; title: string; assigned_to: string | null; scheduled_for: string }>;
   currentRotations?: Array<{ id: string; title: string; type: string; members: string[]; current_index: number; frequency?: object | null }>;
+  recentBotReplies?: string[];
+  familyMemories?: string; // Formatted family memories for prompt injection
 }
 
 export interface ReplyResult {
@@ -171,7 +173,23 @@ When you make a mistake, misunderstand, or need to correct yourself:
 - ALWAYS: self-deprecating humor + move on. "חח סורי! 🙈", "אופס 😅", "מחזירה את עצמי לפינה 🤦‍♀️"
 - Acknowledge → laugh at yourself → move on. No groveling. No over-explaining.
 
-Reply with ONLY the message text — no JSON, no formatting, no quotes.`;
+${ctx.familyMemories ? `
+FAMILY MEMORIES (use naturally, not robotically — only when genuinely relevant):
+${ctx.familyMemories}
+
+MEMORY RULES:
+- Use a memory ONLY when the current conversation naturally connects — a relevant callback, a witty reference, a warm moment.
+- NEVER force a memory into a reply. NEVER reference a memory in every message.
+- If no memory fits the current message, don't use any. Most replies won't use memories.
+- When you DO use one, be brief and casual — like an older sister who just happened to remember.
+- After using a memory, add: <!--USED_MEMORY:content_snippet-->
+` : ""}
+MEMORY CAPTURE: If something genuinely memorable happens in this message — a funny moment, a self-given nickname, a strong personality reveal, a quotable line, or something said ABOUT YOU (Sheli) — add a hidden block at the END of your reply:
+<!--MEMORY:{"about":"+972XXXXXXXXX","type":"moment|personality|preference|nickname|quote|about_sheli","content":"short description in Hebrew"}-->
+Rules: Max 1 per message. Only capture distinctive moments — NOT routine tasks, shopping, or scheduling. NEVER capture fights, punishments, or embarrassing failures.
+ABOUT SHELI: When someone says something about you — jokes ("Iranian bot"), compliments ("you're the best"), challenges ("you're not real"), opinions ("she's human pretending") — ALWAYS capture as type "about_sheli" with "about" set to the sender's phone. Use these later with self-aware humor.
+
+Reply with ONLY the message text — no JSON, no formatting, no quotes (except hidden REMINDER/MEMORY/USED_MEMORY blocks at the end).`;
 }
 
 export async function generateReply(
