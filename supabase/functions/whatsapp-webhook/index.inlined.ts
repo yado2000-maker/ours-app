@@ -2218,7 +2218,8 @@ Your visible reply here
 ACTIONS array: each object has "type" and relevant fields:
 - shopping: {"type":"shopping","items":["חלב","ביצים"]}
 - task: {"type":"task","text":"לפרוק מדיח"}
-- reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00"}
+- reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
+  IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00). If user says "ב-5" → today 17:00 IST. If "בעוד שעה" → compute from current time. If time already passed today → use tomorrow. The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - name_correction: {"type":"name_correction","name":"ירון"}
@@ -2230,6 +2231,87 @@ If no action taken, use empty array: <!--ACTIONS:[]-->
 Always include TRIED with the full cumulative list.`;
 
 // (Removed: generateOnboardingReply — replaced by inline Sonnet call in handleDirectMessage)
+
+// Auto-create a personal household for 1:1 users on first actionable message
+async function ensureOnboardingHousehold(
+  phone: string,
+  convo: Record<string, unknown>,
+  userName: string
+): Promise<string> {
+  if (convo.household_id) return convo.household_id as string;
+
+  const hhId = "hh_" + uid4() + uid4();
+  const displayName = userName || "הבית שלי";
+
+  const { error: hhErr } = await supabase.from("households_v2").insert({
+    id: hhId,
+    name: displayName,
+  });
+  if (hhErr) console.error("[1:1] Failed to create household:", hhErr);
+
+  const { error: memErr } = await supabase.from("household_members").insert({
+    household_id: hhId,
+    display_name: userName || "אני",
+    role: "founder",
+  });
+  if (memErr) console.error("[1:1] Failed to create member:", memErr);
+
+  // Link phone to household for future group-join auto-detection
+  await supabase.from("whatsapp_member_mapping").upsert({
+    phone_number: phone,
+    household_id: hhId,
+    member_name: userName || null,
+  }, { onConflict: "phone_number" });
+
+  await supabase.from("onboarding_conversations").update({
+    household_id: hhId,
+  }).eq("phone", phone);
+
+  console.log(`[1:1] Created personal household ${hhId} for ${phone} (${displayName})`);
+  return hhId;
+}
+
+// Parse a time string like "17:00", "ב-5", "22:45" → ISO send_at timestamp
+function parseReminderTime(timeStr: string): string | null {
+  if (!timeStr) return null;
+
+  const now = new Date();
+  const israelNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+
+  // Try ISO format first (Sonnet may output full ISO)
+  if (timeStr.includes("T") && timeStr.includes(":")) {
+    const parsed = new Date(timeStr);
+    if (!isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+
+  // Extract hours and minutes from various formats
+  const timeMatch = timeStr.match(/(\d{1,2})[:\u05D1\-]?(\d{2})?/);
+  if (!timeMatch) return null;
+
+  let hours = parseInt(timeMatch[1], 10);
+  const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+
+  // Assume PM for single-digit hours 1-6 (Israeli convention: "ב-5" = 17:00)
+  if (hours >= 1 && hours <= 6 && !timeStr.includes("בוקר") && !timeStr.includes("לילה")) {
+    hours += 12;
+  }
+
+  // Build target date in Israel timezone
+  const target = new Date(israelNow);
+  target.setHours(hours, minutes, 0, 0);
+
+  // If time already passed today → tomorrow
+  if (target <= israelNow) {
+    target.setDate(target.getDate() + 1);
+  }
+
+  // Convert back to UTC by computing offset
+  const utcTarget = new Date(target.getTime());
+  // Israel is UTC+3 (or UTC+2 in winter, but April is summer time)
+  utcTarget.setHours(utcTarget.getHours() - 3);
+
+  return utcTarget.toISOString();
+}
 
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
   const phone = message.senderPhone;
@@ -2456,22 +2538,113 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
       try { newTried = JSON.parse(triedMatch[1]); } catch {}
     }
 
-    // Process actions → add to demo_items
+    // Process actions → execute REAL DB operations (not just demo_items)
     const newItems = [...existingItems];
+    let hhId: string | null = null;
+
+    // Name correction is handled separately (no household needed)
     for (const action of actions) {
-      if (action.type === "shopping" && action.items) {
-        for (const item of action.items) {
-          newItems.push({ type: "shopping", text: item });
-        }
-      } else if (action.type === "name_correction" && action.name) {
-        // Update stored name + re-detect gender from new name
+      if (action.type === "name_correction" && action.name) {
         const newGender = detectGender(action.name);
         const updatedContext = { ...(convo.context || {}), name: action.name, gender: newGender };
         await supabase.from("onboarding_conversations").update({
           context: updatedContext,
         }).eq("phone", phone);
-      } else if (action.type) {
-        newItems.push({ type: action.type, text: action.text || action.title || "" });
+      }
+    }
+
+    // For all other actions, ensure household exists and execute for real
+    const realActions = actions.filter((a: any) => a.type && a.type !== "name_correction");
+    if (realActions.length > 0) {
+      hhId = await ensureOnboardingHousehold(phone, convo as Record<string, unknown>, userName);
+
+      // Map 1:1 Sonnet format → executeActions format
+      const mappedActions: any[] = [];
+      for (const action of realActions) {
+        switch (action.type) {
+          case "shopping":
+            if (action.items && Array.isArray(action.items)) {
+              mappedActions.push({
+                type: "add_shopping",
+                data: { items: action.items.map((item: string) => ({ name: item, qty: "1", category: "אחר" })) },
+              });
+              for (const item of action.items) {
+                newItems.push({ type: "shopping", text: item });
+              }
+            }
+            break;
+          case "task":
+            mappedActions.push({
+              type: "add_task",
+              data: { title: action.text || "", assigned_to: null },
+            });
+            newItems.push({ type: "task", text: action.text || "" });
+            break;
+          case "event":
+            mappedActions.push({
+              type: "add_event",
+              data: {
+                title: action.title || action.text || "",
+                assigned_to: null,
+                scheduled_for: action.date
+                  ? `${action.date}${action.time ? "T" + action.time + ":00+03:00" : "T18:00:00+03:00"}`
+                  : new Date().toISOString(),
+              },
+            });
+            newItems.push({ type: "event", text: action.title || action.text || "" });
+            break;
+          case "rotation":
+            if (action.members && Array.isArray(action.members)) {
+              mappedActions.push({
+                type: "add_task",
+                data: {
+                  rotation: {
+                    title: action.title || "",
+                    type: action.rotationType || "duty",
+                    members: action.members,
+                  },
+                },
+              });
+              newItems.push({ type: "rotation", text: action.title || "" });
+            }
+            break;
+          case "reminder": {
+            // Parse time → INSERT into reminder_queue directly
+            const sendAt = action.send_at
+              ? new Date(action.send_at).toISOString()
+              : parseReminderTime(action.time || "");
+            if (sendAt) {
+              const { error: remErr } = await supabase.from("reminder_queue").insert({
+                household_id: hhId,
+                group_id: phone + "@s.whatsapp.net",
+                message_text: action.text || "",
+                send_at: sendAt,
+                sent: false,
+                reminder_type: "user",
+                created_by_phone: phone,
+                created_by_name: userName,
+              });
+              if (remErr) console.error("[1:1 Reminder] Insert error:", remErr);
+              else console.log(`[1:1 Reminder] Created for ${sendAt}: "${action.text}"`);
+            } else {
+              console.warn(`[1:1 Reminder] Could not parse time from: ${JSON.stringify(action)}`);
+            }
+            newItems.push({ type: "reminder", text: action.text || "" });
+            break;
+          }
+          default:
+            newItems.push({ type: action.type, text: action.text || action.title || "" });
+        }
+      }
+
+      // Execute mapped actions (tasks, shopping, events, rotations) via the real executor
+      if (mappedActions.length > 0) {
+        try {
+          const { summary } = await executeActions(hhId, mappedActions, userName || senderName);
+          console.log(`[1:1] Executed ${summary.length} real actions for ${phone}:`, summary);
+        } catch (err) {
+          console.error("[1:1] executeActions error:", err);
+        }
       }
     }
 
