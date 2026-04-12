@@ -735,8 +735,8 @@ export default function MenuPanel({
                 <a
                   href={`https://wa.me/?text=${encodeURIComponent(
                     isHe
-                      ? "\u05D4\u05D9\u05D9! \u05EA\u05E0\u05E1\u05D5 \u05D0\u05EA \u05E9\u05DC\u05D9 \u2014 \u05E2\u05D5\u05D6\u05E8\u05EA \u05D7\u05DB\u05DE\u05D4 \u05DC\u05DE\u05E9\u05E4\u05D7\u05D4 \u05D1\u05D5\u05D5\u05D8\u05E1\u05D0\u05E4 \uD83C\uDFE0\n" + referralLink
-                      : "Hey! Try Sheli \u2014 a smart family helper on WhatsApp \uD83C\uDFE0\n" + referralLink
+                      ? "\u05D4\u05D9\u05D9! \u05EA\u05E0\u05E1\u05D5 \u05D0\u05EA \u05E9\u05DC\u05D9, \u05E2\u05D5\u05D6\u05E8\u05EA \u05D7\u05DB\u05DE\u05D4 \u05D1\u05D5\u05D5\u05D8\u05E1\u05D0\u05E4 \uD83C\uDFE0\n" + referralLink
+                      : "Hey! Try Sheli, a smart helper on WhatsApp \uD83C\uDFE0\n" + referralLink
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"

@@ -69,7 +69,7 @@ const en = {
   waPhone: "+972 55-517-5553",
   // Settings WhatsApp
   waSettingsTitle: "WhatsApp",
-  waSettingsSub: "Add Sheli to your home or family WhatsApp group",
+  waSettingsSub: "Add Sheli to your WhatsApp group",
   waSettingsBtn: "Add to group",
   // Menu panel
   menuProfile: "Profile",
@@ -84,7 +84,7 @@ const en = {
   menuAddMember: "Add member",
   menuAddMemberPlaceholder: "Name...",
   menuInviteDesc: "Send the link to family members \u2014 they\u2019ll join your household in the app",
-  menuWaDesc: "Save this number and add Sheli to your home or family WhatsApp group",
+  menuWaDesc: "Save this number and add Sheli to your WhatsApp group",
   menuCopyLink: "Copy link",
   menuLinkCopied: "Copied!",
   menuShareWa: "Share on WhatsApp",
@@ -100,11 +100,11 @@ const en = {
   menuHhName: "Home name",
   menuMembers: "Members",
   // Referral
-  menuReferral: "Family brings Family",
-  menuReferralDesc: "Invite another family to Sheli \u2014 both families get 1 free month of Premium!",
-  menuReferralShare: "Send to a family",
+  menuReferral: "Friends bring Friends",
+  menuReferralDesc: "Invite someone to Sheli, both of you get 1 free month of Premium!",
+  menuReferralShare: "Send to friends",
   menuReferralCopy: "Copy",
   menuReferralCopied: "Copied!",
-  menuReferralStats: (sent, completed) => `Invited: ${sent} families \u00B7 ${completed} activated`,
+  menuReferralStats: (sent, completed) => `Invited: ${sent} people \u00B7 ${completed} activated`,
 };
 export default en;

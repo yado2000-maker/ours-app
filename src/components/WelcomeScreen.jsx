@@ -47,7 +47,7 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           fontWeight: 300,
           marginBottom: 48,
           letterSpacing: "0.03em",
-        }}>Your home & family's smart helper</p>
+        }}>Your smart helper on WhatsApp</p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, width: "100%", maxWidth: 300 }}>
           {[
@@ -90,11 +90,11 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
   ];
 
   const features = isHe ? [
-    { icon: <ShoppingFeatureIcon size={22} />, title: "רשימת קניות חכמה", sub: "אמרו 'חלב' בקבוצה — מוסיפה לרשימה בשנייה" },
+    { icon: <ShoppingFeatureIcon size={22} />, title: "רשימת קניות חכמה", sub: "כתבו 'חלב' לשלי, והיא מוסיפה לרשימה בשנייה" },
     { icon: <CalendarFeatureIcon size={22} />, title: "הלו״ז שלנו", sub: "חוגים, הסעות, אירועים — מסודרים מעצמם" },
     { icon: <ChoresFeatureIcon size={22} />, title: "חלוקת מטלות", sub: "זוכרת מי צריך לעשות מה ומתי" },
   ] : [
-    { icon: <ShoppingFeatureIcon size={22} />, title: "Smart shopping list", sub: "Say 'milk' in the group — on the list instantly" },
+    { icon: <ShoppingFeatureIcon size={22} />, title: "Smart shopping list", sub: "Text 'milk' to Sheli, on the list instantly" },
     { icon: <CalendarFeatureIcon size={22} />, title: "Our schedule", sub: "Classes, pickups, events — organized automatically" },
     { icon: <ChoresFeatureIcon size={22} />, title: "Task sharing", sub: "Remembers who does what and when" },
   ];
@@ -155,8 +155,8 @@ export default function WelcomeScreen({ onGetStarted, onSignIn }) {
           marginBottom: 16,
         }}>
           {isHe
-            ? "העוזרת החכמה של הבית והמשפחה"
-            : "Your home & family's smart helper"}
+            ? "העוזרת החכמה שלכם בווטסאפ"
+            : "Your smart helper on WhatsApp"}
         </p>
 
         {/* Compact WhatsApp mock — just 2 messages */}

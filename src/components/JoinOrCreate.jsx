@@ -78,7 +78,7 @@ export default function JoinOrCreate({
       if (hhId) {
         await onJoinHousehold(hhId);
       } else {
-        setError(isHe ? "לא מצאנו משפחה עם המספר הזה. נסו מספר אחר או צרו בית חדש" : "No family found with this number. Try another or create a new home");
+        setError(isHe ? "לא מצאנו בית עם המספר הזה. נסו מספר אחר או צרו בית חדש" : "No home found with this number. Try another or create a new one");
       }
     } catch (e) {
       setError(isHe ? "שגיאה — נסו שוב" : "Error — try again");
@@ -367,7 +367,7 @@ export default function JoinOrCreate({
           {isHe ? "כבר משתמשים בשלי בווטסאפ?" : "Already using Sheli on WhatsApp?"}
         </p>
         <p style={{fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4, textAlign: isHe ? "right" : "left"}}>
-          {isHe ? "הכניסו את מספר הטלפון שלכם ונמצא את המשפחה" : "Enter your phone number and we'll find your family"}
+          {isHe ? "הכניסו את מספר הטלפון שלכם ונמצא את הבית שלכם" : "Enter your phone number and we'll find your home"}
         </p>
         <div style={s.codeRow}>
           <input

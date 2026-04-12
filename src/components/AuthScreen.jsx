@@ -492,7 +492,7 @@ export default function AuthScreen({ onBack, lang = "en" }) {
         <div style={{ fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 36, letterSpacing: "0.04em",
             background: "linear-gradient(135deg, #E8725C, #D4507A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
             filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.08))", marginBottom: 4 }}>sheli</div>
-        <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: isHe ? 400 : 300, marginBottom: 36, letterSpacing: isHe ? 0 : "0.03em" }}>{isHe ? "העוזרת החכמה של הבית והמשפחה" : "Your home & family's smart helper"}</p>
+        <p style={{ fontSize: 13, color: "var(--muted)", fontWeight: isHe ? 400 : 300, marginBottom: 36, letterSpacing: isHe ? 0 : "0.03em" }}>{isHe ? "העוזרת החכמה שלכם בווטסאפ" : "Your smart helper on WhatsApp"}</p>
 
         <div style={{ width: "100%", maxWidth: 340, display: "flex", flexDirection: "column", gap: 14 }}>
           {/* Primary: WhatsApp OTP */}
