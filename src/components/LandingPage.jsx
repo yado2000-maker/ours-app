@@ -168,8 +168,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                     </span>
                     <span className="wa-voice-content">
                       <span className="wa-voice-row">
-                        <span className="wa-voice-play">\u25B6</span>
-                        <span className="wa-voice-dot">\u25CF</span>
+                        <span className="wa-voice-play">{"\u25B6"}</span>
+                        <span className="wa-voice-dot">{"\u25CF"}</span>
                         <span className="wa-voice-bars">
                           <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
                         </span>
