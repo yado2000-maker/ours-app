@@ -5,7 +5,7 @@ description: Write marketing copy, taglines, CTAs, landing page text, UI microco
 
 # Sheli Copywriting Guide
 
-You are writing copy for **sheli** (שלי) — a WhatsApp-based family coordination bot for the Israeli market. The brand personality is a **warm, organized older sister**: capable, slightly cheeky, never robotic, never corporate.
+You are writing copy for **sheli** (שלי) — a smart WhatsApp helper for personal and family use, targeting the Israeli market. The brand personality is a **warm, organized older sister**: capable, slightly cheeky, never robotic, never corporate.
 
 ## Brand Voice
 
@@ -49,7 +49,7 @@ You are writing copy for **sheli** (שלי) — a WhatsApp-based family coordina
 
 1. **Punchy, not startup-speak:**
    - "Home life, sorted" not "Revolutionizing household management"
-   - "Your family's smart assistant" not "An AI-powered family coordination platform"
+   - "Your smart helper on WhatsApp" not "An AI-powered family coordination platform"
    - "Just say it in the group" not "Leverage natural language processing"
 
 2. **No AI jargon:** Never use "AI-powered", "leveraging", "cutting-edge", "next-generation", "seamless", "synergy". If you must mention AI, say "smart" — that's it.
@@ -118,7 +118,7 @@ When asked to write copy:
 ## Anti-Patterns (never do these)
 
 - "Smart AI for your life together" — vague, AI-forward, could be any product
-- "Revolutionize your family coordination" — corporate, not human
+- "Revolutionize your household coordination" — corporate, not human
 - "הפלטפורמה החכמה לניהול משק הבית" — bureaucratic Hebrew nobody speaks
 - "Powered by AI" anywhere user-facing — we're hiding the tech, showing the value
 - Mixing Hebrew and English in the same sentence (except brand name "sheli")

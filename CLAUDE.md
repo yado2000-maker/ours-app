@@ -1,4 +1,4 @@
-# sheli (שלי) — Your Home & Family's Smart Helper
+# sheli (שלי) — Your Smart Helper on WhatsApp
 
 ## Architecture
 - **Frontend:** React 19 + Vite 8, deployed on Vercel (sheli.ai)
@@ -89,7 +89,7 @@
 - **Wordmark:** lowercase "sheli" in Nunito 800, coral→pink gradient (`#E8725C → #D4507A`) with drop shadow
 - **Icon:** `/public/icons/icon.svg` — gradient rounded square with white "sheli" wordmark
 - **Fonts:** Nunito (EN body + wordmark), Heebo (HE body). Cormorant Garamond removed.
-- **Taglines:** HE "העוזרת החכמה של הבית והמשפחה" / EN "Your home & family's smart helper"
+- **Taglines:** HE "העוזרת החכמה שלכם בווטסאפ" / EN "Your smart helper on WhatsApp"
 - **Dark theme:** Cool teal-gray (`#141A1A` bg, `#1C2424` cards, `#2A3636` borders) — not warm brown
 - **Design doc:** `docs/plans/2026-04-06-design-system.md`
 

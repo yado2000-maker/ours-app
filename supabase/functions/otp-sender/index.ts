@@ -41,7 +41,7 @@ function otpSmsMessage(otp: string): string {
 }
 
 const BOT_PHONE = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
-const BRIDGE_MESSAGE = `✅ התחברת בהצלחה לשלי!\nרוצה שאעזור לכל המשפחה? הוסיפו אותי לקבוצת הוואטסאפ שלכם 👇\nhttps://wa.me/${BOT_PHONE}`;
+const BRIDGE_MESSAGE = `✅ התחברת בהצלחה לשלי!\nרוצים שאעזור גם לשאר הבית? הוסיפו אותי לקבוצת הווטסאפ שלכם 👇\nhttps://wa.me/${BOT_PHONE}`;
 
 // ─── Phone Number Normalization ───
 
