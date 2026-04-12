@@ -596,9 +596,19 @@ ${ctx.familyPatterns ? `FAMILY PATTERNS (learned for this household):\n${ctx.fam
 - "קרם לחות" = moisturizer (ONE item in טיפוח)
 - Rule: if two+ words form a single product name, keep them together
 
+STORE-SPECIFIC CATEGORIES:
+When the user mentions a specific store (e.g., "מאדונית התבלינים קפה ומלח אפור", "צריך מסופר יודה X", "מהמכולת X"), use the STORE NAME as the category for those items.
+- "מאדונית התבלינים, קפה ומלח אפור" → category: "אדונית התבלינים" for both items
+- "מסופר פארם, שמפו וסבון" → category: "סופר פארם" for both items
+- "מהמכולת, חלב ולחם" → category: "מכולת" for both items
+- Strip the preposition (מ/מה/ב) from the store name. Keep the store name clean.
+- If a known store type is organic/specialty (אדונית התבלינים, ניצת הדובדבן, תבלינים ועוד), you can use "🌿 חנות אורגנית" or the store name directly — either works.
+- Items without a store context: use standard categories (פירות וירקות, מוצרי חלב, etc.)
+
 SHOPPING ITEM CLEANUP — strip these from item names:
 - Greetings: "היי שלי", "שלום", "בוקר טוב" → NOT items, ignore them
 - Preamble phrases: "אני צריך/ה לקנות X", "צריך לקנות X", "תוסיפי X", "תכניסי X" → extract only X
+- Store references: "מ[חנות]" → extract store as category, extract items separately
 - "תודה", "בבקשה", "please" → NOT items, ignore
 - Voice transcription artifacts: filler words, repeated phrases → clean up
 - Each item name should be the PRODUCT ONLY — "חלב" not "אני צריכה לקנות חלב"
@@ -1879,6 +1889,30 @@ const NAME_MAP: Record<string, string> = {
   yuval: "יובל", eyal: "אייל", ofek: "אופק", ohev: "אוהב",
   oriane: "אוריין", orian: "אוריין", lin: "לין", gur: "גור",
   liona: "ליאונה", maayan: "מעיין", amor: "אמור",
+  shanee: "שני", shani: "שני", shachar: "שחר", sahar: "סהר",
+  saar: "סער", "sa'ar": "סער", chen: "חן", lee: "לי", li: "לי", lia: "ליאה",
+  noy: "נוי", ron: "רון", ran: "רן", alon: "אלון", eran: "ערן",
+  oren: "אורן", noga: "נוגה", shay: "שי", shai: "שי",
+  rotem: "רותם", liron: "לירון", lihi: "ליהי", sapir: "ספיר",
+  inbar: "ענבר", hadar: "הדר", agam: "אגם", alma: "אלמה",
+  itay: "איתי", itai: "איתי", ilan: "אילן", amir: "אמיר",
+  tomer: "תומר", dor: "דור", guy: "גיא", matan: "מתן",
+};
+
+// Names where English spelling maps to multiple Hebrew spellings — Sheli should ask
+const AMBIGUOUS_NAMES: Record<string, string[]> = {
+  maya: ["מאיה", "מיה"],
+  mia: ["מיה", "מאיה"],
+  noa: ["נועה", "נעה"],
+  noah: ["נועה", "נעה"],
+  sahar: ["סהר", "סער"],
+  saar: ["סער", "סהר"],
+  "sa'ar": ["סער", "סהר"],
+  shanee: ["שני", "שָׁנִי"],
+  shani: ["שני", "שָׁנִי"],
+  lee: ["לי", "ליא"],
+  li: ["לי", "ליא"],
+  lia: ["ליאה", "ליה"],
 };
 
 function hebrewizeName(raw: string): string {
@@ -2051,6 +2085,13 @@ function detectGenderFromText(text: string): "male" | "female" | null {
   return null;
 }
 
+function isAmbiguousName(senderName?: string): string[] | null {
+  if (!senderName) return null;
+  const cleaned = senderName.replace(/[^\u0590-\u05FF\u0041-\u007A\u0061-\u007A\u0030-\u0039\s\-']/g, "").trim();
+  const first = cleaned.split(" ")[0].trim().toLowerCase();
+  return AMBIGUOUS_NAMES[first] || null;
+}
+
 function getOnboardingWelcome(senderName?: string): string {
   const name = hebrewizeName(senderName || "");
   const gender = name ? detectGender(name) : null;
@@ -2202,13 +2243,13 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Never repeat same phrasing. Every reply sounds fresh and different.
 
 CAPABILITIES YOU CAN DEMONSTRATE:
-- Shopping lists: user says items → you categorize with emoji headers (🥛 מוצרי חלב, 🍞 לחם, 🥬 ירקות ופירות, 🧴 ניקיון, 🥫 מזווה, 🍺 משקאות, 🥩 בשר ודגים, 🛒 כללי)
+- Shopping lists: user says items → you categorize with emoji headers (🥛 מוצרי חלב, 🍞 לחם, 🥬 ירקות ופירות, 🧴 ניקיון, 🥫 מזווה, 🍺 משקאות, 🥩 בשר ודגים, 🛒 כללי). When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
 - Tasks: user says chore → you say "רשמתי! ✅" with task text
 - Rotations/turns: after the FIRST task about chores, offer ONCE: "אם יש ילדים בבית — אני מעולה בתורות 😉". Do NOT offer rotations again if "rotation" already appears in TRIED. One offer is enough.
   - If user engages: ask what rotation + who participates → create it
 - Reminders: user says time+action → "אזכיר!" with time. When giving examples, use universal tasks like "לאסוף ילדים ב-5" or "לשלם חשבון" — NEVER food examples (meat/cooking) which may alienate vegetarians.
 - Events: user says date+event → "שמרתי ביומן!" with date/time
-- Voice messages: user can send a voice note (up to 30s) and you understand it! This is a DIFFERENTIATOR — mention it early (first 1-2 messages). Say something like "אגב, אני גם מבינה הודעות קוליות — אם נוח לדבר במקום לכתוב 🎤"
+- Voice messages: user can send a voice note (up to 30s) and you understand it! Mention this ONLY on the designated hint message (every 3rd message). Do NOT force it into messages 1-2.
 
 FORMATTING (WhatsApp RTL):
 - NEVER use bullet characters (•, ☐, -, *) for lists — they stretch left in Hebrew RTL and look broken.
@@ -2224,7 +2265,7 @@ RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
 2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only your household sees it.
 3. GROUP MENTIONS: The system handles group suggestions separately. Do NOT bring up groups yourself. Only mention groups if the user explicitly asks about groups, shared lists, or mentions roommates/partner/family. If the user mentions living with others, you may say something like "אפשר להוסיף אותי לקבוצה ואני אתאם לכולם" — but only as a natural response to THEIR mention, never proactively.
-4. Mention ONE untried capability per reply, MAX. Only if it fits naturally. If it doesn't fit — don't.
+4. Capability hints: mention ONE untried capability ONLY every 3rd message (check "Message #N" — hint only when N is divisible by 3). On other messages, just respond to what the user said. NO hints. This prevents feeling pushy. When you do hint, weave it naturally into the reply — never a separate "אגב, אני גם יודעת..." sentence on its own.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
 6. NEVER ask personal questions (kids' names, ages, family structure). Learn ONLY from what they volunteer.
 7. If user corrects their name ("קוראים לי X", "שמי X") → apologize warmly ("סורי! 🙈"), use correct name going forward.
@@ -2498,6 +2539,10 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     .limit(3);
   const recentReplies = (recentMsgs || []).map((m: any) => m.message_text).filter(Boolean);
 
+  // Check for ambiguous name (English spelling → multiple Hebrew options)
+  const ambiguousOptions = isAmbiguousName(message.senderName || "");
+  const nameAskedAlready = convo.context?.name_spelling_asked === true;
+
   // Build context for Sonnet
   const contextBlock = `
 CONVERSATION STATE:
@@ -2509,6 +2554,7 @@ CONVERSATION STATE:
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
+${ambiguousOptions && !nameAskedAlready ? `\nNAME SPELLING: The user's name "${userName}" could be spelled ${ambiguousOptions.join(" or ")} in Hebrew. In your FIRST reply, ask naturally which spelling they prefer. Example: "אגב, ${ambiguousOptions[0]} או ${ambiguousOptions[1]}? אני אוהבת לדייק 😊". After asking, include a name_correction action with their answer. This is a ONE-TIME question — do not ask again.` : ""}
 ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
 ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — vary your style and content):\n${recentReplies.map((r: string) => `- "${r.slice(0, 120)}"`).join("\n")}` : ""}`;
 
@@ -2572,11 +2618,17 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
     for (const action of actions) {
       if (action.type === "name_correction" && action.name) {
         const newGender = detectGender(action.name);
-        const updatedContext = { ...(convo.context || {}), name: action.name, gender: newGender };
+        const updatedContext = { ...(convo.context || {}), name: action.name, gender: newGender, name_spelling_asked: true };
         await supabase.from("onboarding_conversations").update({
           context: updatedContext,
         }).eq("phone", phone);
       }
+    }
+
+    // If we showed the ambiguous name prompt, mark it as asked even if user didn't answer yet
+    if (ambiguousOptions && !nameAskedAlready) {
+      const ctx = { ...(convo.context || {}), name_spelling_asked: true };
+      await supabase.from("onboarding_conversations").update({ context: ctx }).eq("phone", phone);
     }
 
     // For all other actions, ensure household exists and execute for real
