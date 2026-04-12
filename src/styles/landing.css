@@ -170,19 +170,47 @@
 
 /* ─── Voice message bubble ─── */
 
-.wa-voice-sender {
-  font-size: 11px;
-  font-weight: 600;
-  color: #53bdeb;
-  display: block;
-  margin-bottom: 2px;
-}
-
 .wa-voice {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 140px;
+}
+
+.wa-voice-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #2a3942;
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.wa-voice-avatar-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.wa-voice-mic-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #25D366;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wa-voice-mic-badge svg {
+  width: 9px;
+  height: 9px;
 }
 
 .wa-voice-play {

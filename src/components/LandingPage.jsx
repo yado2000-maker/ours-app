@@ -29,7 +29,7 @@ const CONTENT = {
       { text: "\u{1F6D2} הוספתי לרשימה!", type: "bot" },
       { text: "תזכירי לי מחר לשלם חשבון חשמל", type: "user" },
       { text: "\u{1F514} בשמחה! אזכיר לך מחר ב-9 בבוקר", type: "bot" },
-      { type: "voice", duration: "0:12", sender: "אני" },
+      { type: "voice", duration: "0:12" },
       { text: "\u{1F4C5} הוספתי ליומן: ארוחת ערב אצל סבא וסבתא ביום שישי", type: "bot" },
     ],
     cta: "שלחו הודעה לשלי",
@@ -76,7 +76,7 @@ const CONTENT = {
       { text: "\u{1F6D2} Added to the list!", type: "bot" },
       { text: "Remind me to pay the electric bill tomorrow", type: "user" },
       { text: "\u{1F514} Sure! I'll remind you tomorrow at 9am", type: "bot" },
-      { type: "voice", duration: "0:12", sender: "Me" },
+      { type: "voice", duration: "0:12" },
       { text: "\u{1F4C5} Added to calendar: dinner at grandma's on Friday at 7pm", type: "bot" },
     ],
     cta: "Message Sheli",
@@ -159,16 +159,19 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                 style={{ animationDelay: `${i * 0.15}s`, direction: c.dir }}
               >
                 {msg.type === "voice" ? (
-                  <>
-                    {msg.sender && <span className="wa-voice-sender">{msg.sender}</span>}
-                    <span className="wa-voice">
-                      <span className="wa-voice-play">\u25B6</span>
-                      <span className="wa-voice-bars">
-                        <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
+                  <span className="wa-voice">
+                    <span className="wa-voice-avatar">
+                      <svg className="wa-voice-avatar-icon" viewBox="0 0 24 24" fill="#8696a0"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                      <span className="wa-voice-mic-badge">
+                        <svg viewBox="0 0 12 12" fill="#fff"><path d="M6 7.5A1.5 1.5 0 0 0 7.5 6V3a1.5 1.5 0 1 0-3 0v3A1.5 1.5 0 0 0 6 7.5zm2.5-1.5A2.5 2.5 0 0 1 6 8.5 2.5 2.5 0 0 1 3.5 6H3a3 3 0 0 0 2.5 2.96V10h1V8.96A3 3 0 0 0 9 6h-.5z"/></svg>
                       </span>
-                      <span className="wa-voice-dur">{msg.duration}</span>
                     </span>
-                  </>
+                    <span className="wa-voice-play">\u25B6</span>
+                    <span className="wa-voice-bars">
+                      <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
+                    </span>
+                    <span className="wa-voice-dur">{msg.duration}</span>
+                  </span>
                 ) : msg.text}
                 <span className="wa-bubble-time">
                   {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
