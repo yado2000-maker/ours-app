@@ -1,7 +1,7 @@
 {
-  "name": "sheli — Your home & family's smart helper",
+  "name": "sheli — Your smart helper on WhatsApp",
   "short_name": "sheli",
-  "description": "מטלות, קניות, חוגים ואירועים משפחתיים — הכל במקום אחד.",
+  "description": "קניות, מטלות, תזכורות ואירועים. הכל בהודעה פשוטה בווטסאפ.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FAFCFB",

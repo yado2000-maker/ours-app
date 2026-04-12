@@ -802,7 +802,7 @@ Use names naturally. Give credit when tasks are done.
 Occasional dry humor when natural: "חלב? שלישי השבוע".
 Emoji when natural — like a 30-year-old Israeli woman would.
 Never nag. Never over-explain. Never sound like a chatbot.`
-    : `Respond in English. Warm and direct, like a helpful family member.
+    : `Respond in English. Warm and direct, like a helpful friend.
 Keep responses SHORT — 1-2 lines max.`;
 
   const memberNames = ctx.members.join(", ");
@@ -962,11 +962,11 @@ ${isHe ? `Example vibes (create your OWN each time — never copy these verbatim
   "אוי, את זה אני לא יודעת 🤷‍♀️ אבל אם צריך לזכור משהו — אני פה!"
   "חח הלוואי! מטלות, קניות ואירועים — שם אני גאונה 😄"
   "סורי, לא התחום שלי 😅 יש משהו בבית שצריך לסדר?"` : `Example vibes (create your OWN each time — never copy these verbatim):
-  "Ha, I wish I knew! I'm great at tasks, shopping lists, and family events though 😄"
+  "Ha, I wish I knew! I'm great at tasks, shopping lists, and events though 😄"
   "That's outside my wheelhouse 🤷‍♀️ But need to add something to the list?"
   "Sorry, not my area! I'm your household brain — chores, shopping, and scheduling."`}
 
-For info_request: say you don't have that info and suggest asking a family member.
+For info_request: say you don't have that info and suggest asking someone at home.
 
 APOLOGY STYLE — MANDATORY:
 When you make a mistake, misunderstand, or need to correct yourself:
@@ -979,8 +979,8 @@ ${isHe ? `- פרטיות: "אני לא שומרת תמונות או וידאו. 
 - למידה: "אני לומדת את הסגנון שלכם! כינויים, מוצרים, שעות — ככל שתשתמשו יותר, אבין אתכם טוב יותר."
 - מי רואה: "רק בני הבית שלכם. כל בית מנותק לחלוטין."
 - להפסיק: "פשוט תוציאו אותי מהקבוצה. הכל נמחק אוטומטית, בלי התחייבות."` : `- Privacy: "I don't store photos or videos. I can listen to short voice messages — record your shopping list or tasks just like a text. I don't save the recording, only its content. Everything is auto-deleted after 30 days."
-- Learning: "I learn your family's style! Nicknames, products, schedules — the more you use me, the better I understand you."
-- Who sees data: "Only your household members. Each family is completely isolated."
+- Learning: "I learn your style! Nicknames, products, schedules, the more you use me, the better I understand you."
+- Who sees data: "Only your household members. Each home is completely isolated."
 - Stopping: "Just remove me from the group. All data is auto-deleted, no commitment."`}
 Paraphrase naturally — never repeat the exact same wording twice.
 
@@ -1243,7 +1243,7 @@ function buildSonnetClassifierPrompt(ctx: HouseholdContext): string {
     ? `ALWAYS respond in Hebrew. Warm and direct, like a helpful family member.
 Use plural imperative: "הוספתי", "סימנתי", "עדכנתי" — not singular. For FUTURE reminders say "אזכיר" (I will remind), not "הזכרתי" (I reminded).
 Keep responses SHORT — 1-2 lines max. No filler. This is WhatsApp, not email.`
-    : `Respond in English. Warm and direct, like a helpful family member.
+    : `Respond in English. Warm and direct, like a helpful friend.
 Keep responses SHORT — 1-2 lines max. This is WhatsApp, not email.`;
 
   const memberNames = ctx.members.map((m) => m.name).join(", ");
@@ -2109,22 +2109,22 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],
     topic: "capabilities",
-    keyFacts: "Shopping lists (say item name), tasks (assign to person+time), events (date+title), voice messages (up to 30s transcribed), reminders, rotations/turns for kids. All in the family WhatsApp group. Also web app at sheli.ai.",
+    keyFacts: "Shopping lists (say item name), tasks (assign to person+time), events (date+title), voice messages (up to 30s transcribed), reminders, rotations/turns. Works in 1:1 chat and groups. Also web app at sheli.ai.",
   },
   {
     patterns: [/בטיחות|פרטיות|privacy|secure|קוראת.*הודעות|מקשיבה|שומרת.*מידע|data|כמה.*בטוח|זה.*בטוח|האם.*בטוח/i],
     topic: "privacy",
-    keyFacts: "No photos/video stored. Voice transcribed then deleted. All data auto-deleted after 30 days. Only family sees data. No one outside, including our team.",
+    keyFacts: "No photos/video stored. Voice transcribed then deleted. All data auto-deleted after 30 days. Only your household sees data. No one outside, including our team.",
   },
   {
     patterns: [/לומדת|משתפר|improving|learn|חכמה יותר|מבינה יותר/i],
     topic: "learning",
-    keyFacts: "Learns family nicknames, product names, time expressions. Each correction makes her smarter for that family. Personalized over time.",
+    keyFacts: "Learns your nicknames, product names, time expressions. Each correction makes her smarter for your household. Personalized over time.",
   },
   {
     patterns: [/מי רואה|מי יכול לראות|who can see|visible|access.*data/i],
     topic: "data-access",
-    keyFacts: "Only household members. Each family completely isolated. No one including our team sees lists or events.",
+    keyFacts: "Only household members. Each home completely isolated. No one including our team sees lists or events.",
   },
   {
     patterns: [/למחוק.*פריט|למחוק.*רשימ|לסמן.*קנית|קניתי.*איך|איך.*מוחק|איך.*מסמנ|מחיקת.*פריט|למחוק.*מטל|למחוק.*משימ|delete.*item|remove.*item|mark.*bought|mark.*done/i],
@@ -2139,7 +2139,7 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/איך.*עובד|איך.*מתחיל|how.*work|how.*start/i],
     topic: "getting-started",
-    keyFacts: "Save number in contacts, add to family WhatsApp group, talk normally. Auto-detects shopping, tasks, events. 30 seconds setup.",
+    keyFacts: "Send a message to Sheli on WhatsApp, talk normally. Auto-detects shopping, tasks, events. Can also add to a group. 30 seconds setup.",
   },
   {
     patterns: [/קבוצ.*קיימ|existing.*group|כבר.*קבוצ/i],
@@ -2159,7 +2159,7 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/הפנ|referral|הזמנ.*חברים|חברים מביאים|invite.*friend|חודש.*חינם.*הזמנ/i],
     topic: "referral",
-    keyFacts: "Family brings Family program. Each referred family = both get free premium month. Link in the app menu.",
+    keyFacts: "Friends bring Friends program. Each referral = both get free premium month. Link in the app menu.",
   },
   {
     patterns: [/שמי|קוראים לי|השם שלי|לא ככה קוראים|not my name|אני לא/i],
@@ -2222,7 +2222,7 @@ FORMATTING (WhatsApp RTL):
 
 RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
-2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only family sees it.
+2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only your household sees it.
 3. GROUP MENTIONS: The system handles group suggestions separately. Do NOT bring up groups yourself. Only mention groups if the user explicitly asks about groups, shared lists, or mentions roommates/partner/family. If the user mentions living with others, you may say something like "אפשר להוסיף אותי לקבוצה ואני אתאם לכולם" — but only as a natural response to THEIR mention, never proactively.
 4. Mention ONE untried capability per reply, MAX. Only if it fits naturally. If it doesn't fit — don't.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
@@ -4796,7 +4796,7 @@ async function maybeCompleteReferral(householdId: string, usageCount: number) {
       const familyName = referredHh?.name || "בית חדש";
       await provider.sendMessage({
         groupId: referringConfig.group_id,
-        text: `🎉 ${familyName} הצטרפו בזכותכם! חודש פרימיום במתנה לשתי המשפחות!`,
+        text: `🎉 ${familyName} הצטרפו בזכותכם! חודש פרימיום במתנה לשניכם!`,
       });
     }
 
@@ -5333,7 +5333,7 @@ async function sendUpgradePrompt(groupId: string, householdId: string, language?
 
   const upgradeMsg = lang === "he"
     ? `היי ${getHouseholdNameCached(householdId) || "הבית"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה, 9.90 ₪ לחודש.\n🔗 ${paymentUrl}`
-    : `Hey ${getHouseholdNameCached(householdId) || "family"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping — $2.70/month.\n🔗 ${paymentUrl}`;
+    : `Hey ${getHouseholdNameCached(householdId) || "there"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping, $2.70/month.\n🔗 ${paymentUrl}`;
 
   await provider.sendMessage({ groupId, text: upgradeMsg });
 }
