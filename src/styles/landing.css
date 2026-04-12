@@ -168,6 +168,55 @@
   direction: ltr;
 }
 
+/* ─── Voice message bubble ─── */
+
+.wa-voice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.wa-voice-play {
+  color: #25D366;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.wa-voice-bars {
+  display: flex;
+  align-items: center;
+  gap: 1.5px;
+  flex: 1;
+  height: 20px;
+}
+
+.wa-voice-bars span {
+  width: 2.5px;
+  border-radius: 2px;
+  background: #8696a0;
+}
+
+.wa-voice-bars span:nth-child(1)  { height: 6px; }
+.wa-voice-bars span:nth-child(2)  { height: 12px; }
+.wa-voice-bars span:nth-child(3)  { height: 8px; }
+.wa-voice-bars span:nth-child(4)  { height: 16px; }
+.wa-voice-bars span:nth-child(5)  { height: 10px; }
+.wa-voice-bars span:nth-child(6)  { height: 18px; }
+.wa-voice-bars span:nth-child(7)  { height: 14px; }
+.wa-voice-bars span:nth-child(8)  { height: 8px; }
+.wa-voice-bars span:nth-child(9)  { height: 16px; }
+.wa-voice-bars span:nth-child(10) { height: 6px; }
+.wa-voice-bars span:nth-child(11) { height: 12px; }
+.wa-voice-bars span:nth-child(12) { height: 4px; }
+
+.wa-voice-dur {
+  font-size: 10px;
+  color: #8696a0;
+  flex-shrink: 0;
+  direction: ltr;
+}
+
 @keyframes msgIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

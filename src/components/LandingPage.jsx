@@ -29,6 +29,8 @@ const CONTENT = {
       { text: "\u{1F6D2} הוספתי לרשימה!", type: "bot" },
       { text: "תזכירי לי מחר לשלם חשבון חשמל", type: "user" },
       { text: "\u{1F514} בשמחה! אזכיר לך מחר ב-9 בבוקר", type: "bot" },
+      { type: "voice", duration: "0:04" },
+      { text: "\u{1F4C5} הוספתי ליומן: ארוחת ערב אצל סבא וסבתא ביום שישי", type: "bot" },
     ],
     cta: "שלחו הודעה לשלי",
     freeBadge: "חינם לגמרי · עד 30 פעולות בחודש · בלי כרטיס אשראי",
@@ -75,6 +77,8 @@ const CONTENT = {
       { text: "\u{1F6D2} Added to the list!", type: "bot" },
       { text: "Remind me to pay the electric bill tomorrow", type: "user" },
       { text: "\u{1F514} Sure! I'll remind you tomorrow at 9am", type: "bot" },
+      { type: "voice", duration: "0:04" },
+      { text: "\u{1F4C5} Added to calendar: dinner at grandma's on Friday at 7pm", type: "bot" },
     ],
     cta: "Message Sheli",
     freeBadge: "Completely free \u00B7 Up to 30 actions/month \u00B7 No credit card",
@@ -153,10 +157,18 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
             {c.mockMessages.map((msg, i) => (
               <div
                 key={i}
-                className={`wa-bubble wa-bubble-${msg.type}`}
+                className={`wa-bubble wa-bubble-${msg.type === "voice" ? "user" : msg.type}`}
                 style={{ animationDelay: `${i * 0.15}s`, direction: c.dir }}
               >
-                {msg.text}
+                {msg.type === "voice" ? (
+                  <span className="wa-voice">
+                    <span className="wa-voice-play">\u25B6</span>
+                    <span className="wa-voice-bars">
+                      <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
+                    </span>
+                    <span className="wa-voice-dur">{msg.duration}</span>
+                  </span>
+                ) : msg.text}
                 <span className="wa-bubble-time">
                   {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
                 </span>
