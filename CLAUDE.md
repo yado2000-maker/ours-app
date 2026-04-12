@@ -282,3 +282,4 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 
 ## TODO
 - **Whapi group removal webhook unreliable** — Ventura family removed Sheli from group but `handleBotRemoved` never fired (`bot_active` stayed true). Manually fixed. Investigate: does Whapi send `remove` events for bot removal? Check webhook payload format, event subtype matching, and add logging/alerting for missed removal events.
+- **Submit Google OAuth consent screen for review** — Calendar API requires sensitive scope (`calendar.events`). Google review takes 2-6 weeks. Submit now so it's approved by the time we build Google Calendar sync (Phase 3). Needs: privacy policy URL, terms of service URL, OAuth consent screen config in Google Cloud Console, video walkthrough of the permission flow.
