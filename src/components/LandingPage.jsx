@@ -44,9 +44,9 @@ const CONTENT = {
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
-      { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "לחצו על הכפתור ושלי מתחילה לעזור" },
-      { title: "דברו כרגיל", subtitle: "שלי מבינה עברית טבעית: קניות, מטלות, תזכורות" },
-      { title: "הכל מסתדר", subtitle: "הרשימה, היומן והמטלות מתעדכנים אוטומטית" },
+      { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "טקסט או הודעה קולית — שלי מבינה הכל" },
+      { title: "כתבו מהבית", subtitle: "\u0022חלב ולחם\u0022 וזה ברשימה. \u0022תזכירי לי מחר\u0022 והיא מזכירה. קניות, מטלות, אירועים" },
+      { title: "שלחו קולית מהדרך", subtitle: "בדרך לסופר? \u0022שלי, מה ברשימה היום?\u0022 והיא עונה מיד" },
     ],
     faqTitle: "שאלות נפוצות",
     faq: [
@@ -90,9 +90,9 @@ const CONTENT = {
     ],
     stepsTitle: "How does it work?",
     steps: [
-      { title: "Send Sheli a message on WhatsApp", subtitle: "Tap the button and Sheli starts helping" },
-      { title: "Just talk naturally", subtitle: "Sheli understands natural language: shopping, tasks, reminders" },
-      { title: "Everything stays organized", subtitle: "Lists, calendar and tasks update automatically" },
+      { title: "Send Sheli a message on WhatsApp", subtitle: "Text or voice message \u2014 Sheli understands both" },
+      { title: "Type from home", subtitle: "\u0022Milk and bread\u0022 and it's on the list. \u0022Remind me tomorrow\u0022 and she will. Shopping, tasks, events" },
+      { title: "Send a voice note on the go", subtitle: "Driving to the store? \u0022Sheli, what's on my list?\u0022 and she answers right away" },
     ],
     faqTitle: "FAQ",
     faq: [
