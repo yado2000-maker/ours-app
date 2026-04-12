@@ -2066,7 +2066,7 @@ function getOnboardingWelcome(senderName?: string): string {
 ${cta} נסו לכתוב:
 "חלב, ביצים ולחם"
 או
-"אל תשכחו לקנות ברוקולי וגבינה" 🛒`;
+"תזכירי לי לקנות ברוקולי וגבינה" 🛒`;
 }
 
 // (Removed: ONBOARDING_WAITING_MESSAGES, getOnboardingWaitingMessage — replaced by nudge system)
