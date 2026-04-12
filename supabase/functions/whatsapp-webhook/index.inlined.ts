@@ -1916,8 +1916,6 @@ const AMBIGUOUS_NAMES: Record<string, string[]> = {
   sahar: ["סהר", "סער"],
   saar: ["סער", "סהר"],
   "sa'ar": ["סער", "סהר"],
-  shanee: ["שני", "שָׁנִי"],
-  shani: ["שני", "שָׁנִי"],
   lee: ["לי", "ליא"],
   li: ["לי", "ליא"],
   lia: ["ליאה", "ליה"],
