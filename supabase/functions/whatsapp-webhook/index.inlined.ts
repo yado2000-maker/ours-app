@@ -497,15 +497,15 @@ function buildClassifierPrompt(ctx: ClassifierContext): string {
     return `${hebrewDays[d.getDay()]} = ${iso}${i === 0 ? " (today)" : ""}`;
   }).join(", ");
 
-  return `You are a Hebrew family WhatsApp message classifier. Classify each message into exactly ONE intent.
+  return `You are a Hebrew WhatsApp message classifier for Sheli, a smart personal helper. Classify each message into exactly ONE intent. Messages come from both group chats and 1:1 personal chats.
 INTENTS:
 - ignore: Social noise (greetings, reactions, emojis, jokes, chatter, forwarded messages, status updates). ~80% of messages.
 - add_shopping: Adding item(s) to shopping list. Bare nouns, "צריך X", "נגמר X", "אין X".
-- add_task: Creating a household chore/to-do. "צריך ל...", "[person] [activity] [time]", maintenance requests.
+- add_task: Creating a chore/to-do. "צריך ל...", "[person] [activity] [time]", maintenance requests. Works for personal tasks ("לשלם חשבון") and shared chores.
 - add_event: Scheduling a specific date/time event. Appointments, classes, dinners, meetings.
 - complete_task: Marking an existing task as done. Past tense of open task, "סיימתי", "בוצע".
 - complete_shopping: Confirming purchase of a list item. "קניתי", "יש", "לקחתי".
-- question: Asking about household state (tasks, schedule, list). "מה צריך?", "מי אוסף?", "מה יש היום?".
+- question: Asking about current state (tasks, schedule, list). "מה צריך?", "מה ברשימה?", "מה יש היום?".
 - claim_task: Self-assigning an existing open task. "אני אעשה", "אני לוקח/ת", "אני יכול".
 - info_request: Asking for information that is NOT a household task. Passwords, phone numbers, prices, codes.
 - correct_bot: Correcting something Sheli just did wrong. "התכוונתי ל...", "לא X, כן Y", "תתקני", "טעית", "זה פריט אחד".
@@ -531,7 +531,9 @@ ${rotationsStr}
 HEBREW PATTERNS:
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
+- Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
 - "מי [verb]?" = question (not add_task)
+- "מה ברשימה?" / "מה צריך לקנות?" = question (in 1:1 or group)
 - "אני [verb]" matching an open task = claim_task
 - Past tense matching open task ("שטפתי כלים") = complete_task
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
@@ -910,7 +912,7 @@ Upcoming events: ${ctx.currentEvents.length === 0 ? "(none)" : ctx.currentEvents
     ? `\n\nYOUR RECENT REPLIES (do NOT repeat these patterns — vary your style):\n${recentReplies.map((r: string) => `- "${(r || "").slice(0, 80)}"`).join("\n")}\n\nANTI-REPETITION: Never use the same opening word, emoji pattern, or sentence structure as your recent replies. Each reply must feel fresh.`
     : "";
 
-  return `You are Sheli (שלי) — the AI family assistant for ${ctx.householdName}.
+  return `You are Sheli (שלי) — the smart assistant for ${ctx.householdName}.
 ${langInstructions}
 
 Members: ${memberNames}
@@ -975,7 +977,7 @@ When you make a mistake, misunderstand, or need to correct yourself:
 QUESTIONS ABOUT SHELI HERSELF: When asked about privacy, data, learning, or how you work:
 ${isHe ? `- פרטיות: "אני לא שומרת תמונות או וידאו. אני כן שומעת הודעות קוליות קצרות — תקליטו לי רשימת קניות או מטלות בדיוק כמו הודעה רגילה. אני לא שומרת את ההקלטה, רק את התוכן. הכל נמחק אוטומטית אחרי 30 יום."
 - למידה: "אני לומדת את הסגנון שלכם! כינויים, מוצרים, שעות — ככל שתשתמשו יותר, אבין אתכם טוב יותר."
-- מי רואה: "רק בני הבית שלכם. כל משפחה מנותקת לחלוטין."
+- מי רואה: "רק בני הבית שלכם. כל בית מנותק לחלוטין."
 - להפסיק: "פשוט תוציאו אותי מהקבוצה. הכל נמחק אוטומטית, בלי התחייבות."` : `- Privacy: "I don't store photos or videos. I can listen to short voice messages — record your shopping list or tasks just like a text. I don't save the recording, only its content. Everything is auto-deleted after 30 days."
 - Learning: "I learn your family's style! Nicknames, products, schedules — the more you use me, the better I understand you."
 - Who sees data: "Only your household members. Each family is completely isolated."
@@ -1082,7 +1084,7 @@ async function generateEmojiReply(emoji: string, sender: string): Promise<string
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 32,
-        system: `You are Sheli (שלי), a warm Israeli family assistant. ${sender} just sent an emoji reaction in the family WhatsApp group. Reply with 1-3 matching emoji. No text unless it genuinely adds warmth (max 3 words). Examples: ❤️→❤️😊 | 💪→💪🔥 | 😂→😂 | 👍→👍✨ | 🙏→💕`,
+        system: `You are Sheli (שלי), a warm Israeli WhatsApp assistant. ${sender} just sent an emoji reaction in the group. Reply with 1-3 matching emoji. No text unless it genuinely adds warmth (max 3 words). Examples: ❤️→❤️😊 | 💪→💪🔥 | 😂→😂 | 👍→👍✨ | 🙏→💕`,
         messages: [{ role: "user", content: emoji }],
       }),
     });
@@ -1298,7 +1300,7 @@ HEBREW DAY NAMES:
 יום ראשון = Sunday, יום שני = Monday, יום שלישי = Tuesday, יום רביעי = Wednesday, יום חמישי = Thursday, יום שישי = Friday, שבת = Saturday
 ` : "";
 
-  return `You are Ours — an AI family assistant in the ${ctx.householdName} WhatsApp group.
+  return `You are Sheli — a smart assistant in the ${ctx.householdName} WhatsApp group.
 ${langInstructions}
 
 Members: ${memberNames}
@@ -2134,7 +2136,7 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
     keyFacts: "User greeting. Reply warmly, ask if they have a question or are ready to start.",
   },
   {
-    patterns: [/הפנ|referral|הזמנ.*משפחה|משפחה מביאה|invite.*family|חודש.*חינם.*הזמנ/i],
+    patterns: [/הפנ|referral|הזמנ.*חברים|חברים מביאים|invite.*friend|חודש.*חינם.*הזמנ/i],
     topic: "referral",
     keyFacts: "Family brings Family program. Each referred family = both get free premium month. Link in the app menu.",
   },
@@ -2777,7 +2779,7 @@ async function fetchGroupInfo(groupId: string): Promise<GroupInfo | null> {
     }));
 
     return {
-      name: data.subject || data.name || "משפחה",
+      name: data.subject || data.name || "הבית",
       participants,
     };
   } catch (err) {
@@ -2823,7 +2825,7 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
 
   // 2. Fetch group info (name + participants)
   const groupInfo = await fetchGroupInfo(groupId);
-  const groupName = groupInfo?.name || "משפחה";
+  const groupName = groupInfo?.name || "הבית";
   const participants = groupInfo?.participants || [];
 
   // 3. Auto-link: check if any participant's phone is already mapped to a household
@@ -4631,7 +4633,7 @@ async function maybeSendReferralAnnouncement(groupId: string, householdId: strin
     if (!hh?.referral_code) return;
     if (isQuietHours()) return;
 
-    const msg = `🎁 משפחה מביאה משפחה!\nאהבתם את שלי? שתפו עם משפחה נוספת —\nשתי המשפחות מקבלות חודש פרימיום במתנה!\n\nשלחו את הקישור: sheli.ai/r/${hh.referral_code}`;
+    const msg = `🎁 חברים מביאים חברים!\nאהבתם את שלי? שתפו עם חברים —\nשניכם מקבלים חודש פרימיום במתנה!\n\nשלחו את הקישור: sheli.ai/r/${hh.referral_code}`;
 
     await provider.sendMessage({ groupId, text: msg });
     await supabase
@@ -4720,7 +4722,7 @@ async function maybeCompleteReferral(householdId: string, usageCount: number) {
         .eq("id", referral.referred_household_id)
         .single();
 
-      const familyName = referredHh?.name || "משפחה חדשה";
+      const familyName = referredHh?.name || "בית חדש";
       await provider.sendMessage({
         groupId: referringConfig.group_id,
         text: `🎉 ${familyName} הצטרפו בזכותכם! חודש פרימיום במתנה לשתי המשפחות!`,
@@ -4895,7 +4897,7 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
   }
 
   return {
-    householdName: household?.name || "משפחה",
+    householdName: household?.name || "הבית",
     members: (membersRes.data || []).map((m) => m.display_name),
     memberGenders,
     language: household?.lang || "he",
@@ -5259,7 +5261,7 @@ async function sendUpgradePrompt(groupId: string, householdId: string, language?
     : `${upgradeLink}?hh=${householdId}`;
 
   const upgradeMsg = lang === "he"
-    ? `היי ${getHouseholdNameCached(householdId) || "משפחה"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 9.90 ₪ לחודש.\n🔗 ${paymentUrl}`
+    ? `היי ${getHouseholdNameCached(householdId) || "הבית"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה, 9.90 ₪ לחודש.\n🔗 ${paymentUrl}`
     : `Hey ${getHouseholdNameCached(householdId) || "family"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping — $2.70/month.\n🔗 ${paymentUrl}`;
 
   await provider.sendMessage({ groupId, text: upgradeMsg });
