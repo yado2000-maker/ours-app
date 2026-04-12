@@ -2055,9 +2055,7 @@ function getOnboardingWelcome(senderName?: string): string {
   const greeting = name
     ? `היי ${name}! 😊 אני שלי, נעים מאוד!`
     : `היי! 👋 אני שלי, נעים מאוד!`;
-  const cta = gender === "male" ? "רוצה לנסות? מה צריך להביא מהסופר?"
-    : gender === "female" ? "רוצה לנסות? מה צריך להביא מהסופר?"
-    : "רוצים לנסות? מה צריך להביא מהסופר?";
+  const cta = gender === "male" ? "רוצה לנסות?" : gender === "female" ? "רוצה לנסות?" : "רוצים לנסות?";
   return `${greeting}
 
 אני יודעת לנהל רשימת קניות, לסדר מטלות ולהזכיר דברים חשובים.
@@ -2065,7 +2063,10 @@ function getOnboardingWelcome(senderName?: string): string {
 
 גרים עם עוד מישהו? אפשר גם להוסיף אותי לקבוצת הווטסאפ שלכם 🏠
 
-${cta} 🛒`;
+${cta} נסו לכתוב:
+"חלב, ביצים ולחם"
+או
+"אל תשכחו לקנות ברוקולי וגבינה" 🛒`;
 }
 
 // (Removed: ONBOARDING_WAITING_MESSAGES, getOnboardingWaitingMessage — replaced by nudge system)
