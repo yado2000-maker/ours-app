@@ -2073,6 +2073,27 @@ ${cta} נסו לכתוב:
 
 // (Removed: ONBOARDING_WAITING_MESSAGES, getOnboardingWaitingMessage — replaced by nudge system)
 
+// ─── Group Nudge (one-time, after 2 days OR 5 actions) ───
+
+const GROUP_NUDGE_MESSAGE = "אגב, אם גרים איתך עוד מישהו, אפשר להוסיף אותי לקבוצת הווטסאפ ואני אתאם לכולם 🏠";
+const GROUP_NUDGE_MIN_DAYS = 2;
+const GROUP_NUDGE_MIN_ACTIONS = 5;
+
+function shouldSendGroupNudge(convo: Record<string, any>): boolean {
+  // Already sent
+  if (convo.context?.group_nudge_sent_at) return false;
+  // Already in a real group
+  if (convo.state === "personal" || convo.state === "joined") return false;
+
+  const actionCount = (convo.demo_items || []).filter((i: any) => i.type !== "_pending_nudge").length;
+  const createdAt = convo.created_at ? new Date(convo.created_at) : null;
+  const daysSinceCreated = createdAt
+    ? (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
+    : 0;
+
+  return actionCount >= GROUP_NUDGE_MIN_ACTIONS || daysSinceCreated >= GROUP_NUDGE_MIN_DAYS;
+}
+
 // (Removed: DEMO_CATEGORIES — categorization now handled by Sonnet in 1:1 prompt)
 
 // (Removed: generateDemoNudge, demoCategorize, TASK_PATTERNS, handleDemoInteraction — all replaced by single Sonnet call)
@@ -2202,7 +2223,7 @@ FORMATTING (WhatsApp RTL):
 RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
 2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only family sees it.
-3. GROUP MENTIONS: The welcome message already told the user they can add you to a group. Do NOT bring up groups proactively. Only mention groups if the user explicitly asks about groups, shared lists, or roommates/family. After message #6, if the user hasn't joined a group, you may mention it ONCE casually ("אגב, אם גרים איתך עוד מישהו, אפשר להוסיף אותי לקבוצה ואני אתאם לכולם 🏠"). Then never again.
+3. GROUP MENTIONS: The system handles group suggestions separately. Do NOT bring up groups yourself. Only mention groups if the user explicitly asks about groups, shared lists, or mentions roommates/partner/family. If the user mentions living with others, you may say something like "אפשר להוסיף אותי לקבוצה ואני אתאם לכולם" — but only as a natural response to THEIR mention, never proactively.
 4. Mention ONE untried capability per reply, MAX. Only if it fits naturally. If it doesn't fit — don't.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
 6. NEVER ask personal questions (kids' names, ages, family structure). Learn ONLY from what they volunteer.
@@ -2487,6 +2508,7 @@ CONVERSATION STATE:
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+- Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
 ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
 ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — vary your style and content):\n${recentReplies.map((r: string) => `- "${r.slice(0, 120)}"`).join("\n")}` : ""}`;
 
@@ -2671,6 +2693,16 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
       await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
     }
 
+    // Group nudge check (one-time, after 2 days OR 5 actions)
+    const updatedConvo = { ...convo, demo_items: newItems, state: newState };
+    if (shouldSendGroupNudge(updatedConvo) && !isQuietHours()) {
+      await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
+      await supabase.from("onboarding_conversations").update({
+        context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
+      }).eq("phone", phone);
+      console.log(`[1:1] Group nudge sent to ${phone}`);
+    }
+
     // Log
     await logMessage(
       { messageId: `onboarding_reply_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: visibleReply, type: "text" },
@@ -2734,6 +2766,34 @@ async function handlePersonalChannelMessage(
     if (visibleReply) {
       await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
     }
+
+    // Group nudge check for personal-household users without a real group
+    try {
+      const { data: groupConfig } = await supabase
+        .from("whatsapp_config")
+        .select("group_id")
+        .eq("household_id", householdId)
+        .eq("bot_active", true)
+        .limit(1)
+        .single();
+
+      if (!groupConfig) {
+        // No real group — check if we should nudge
+        const { data: convo } = await supabase
+          .from("onboarding_conversations")
+          .select("*")
+          .eq("phone", phone)
+          .single();
+
+        if (convo && shouldSendGroupNudge(convo) && !isQuietHours()) {
+          await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
+          await supabase.from("onboarding_conversations").update({
+            context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
+          }).eq("phone", phone);
+          console.log(`[1:1 personal] Group nudge sent to ${phone}`);
+        }
+      }
+    } catch {}
 
     console.log(`[1:1 personal] Reply for ${phone} (household: ${householdId})`);
   } catch (err) {
@@ -2907,9 +2967,20 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
       .single();
 
     if (onboardingConvo) {
+      // Fetch existing context to preserve it
+      const { data: fullConvo } = await supabase
+        .from("onboarding_conversations")
+        .select("context")
+        .eq("id", onboardingConvo.id)
+        .single();
       await supabase
         .from("onboarding_conversations")
-        .update({ state: "personal", household_id: householdId, updated_at: new Date().toISOString() })
+        .update({
+          state: "personal",
+          household_id: householdId,
+          context: { ...(fullConvo?.context || {}), group_nudge_sent_at: "joined_group" },
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", onboardingConvo.id);
 
       // Send 1:1 personal channel message
