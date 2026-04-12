@@ -45,3 +45,4 @@ tests/classifier-results.json
 .env
 .env.*
 !.env.local.example
+supabase/.temp/
