@@ -42,7 +42,7 @@ const CONTENT = {
       { Icon: ReminderFeatureIcon, title: "תזכורות חכמות", subtitle: "\u0022שלי, תזכירי לי...\u0022 והיא מזכירה בזמן. גם דברים שחוזרים כל שבוע" },
       { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
       { Icon: ChoresFeatureIcon, title: "משימות ומטלות", subtitle: "נהלו את המשימות ואת מטלות הבית. שלי זוכרת ומעדכנת" },
-      { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור שאתם קוראים לרכב \u0022הזחל\u0022 ושביום שלישי תמיד צריך חלב" },
+      { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור איך קוראים לכלב שלכם, מתי היומולדת של אמא ושביום שלישי תמיד נגמר החלב" },
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
@@ -89,7 +89,7 @@ const CONTENT = {
       { Icon: ReminderFeatureIcon, title: "Smart reminders", subtitle: "\u0022Sheli, remind me...\u0022 and she'll remind you on time. Even recurring ones." },
       { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
       { Icon: ChoresFeatureIcon, title: "Tasks & chores", subtitle: "Manage your tasks and your house chores. Sheli remembers and updates" },
-      { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember you call the car \u0022the beast\u0022 and that you always need milk on Tuesdays" },
+      { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember your dog's name, when mom's birthday is, and that you always run out of milk on Tuesdays" },
     ],
     stepsTitle: "How does it work?",
     steps: [
