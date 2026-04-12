@@ -161,16 +161,21 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                 {msg.type === "voice" ? (
                   <span className="wa-voice">
                     <span className="wa-voice-avatar">
-                      <svg className="wa-voice-avatar-icon" viewBox="0 0 24 24" fill="#8696a0"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                      <img src="/voice-avatar.svg" alt="" className="wa-voice-avatar-img" />
                       <span className="wa-voice-mic-badge">
                         <svg viewBox="0 0 12 12" fill="#fff"><path d="M6 7.5A1.5 1.5 0 0 0 7.5 6V3a1.5 1.5 0 1 0-3 0v3A1.5 1.5 0 0 0 6 7.5zm2.5-1.5A2.5 2.5 0 0 1 6 8.5 2.5 2.5 0 0 1 3.5 6H3a3 3 0 0 0 2.5 2.96V10h1V8.96A3 3 0 0 0 9 6h-.5z"/></svg>
                       </span>
                     </span>
-                    <span className="wa-voice-play">\u25B6</span>
-                    <span className="wa-voice-bars">
-                      <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
+                    <span className="wa-voice-content">
+                      <span className="wa-voice-row">
+                        <span className="wa-voice-play">\u25B6</span>
+                        <span className="wa-voice-dot">\u25CF</span>
+                        <span className="wa-voice-bars">
+                          <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
+                        </span>
+                      </span>
+                      <span className="wa-voice-dur">{msg.duration}</span>
                     </span>
-                    <span className="wa-voice-dur">{msg.duration}</span>
                   </span>
                 ) : msg.text}
                 <span className="wa-bubble-time">

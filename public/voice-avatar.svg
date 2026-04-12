@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <defs>
+    <clipPath id="circle">
+      <circle cx="40" cy="40" r="40"/>
+    </clipPath>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F4A460"/>
+      <stop offset="40%" stop-color="#E8855C"/>
+      <stop offset="70%" stop-color="#D4507A"/>
+      <stop offset="100%" stop-color="#8B6FA5"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="55%" r="30%">
+      <stop offset="0%" stop-color="#FFD700" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#F4A460" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g clip-path="url(#circle)">
+    <!-- Sky gradient -->
+    <rect width="80" height="80" fill="url(#sky)"/>
+    <!-- Sun glow -->
+    <circle cx="40" cy="44" r="24" fill="url(#sun)"/>
+    <!-- Horizon landscape -->
+    <ellipse cx="40" cy="72" rx="50" ry="16" fill="#2D1B3D" opacity="0.6"/>
+    <!-- Person silhouette - arms slightly raised -->
+    <g fill="#1A0E2E" opacity="0.85">
+      <!-- Head -->
+      <circle cx="40" cy="30" r="6"/>
+      <!-- Body -->
+      <path d="M37 36 L43 36 L44 54 L36 54 Z"/>
+      <!-- Left arm raised -->
+      <path d="M37 38 L26 30 L25 32 L36 40 Z"/>
+      <!-- Right arm raised -->
+      <path d="M43 38 L54 30 L55 32 L44 40 Z"/>
+      <!-- Legs -->
+      <path d="M36 54 L33 70 L37 70 L39 56 Z"/>
+      <path d="M44 54 L47 70 L43 70 L41 56 Z"/>
+    </g>
+  </g>
+</svg>
