@@ -60,19 +60,10 @@
   font-size: 16px;
   font-weight: 400;
   color: var(--warm);
-  margin: 8px 0 4px;
+  margin: 8px 0 28px;
   text-align: center;
   max-width: 320px;
   line-height: 1.5;
-}
-
-.landing-subline {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent, #2AB673);
-  margin: 0 0 28px;
-  text-align: center;
-  letter-spacing: 0;
 }
 
 /* ─── WhatsApp Mock — 1:1 personal chat ─── */
@@ -328,53 +319,6 @@
   line-height: 1.5;
 }
 
-/* ─── Personas — "Works for everyone" ─── */
-
-.landing-personas {
-  padding: 48px 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: var(--white);
-}
-
-.persona-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 400px;
-}
-
-.persona-card {
-  background: var(--cream, #FAFCFB);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 20px;
-  text-align: center;
-  box-shadow: var(--sh);
-}
-
-.persona-emoji {
-  font-size: 28px;
-  display: block;
-  margin-bottom: 8px;
-}
-
-.persona-card h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--dark);
-}
-
-.persona-card p {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--warm);
-  line-height: 1.5;
-}
-
 /* ─── How It Works ─── */
 
 .landing-steps {
@@ -560,15 +504,6 @@
     flex-direction: column;
     align-items: center;
     text-align: center;
-  }
-
-  .persona-cards {
-    flex-direction: row;
-    max-width: 720px;
-  }
-
-  .persona-card {
-    flex: 1;
   }
 
   .steps-list {

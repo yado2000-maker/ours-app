@@ -21,7 +21,6 @@ const CONTENT = {
     dir: "rtl",
     font: "'Heebo', sans-serif",
     tagline: "העוזרת החכמה שלכם בווטסאפ",
-    subline: "לכם ולבית",
     mockChatName: "שלי",
     mockStatus: "מחוברת",
     mockAvatar: "ש",
@@ -42,12 +41,6 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
       { Icon: ChoresFeatureIcon, title: "מטלות בית", subtitle: "מי עושה מה ומתי — שלי זוכרת ומעדכנת" },
       { Icon: LearningFeatureIcon, title: "שלי לומדת אתכם", subtitle: "ככל שתשתמשו יותר, שלי מבינה אתכם טוב יותר — כינויים, מוצרים, הרגלים" },
-    ],
-    personasTitle: "שלי מתאימה לכולם",
-    personas: [
-      { emoji: "\u{1F3E0}", title: "גרים לבד?", text: "קניות, תזכורות וסידורים — כמו עוזרת אישית בווטסאפ" },
-      { emoji: "\u{1F46B}", title: "עם שותפים?", text: "הוסיפו את שלי לקבוצה — מי קונה, מי מנקה, הכל מתואם" },
-      { emoji: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}", title: "משפחה?", text: "ניהול הבית — קניות, הסעות, חוגים, מטלות ותזכורות לכל המשפחה" },
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
@@ -74,7 +67,6 @@ const CONTENT = {
     dir: "ltr",
     font: "'Nunito', sans-serif",
     tagline: "Your smart helper on WhatsApp",
-    subline: "For you & your home",
     mockChatName: "Sheli",
     mockStatus: "online",
     mockAvatar: "S",
@@ -95,12 +87,6 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
       { Icon: ChoresFeatureIcon, title: "Household tasks", subtitle: "Who does what and when \u2014 Sheli remembers and updates" },
       { Icon: LearningFeatureIcon, title: "Sheli learns you", subtitle: "The more you use her, the better she gets \u2014 nicknames, products, routines" },
-    ],
-    personasTitle: "Works for everyone",
-    personas: [
-      { emoji: "\u{1F3E0}", title: "Living alone?", text: "Shopping, reminders and daily tasks \u2014 like a personal assistant on WhatsApp" },
-      { emoji: "\u{1F46B}", title: "Roommates?", text: "Add Sheli to the group \u2014 who buys, who cleans, all coordinated" },
-      { emoji: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}", title: "Family?", text: "Manage the household \u2014 shopping, rides, activities, tasks and reminders for everyone" },
     ],
     stepsTitle: "How does it work?",
     steps: [
@@ -153,7 +139,6 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <section className="landing-hero">
         <h1 className="landing-wordmark">sheli</h1>
         <p className="landing-tagline">{c.tagline}</p>
-        <p className="landing-subline">{c.subline}</p>
 
         {/* WhatsApp Mock — 1:1 personal chat */}
         <div className="wa-mock">
@@ -210,20 +195,6 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                 <h3>{f.title}</h3>
                 <p>{f.subtitle}</p>
               </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ─── Personas — "Works for everyone" ─── */}
-      <section className="landing-personas">
-        <h2 className="landing-section-title">{c.personasTitle}</h2>
-        <div className="persona-cards">
-          {c.personas.map((p, i) => (
-            <div key={i} className="persona-card">
-              <span className="persona-emoji">{p.emoji}</span>
-              <h3>{p.title}</h3>
-              <p>{p.text}</p>
             </div>
           ))}
         </div>
