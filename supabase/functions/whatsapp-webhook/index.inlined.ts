@@ -830,7 +830,7 @@ Keep responses SHORT — 1-2 lines max.`;
       }
       break;
     case "add_event":
-      actionSummary = `An event was scheduled: "${e.title || e.raw_text}"${e.time_raw ? ` at ${e.time_raw}` : ""}.`;
+      actionSummary = `An event was scheduled: "${e.title || e.raw_text}"${e.time_raw ? ` at ${e.time_raw}` : ""}. After confirming the event, offer a reminder: "רוצה שאזכיר? תגידו מתי ואני אדאג 😊" (or similar natural phrasing). Keep it short — one line offer. If user doesn't respond, no reminder is set. Do NOT auto-set a reminder.`;
       break;
     case "complete_task":
       actionSummary = `A task was marked as done${e.task_id ? ` (id: ${e.task_id})` : ""}.`;
@@ -2164,7 +2164,7 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Hebrew slang where natural (יאללה, סבבה, אחלה)
 - NEVER ignore a message — always reply, even to jokes, trolling, or nonsense
 - Match their energy: trolling gets witty trolling back, warmth gets warmth
-- Every reply ends with soft forward motion toward your capabilities
+- NOT every reply needs to mention other capabilities. Most replies are just the action confirmation. Sprinkle "אגב" tips sparingly (every 3-4 messages).
 - Keep replies under 300 characters. This is WhatsApp, not email.
 - Sheli speaks feminine first person always (הוספתי, not הוספנו).
 - GENDERED ADDRESS: Check the CONVERSATION STATE for "gender" field:
@@ -2182,7 +2182,7 @@ CAPABILITIES YOU CAN DEMONSTRATE:
 - Rotations/turns: after the FIRST task about chores, offer ONCE: "אם יש ילדים בבית — אני מעולה בתורות 😉". Do NOT offer rotations again if "rotation" already appears in TRIED. One offer is enough.
   - If user engages: ask what rotation + who participates → create it
 - Reminders: user says time+action → "אזכיר!" with time. When giving examples, use universal tasks like "לאסוף ילדים ב-5" or "לשלם חשבון" — NEVER food examples (meat/cooking) which may alienate vegetarians.
-- Events: user says date+event → "שמרתי ביומן!" with date/time
+- Events: user says date+event → "שמרתי ביומן!" with date/time. Then offer a reminder: "רוצה שאזכיר? תגידי מתי ואני אדאג 😊". Do NOT auto-set a reminder — only if user responds with a time.
 - Voice messages: user can send a voice note (up to 30s) and you understand it! This is a DIFFERENTIATOR — mention it early (first 1-2 messages). Say something like "אגב, אני גם מבינה הודעות קוליות — אם נוח לדבר במקום לכתוב 🎤"
 
 FORMATTING (WhatsApp RTL):
@@ -2199,7 +2199,7 @@ RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
 2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only family sees it.
 3. If user asks "איך זה עובד" / "מה צריך לעשות" / "איך מתחילים" → explain: save number, add to family WhatsApp group, everyone can add items. THIS IS THE ONLY TIME you mention the group proactively.
-4. Mention ONE untried capability per reply, MAX. Only if it fits naturally. If it doesn't fit — don't.
+4. Mention an untried capability ("אגב..." tip) ONLY once every 3-4 messages (check the Message # in CONVERSATION STATE — only on messages 1, 4, 7, 10, etc.). Most replies should be JUST the confirmation with NO "by the way" addition. When you do mention one, keep it to ONE short sentence. If it doesn't fit naturally — skip entirely.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
 6. NEVER ask personal questions (kids' names, ages, family structure). Learn ONLY from what they volunteer.
 7. If user corrects their name ("קוראים לי X", "שמי X") → apologize warmly ("סורי! 🙈"), use correct name going forward.
@@ -2219,7 +2219,13 @@ ACTIONS array: each object has "type" and relevant fields:
 - shopping: {"type":"shopping","items":["חלב","ביצים"]}
 - task: {"type":"task","text":"לפרוק מדיח"}
 - reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
-  IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00). If user says "ב-5" → today 17:00 IST. If "בעוד שעה" → compute from current time. If time already passed today → use tomorrow. The "time" field is a display hint; "send_at" is what actually schedules the reminder.
+  IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00).
+  Check CURRENT TIME before deciding the date:
+  - "ב-7:31" and it's now 7:28 → TODAY at 07:31 (still in the future!)
+  - "ב-5" and it's now 18:00 → TOMORROW at 17:00 (already passed today)
+  - "בעוד שעה" / "בעוד 4 דקות" → compute from CURRENT TIME (add hours/minutes)
+  - "מחר ב-8" → tomorrow at 08:00
+  Your VISIBLE REPLY must match the send_at: if send_at is today, say "אזכיר היום ב-X". If tomorrow, say "אזכיר מחר ב-X". NEVER say "מחר" when the time is today.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - name_correction: {"type":"name_correction","name":"ירון"}
@@ -2256,12 +2262,11 @@ async function ensureOnboardingHousehold(
   });
   if (memErr) console.error("[1:1] Failed to create member:", memErr);
 
-  // Link phone to household for future group-join auto-detection
-  await supabase.from("whatsapp_member_mapping").upsert({
-    phone_number: phone,
-    household_id: hhId,
-    member_name: userName || null,
-  }, { onConflict: "phone_number" });
+  // NOTE: Do NOT create whatsapp_member_mapping here.
+  // That table is for group members only. Creating it for 1:1-only users
+  // causes handleDirectMessage to route them to handlePersonalChannelMessage
+  // (the "already in a group" stub) instead of the onboarding Sonnet handler.
+  // The mapping will be created when the user actually joins a group.
 
   await supabase.from("onboarding_conversations").update({
     household_id: hhId,
@@ -2482,7 +2487,8 @@ CONVERSATION STATE:
 - Items collected so far: ${JSON.stringify(existingItems)}
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
-- Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+- Current time in Israel: ${new Date().toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", weekday: "long", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })} (Israel Standard Time, UTC+3)
+- Current date ISO: ${new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jerusalem" })}
 ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
 ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — vary your style and content):\n${recentReplies.map((r: string) => `- "${r.slice(0, 120)}"`).join("\n")}` : ""}`;
 
@@ -2718,20 +2724,84 @@ async function handlePersonalChannelMessage(
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
 
-    // Parse and send visible reply
+    // Parse actions and visible reply
+    const actionsMatch = raw.match(/<!--ACTIONS:(.*?)-->/s);
     const visibleReply = raw
       .replace(/<!--ACTIONS:.*?-->/s, "")
       .replace(/<!--TRIED:.*?-->/s, "")
       .trim();
 
-    // TODO: Execute actions against the real household DB (not demo_items)
-    // This connects to the existing action executor in a future iteration
+    // Execute actions against the real household DB
+    let actions: any[] = [];
+    if (actionsMatch) {
+      try { actions = JSON.parse(actionsMatch[1]); } catch {}
+    }
+
+    const realActions = actions.filter((a: any) => a.type && a.type !== "name_correction");
+    if (realActions.length > 0 && householdId) {
+      const mappedActions: any[] = [];
+      const userName = message.senderName || "";
+      for (const action of realActions) {
+        switch (action.type) {
+          case "shopping":
+            if (action.items && Array.isArray(action.items)) {
+              mappedActions.push({
+                type: "add_shopping",
+                data: { items: action.items.map((item: string) => ({ name: item, qty: "1", category: "אחר" })) },
+              });
+            }
+            break;
+          case "task":
+            mappedActions.push({ type: "add_task", data: { title: action.text || "", assigned_to: null } });
+            break;
+          case "event":
+            mappedActions.push({
+              type: "add_event",
+              data: {
+                title: action.title || action.text || "",
+                assigned_to: null,
+                scheduled_for: action.date
+                  ? `${action.date}${action.time ? "T" + action.time + ":00+03:00" : "T18:00:00+03:00"}`
+                  : new Date().toISOString(),
+              },
+            });
+            break;
+          case "reminder": {
+            const sendAt = action.send_at
+              ? new Date(action.send_at).toISOString()
+              : parseReminderTime(action.time || "");
+            if (sendAt) {
+              await supabase.from("reminder_queue").insert({
+                household_id: householdId,
+                group_id: phone + "@s.whatsapp.net",
+                message_text: action.text || "",
+                send_at: sendAt,
+                sent: false,
+                reminder_type: "user",
+                created_by_phone: phone,
+                created_by_name: userName,
+              });
+              console.log(`[1:1 personal] Reminder created for ${sendAt}: "${action.text}"`);
+            }
+            break;
+          }
+        }
+      }
+      if (mappedActions.length > 0) {
+        try {
+          const { summary } = await executeActions(householdId, mappedActions, message.senderName || "");
+          console.log(`[1:1 personal] Executed ${summary.length} actions for ${phone}`);
+        } catch (err) {
+          console.error("[1:1 personal] executeActions error:", err);
+        }
+      }
+    }
 
     if (visibleReply) {
       await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
     }
 
-    console.log(`[1:1 personal] Reply for ${phone} (household: ${householdId})`);
+    console.log(`[1:1 personal] Reply for ${phone} (household: ${householdId}, actions: ${realActions.length})`);
   } catch (err) {
     console.error("[1:1 personal] error:", err);
   }
