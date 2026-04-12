@@ -2055,14 +2055,15 @@ function getOnboardingWelcome(senderName?: string): string {
   const greeting = name
     ? `היי ${name}! 😊 אני שלי, נעים מאוד!`
     : `היי! 👋 אני שלי, נעים מאוד!`;
-  // Gender the CTA: רוצה (m/f singular) vs רוצים (plural/unknown)
   const cta = gender === "male" ? "רוצה לנסות? מה צריך להביא מהסופר?"
     : gender === "female" ? "רוצה לנסות? מה צריך להביא מהסופר?"
     : "רוצים לנסות? מה צריך להביא מהסופר?";
   return `${greeting}
 
-אני יודעת לנהל רשימת קניות, לסדר מטלות בבית ולהזכיר דברים חשובים.
-אפשר גם לשלוח לי הודעה קולית — אני מבינה! 🎤
+אני יודעת לנהל רשימת קניות, לסדר מטלות ולהזכיר דברים חשובים.
+אפשר גם לשלוח לי הודעה קולית, אני מבינה! 🎤
+
+גרים עם עוד מישהו? אפשר גם להוסיף אותי לקבוצת הווטסאפ שלכם 🏠
 
 ${cta} 🛒`;
 }
@@ -2155,7 +2156,7 @@ function matchOnboardingQA(text: string): { topic: string; keyFacts: string } | 
 
 // ─── Sonnet-powered 1:1 conversational onboarding ("The Natural Friend") ───
 
-const ONBOARDING_1ON1_PROMPT = `You are שלי (Sheli) — a smart family home assistant on WhatsApp.
+const ONBOARDING_1ON1_PROMPT = `You are שלי (Sheli) — a smart personal helper on WhatsApp.
 You're chatting 1:1 with a new user who just reached out.
 
 PERSONALITY: Like a witty, organized friend who happens to have superpowers.
@@ -2198,7 +2199,7 @@ FORMATTING (WhatsApp RTL):
 RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
 2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only family sees it.
-3. If user asks "איך זה עובד" / "מה צריך לעשות" / "איך מתחילים" → explain: save number, add to family WhatsApp group, everyone can add items. THIS IS THE ONLY TIME you mention the group proactively.
+3. GROUP MENTIONS: The welcome message already told the user they can add you to a group. Do NOT bring up groups proactively. Only mention groups if the user explicitly asks about groups, shared lists, or roommates/family. After message #6, if the user hasn't joined a group, you may mention it ONCE casually ("אגב, אם גרים איתך עוד מישהו, אפשר להוסיף אותי לקבוצה ואני אתאם לכולם 🏠"). Then never again.
 4. Mention ONE untried capability per reply, MAX. Only if it fits naturally. If it doesn't fit — don't.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
 6. NEVER ask personal questions (kids' names, ages, family structure). Learn ONLY from what they volunteer.
@@ -2428,7 +2429,7 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   if (convo.state === "joined" || convo.state === "personal") {
     await prov.sendMessage({
       groupId: message.groupId,
-      text: "אני כבר בקבוצה! דברו איתי שם, או כתבו לי כאן לדברים אישיים 😊",
+      text: "אני כבר בקבוצה שלכם! דברו איתי שם, או כתבו לי כאן לדברים אישיים 😊",
     });
     return;
   }
@@ -2709,7 +2710,7 @@ async function handlePersonalChannelMessage(
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 512,
-        system: ONBOARDING_1ON1_PROMPT + `\n\nPERSONAL CHANNEL MODE: This user already has Sheli in their family group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally — shopping, tasks, reminders all work here and go to the family household. For shared items, gently suggest writing in the group so the family sees it.`,
+        system: ONBOARDING_1ON1_PROMPT + `\n\nPERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally, shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.`,
         messages: [{ role: "user", content: text }],
       }),
     });
@@ -2739,7 +2740,7 @@ async function handlePersonalChannelMessage(
 
 // ─── Group Introduction ───
 
-const INTRO_MESSAGE = `היי! 👋 אני שלי, העוזרת החכמה של המשפחה.
+const INTRO_MESSAGE = `היי! 👋 אני שלי, העוזרת החכמה שלכם בווטסאפ.
 
 אני יכולה לעזור עם:
 ✅ משימות - "צריך לאסוף את הילדים ב-4"
@@ -2909,12 +2910,12 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
         .eq("id", onboardingConvo.id);
 
       // Send 1:1 personal channel message
-      const postGroupMsg = `מעולה, אני בקבוצה! 🎉 מעכשיו כל המשפחה יכולה לדבר איתי שם.
+      const postGroupMsg = `מעולה, אני בקבוצה! 🎉 מעכשיו כולם בבית יכולים לדבר איתי שם.
 
 הצ'אט הזה? הוא רק שלך ושלי 😊
 
-תזכורת אישית, רעיון למתנה, משימה שרק אתם צריכים לזכור —
-כתבו לי כאן. אף אחד מהמשפחה לא רואה.
+תזכורת אישית, רעיון למתנה, משימה שרק אתם צריכים לזכור,
+כתבו לי כאן. אף אחד אחר לא רואה.
 
 אני תמיד כאן 💛`;
       await provider.sendMessage({
