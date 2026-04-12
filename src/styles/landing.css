@@ -279,11 +279,24 @@
 .wa-voice-bars span:nth-child(25) { height: 8px; }
 .wa-voice-bars span:nth-child(26) { height: 4px; }
 
+.wa-voice-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .wa-voice-dur {
   font-size: 10px;
   color: #8696a0;
-  flex-shrink: 0;
-  direction: ltr;
+}
+
+.wa-voice-meta .wa-bubble-time {
+  float: none;
+  margin: 0;
+}
+
+.wa-bubble-voice {
+  padding: 4px 8px 4px 4px;
 }
 
 @keyframes msgIn {

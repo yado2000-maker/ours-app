@@ -155,8 +155,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
             {c.mockMessages.map((msg, i) => (
               <div
                 key={i}
-                className={`wa-bubble wa-bubble-${msg.type === "voice" ? "user" : msg.type}`}
-                style={{ animationDelay: `${i * 0.15}s`, direction: c.dir }}
+                className={`wa-bubble wa-bubble-${msg.type === "voice" ? "user wa-bubble-voice" : msg.type}`}
+                style={{ animationDelay: `${i * 0.15}s`, direction: msg.type === "voice" ? "ltr" : c.dir }}
               >
                 {msg.type === "voice" ? (
                   <span className="wa-voice">
@@ -174,13 +174,22 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                           <span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span /><span />
                         </span>
                       </span>
-                      <span className="wa-voice-dur">{msg.duration}</span>
+                      <span className="wa-voice-meta">
+                        <span className="wa-voice-dur">{msg.duration}</span>
+                        <span className="wa-bubble-time">
+                          {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
+                        </span>
+                      </span>
                     </span>
                   </span>
-                ) : msg.text}
-                <span className="wa-bubble-time">
-                  {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
-                </span>
+                ) : (
+                  <>
+                    {msg.text}
+                    <span className="wa-bubble-time">
+                      {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
+                    </span>
+                  </>
+                )}
               </div>
             ))}
           </div>
