@@ -597,13 +597,21 @@ ${ctx.familyPatterns ? `FAMILY PATTERNS (learned for this household):\n${ctx.fam
 - Rule: if two+ words form a single product name, keep them together
 
 STORE-SPECIFIC CATEGORIES:
-When the user mentions a specific store (e.g., "מאדונית התבלינים קפה ומלח אפור", "צריך מסופר יודה X", "מהמכולת X"), use the STORE NAME as the category for those items.
-- "מאדונית התבלינים, קפה ומלח אפור" → category: "אדונית התבלינים" for both items
-- "מסופר פארם, שמפו וסבון" → category: "סופר פארם" for both items
-- "מהמכולת, חלב ולחם" → category: "מכולת" for both items
-- Strip the preposition (מ/מה/ב) from the store name. Keep the store name clean.
-- If a known store type is organic/specialty (אדונית התבלינים, ניצת הדובדבן, תבלינים ועוד), you can use "🌿 חנות אורגנית" or the store name directly — either works.
-- Items without a store context: use standard categories (פירות וירקות, מוצרי חלב, etc.)
+When the user mentions a specific store, use the STORE NAME as the category for those items.
+Strip the preposition (מ/מה/ב) from the store name.
+
+Known Israeli stores and their category behavior:
+- 🛒 General supermarkets (use standard product categories, NOT store name): שופרסל, פוליצר, רמי לוי, יוחננוף, חצי חינם, קשת טעמים, טיב טעם, מגה, ויקטורי, אושר עד, שוק
+  → "משופרסל חלב ולחם" → category: מוצרי חלב / מאפים (standard categories, not "שופרסל")
+  → Supermarket names are just WHERE to buy, not a meaningful grouping
+- 💊 Pharmacy/drugstore (category: "סופר פארם" or store name): סופר פארם, בי, פארם גרופ, Super-Pharm
+  → "מסופר פארם, שמפו וסבון" → category: "סופר פארם" for both
+- 🌿 Organic/specialty (category: store name): ניצת הדובדבן, אדונית התבלינים, תבלינים ועוד
+  → "מניצת הדובדבן, טחינה וגרנולה" → category: "ניצת הדובדבן" for both
+- 🏪 Other specific stores (category: store name): מכולת, מחסני חשמל, איקאה, ACE, הום סנטר, etc.
+  → "מאיקאה, מדף ומנורה" → category: "איקאה" for both
+
+Items without a store context: use standard categories (פירות וירקות, מוצרי חלב, etc.)
 
 SHOPPING ITEM CLEANUP — strip these from item names:
 - Greetings: "היי שלי", "שלום", "בוקר טוב" → NOT items, ignore them
