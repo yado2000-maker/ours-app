@@ -1,48 +1,69 @@
 import { useState } from "react";
 import "../styles/landing.css";
-import { ShoppingFeatureIcon, CalendarFeatureIcon, ChoresFeatureIcon, ChevronRightIcon } from "./Icons.jsx";
+import {
+  ShoppingFeatureIcon,
+  CalendarFeatureIcon,
+  ChoresFeatureIcon,
+  ReminderFeatureIcon,
+  LearningFeatureIcon,
+  ChevronRightIcon,
+} from "./Icons.jsx";
 
 const WA_LINK = "https://wa.me/972555175553?text=" + encodeURIComponent("היי שלי!");
 
 // ─── Bilingual content ───
+// Rethought for "personal + family" positioning (One Sheli, One Price).
+// Mock shows 1:1 personal chat (universal entry point), not a family group.
+// All CTAs use plural gender-free forms. No family-only framing.
 
 const CONTENT = {
   he: {
     dir: "rtl",
     font: "'Heebo', sans-serif",
-    tagline: "העוזרת החכמה של הבית והמשפחה",
-    mockGroup: "משפחת כהן",
-    mockMembers: "אמא, אבא, נועה, איתי, שלי",
+    tagline: "העוזרת החכמה שלכם בווטסאפ",
+    subline: "לכם ולבית",
+    mockChatName: "שלי",
+    mockStatus: "מחוברת",
+    mockAvatar: "ש",
     mockMessages: [
-      { sender: "אמא", text: "חלב, לחם וביצים", type: "user" },
-      { sender: "שלי", text: "\u{1F6D2} הוספתי חלב, לחם וביצים לרשימה", type: "bot" },
-      { sender: "אבא", text: "@שלי תזכירי לי לעצור בסופר בדרך הביתה", type: "user", mention: "@שלי" },
-      { sender: "שלי", text: "\u{1F514} בשמחה! אזכיר לך ב-18:00 לעצור בסופר", type: "bot" },
-      { sender: "שלי", text: "\u{1F381} זוכרים שיש יומולדת לסבתא ביום שישי? זמן טוב לקנות מתנה", type: "bot" },
+      { text: "חלב, ביצים ולחם", type: "user" },
+      { text: "\u{1F6D2} הוספתי לרשימה!", type: "bot" },
+      { text: "תזכירי לי מחר לשלם חשבון חשמל", type: "user" },
+      { text: "\u{1F514} בשמחה! אזכיר לך מחר ב-9 בבוקר", type: "bot" },
     ],
-    cta: "הוסיפו את שלי לקבוצה",
+    cta: "שלחו הודעה לשלי",
     freeBadge: "חינם לגמרי · עד 30 פעולות בחודש · בלי כרטיס אשראי",
     qrLabel: "או סרקו את הקוד",
     signin: "יש לי כבר חשבון \u2190 כניסה",
     featuresTitle: "מה שלי יודעת לעשות?",
     features: [
-      { Icon: ShoppingFeatureIcon, title: "רשימת קניות", subtitle: 'אמרו "חלב" בקבוצה וזה ברשימה. בלי אפליקציה, בלי הקלדה' },
-      { Icon: CalendarFeatureIcon, title: "חוגים, הסעות ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן המשפחתי" },
-      { Icon: ChoresFeatureIcon, title: "מטלות בית", subtitle: "מי עושה מה ומתי, שלי זוכרת ומעדכנת" },
+      { Icon: ShoppingFeatureIcon, title: "רשימת קניות", subtitle: "כתבו \u0022חלב\u0022 לשלי והיא מוסיפה לרשימה. בלי אפליקציה, בלי הקלדה" },
+      { Icon: ReminderFeatureIcon, title: "תזכורות חכמות", subtitle: "\u0022שלי, תזכירי לי...\u0022 והיא מזכירה בזמן. גם דברים שחוזרים כל שבוע" },
+      { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
+      { Icon: ChoresFeatureIcon, title: "מטלות בית", subtitle: "מי עושה מה ומתי — שלי זוכרת ומעדכנת" },
+      { Icon: LearningFeatureIcon, title: "שלי לומדת אתכם", subtitle: "ככל שתשתמשו יותר, שלי מבינה אתכם טוב יותר — כינויים, מוצרים, הרגלים" },
+    ],
+    personasTitle: "שלי מתאימה לכולם",
+    personas: [
+      { emoji: "\u{1F3E0}", title: "גרים לבד?", text: "קניות, תזכורות וסידורים — כמו עוזרת אישית בווטסאפ" },
+      { emoji: "\u{1F46B}", title: "עם שותפים?", text: "הוסיפו את שלי לקבוצה — מי קונה, מי מנקה, הכל מתואם" },
+      { emoji: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}", title: "משפחה?", text: "ניהול הבית — קניות, הסעות, חוגים, מטלות ותזכורות לכל המשפחה" },
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
-      { title: "הוסיפו את שלי לקבוצת הווטסאפ", subtitle: "לחצו על הכפתור ושלי מצטרפת לקבוצה שלכם" },
-      { title: "דברו כרגיל", subtitle: "שלי מבינה עברית טבעית: קניות, מטלות, אירועים" },
+      { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "לחצו על הכפתור ושלי מתחילה לעזור" },
+      { title: "דברו כרגיל", subtitle: "שלי מבינה עברית טבעית: קניות, מטלות, תזכורות" },
       { title: "הכל מסתדר", subtitle: "הרשימה, היומן והמטלות מתעדכנים אוטומטית" },
     ],
     faqTitle: "שאלות נפוצות",
     faq: [
-      { q: "איך שלי עובדת?", a: "שלי היא מנוע בינה מלאכותית חכם שמבין עברית בשיחה טבעית — תגידו \u0022חלב\u0022 והיא תוסיף לרשימה, תכתבו \u0022לאסוף את נועה מהחוג ב-5\u0022 והיא תזכיר לכם בזמן, ואפילו תחלק מטלות בית בין בני הבית. היא לומדת את הסגנון שלכם עם הזמן — כינויים, מוצרים קבועים, שעות שחוזרות. ככל שתשתמשו יותר, היא תבין אתכם טוב יותר." },
-      { q: "יש גם אפליקציה?", a: "כן! לשלי יש אפליקציה נהדרת - רשימת הקניות, המטלות ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה. אפשר לצפות בהכל, לערוך ולהתעדכן בקלות. היכנסו: sheli.ai" },
-      { q: "כמה זה עולה?", a: "חינם לגמרי עד 30 פעולות בחודש, כל חודש!\nצריכים יותר פעולות? הצטרפו למנוי פרימיום ללא הגבלה ב-9.90 \u20AA לחודש בלבד." },
-      { q: "מה עם הפרטיות?", a: "שלי לא שומרת תמונות או וידאו. היא יכולה לשמוע הודעות קוליות קצרות - תוכלו להקליט לה את המצרכים לקניות או את מטלות הבית בדיוק כמו בהודעת טקסט - היא לא שומרת את ההקלטה אלא רק את התוכן שלה, בדיוק כמו הודעה רגילה. כל המידע נמחק אחרי 30 יום. שיחות אישיות? שלי לא רואה אותן בכלל. רק בני הבית שלכם רואים את המידע - אף אחד אחר לא יכול לגשת למידע, כולל אותנו." },
-      { q: "איך מתחילים? ואיך מפסיקים?", a: "הוסיפו את שלי לכל קבוצת ווטסאפ קיימת — היא מתחילה לעזור מיד. רוצים להפסיק? פשוט הוציאו אותה מהקבוצה. הכל נמחק אוטומטית, בלי התחייבות." },
+      { q: "איך שלי עובדת?", a: "שלי היא עוזרת חכמה בווטסאפ שמבינה עברית טבעית. כתבו \u0022חלב\u0022 והיא תוסיף לרשימה, \u0022תזכירי לי...\u0022 והיא תזכיר בזמן. שלי עובדת בצ\u0027אט אישי ובקבוצות — לבד או עם כל מי שגר איתכם. היא לומדת את הסגנון שלכם עם הזמן: כינויים, מוצרים קבועים, הרגלים." },
+      { q: "אני גר/ה לבד, שלי מתאימה לי?", a: "בטח! שלי מתאימה לכל מי שרוצה קצת יותר סדר בחיים. קניות, תזכורות, סידורים — הכל בהודעה פשוטה בווטסאפ." },
+      { q: "אני גר/ה עם שותפים, שלי יכולה לעזור?", a: "בטח! תוסיפו את שלי לקבוצת הדירה והיא תתאם הכל — מי קונה חלב, תור למקלחת, ומי שוטף כלים \u{1F9F9}" },
+      { q: "יש גם אפליקציה?", a: "כן! לשלי יש אפליקציה נהדרת — רשימת הקניות, המטלות ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה. היכנסו: sheli.ai" },
+      { q: "כמה זה עולה?", a: "חינם לגמרי עד 30 פעולות בחודש, כל חודש!\nצריכים יותר? פרימיום ללא הגבלה ב-9.90 \u20AA לחודש בלבד." },
+      { q: "מה עם הפרטיות?", a: "שלי לא שומרת תמונות או וידאו. הודעות קוליות קצרות? שלי שומעת ומבינה, אבל לא שומרת את ההקלטה — רק את התוכן, בדיוק כמו הודעה רגילה. כל המידע נמחק אחרי 30 יום. רק אתם רואים את המידע שלכם — אף אחד אחר, כולל אותנו." },
+      { q: "איך מתחילים? ואיך מפסיקים?", a: "שלחו הודעה לשלי בווטסאפ — היא מתחילה לעזור מיד. רוצים שכולם בבית ישתתפו? הוסיפו אותה לקבוצת ווטסאפ. רוצים להפסיק? פשוט תפסיקו לכתוב. כל המידע נמחק אוטומטית, בלי התחייבות." },
     ],
     bottomTitle: "מוכנים להתחיל?",
     bottomLink: "קחו אותי לאפליקציה",
@@ -52,44 +73,55 @@ const CONTENT = {
   en: {
     dir: "ltr",
     font: "'Nunito', sans-serif",
-    tagline: "Your home & family's smart helper",
-    mockGroup: "The Johnsons",
-    mockMembers: "Mom, Dad, Emma, Jake, Sheli",
+    tagline: "Your smart helper on WhatsApp",
+    subline: "For you & your home",
+    mockChatName: "Sheli",
+    mockStatus: "online",
+    mockAvatar: "S",
     mockMessages: [
-      { sender: "Mom", text: "Milk, bread and eggs", type: "user" },
-      { sender: "Sheli", text: "\u{1F6D2} Added milk, bread and eggs to the list", type: "bot" },
-      { sender: "Dad", text: "@Sheli remind me to stop at the store on the way home", type: "user", mention: "@Sheli" },
-      { sender: "Sheli", text: "\u{1F514} Sure! I'll remind you at 6pm to stop at the store", type: "bot" },
-      { sender: "Sheli", text: "\u{1F381} Remember Grandma's birthday is on Friday? Good time to get a gift", type: "bot" },
+      { text: "Milk, bread and eggs", type: "user" },
+      { text: "\u{1F6D2} Added to the list!", type: "bot" },
+      { text: "Remind me to pay the electric bill tomorrow", type: "user" },
+      { text: "\u{1F514} Sure! I'll remind you tomorrow at 9am", type: "bot" },
     ],
-    cta: "Add Sheli to your group",
-    freeBadge: "Completely free · Up to 30 actions/month · No credit card",
+    cta: "Send Sheli a message",
+    freeBadge: "Completely free \u00B7 Up to 30 actions/month \u00B7 No credit card",
     qrLabel: "or scan the code",
     signin: "I have an account \u2192 Sign in",
     featuresTitle: "What can Sheli do?",
     features: [
-      { Icon: ShoppingFeatureIcon, title: "Shopping lists", subtitle: 'Say "milk" in the group and it\'s on the list. No app, no typing.' },
-      { Icon: CalendarFeatureIcon, title: "Events & scheduling", subtitle: "Sheli spots dates and organizes the family calendar" },
-      { Icon: ChoresFeatureIcon, title: "Household tasks", subtitle: "Who does what and when — Sheli remembers and updates" },
+      { Icon: ShoppingFeatureIcon, title: "Shopping lists", subtitle: "Text \u0022milk\u0022 to Sheli and it's on the list. No app needed." },
+      { Icon: ReminderFeatureIcon, title: "Smart reminders", subtitle: "\u0022Sheli, remind me...\u0022 and she'll remind you on time. Even recurring ones." },
+      { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
+      { Icon: ChoresFeatureIcon, title: "Household tasks", subtitle: "Who does what and when \u2014 Sheli remembers and updates" },
+      { Icon: LearningFeatureIcon, title: "Sheli learns you", subtitle: "The more you use her, the better she gets \u2014 nicknames, products, routines" },
+    ],
+    personasTitle: "Works for everyone",
+    personas: [
+      { emoji: "\u{1F3E0}", title: "Living alone?", text: "Shopping, reminders and daily tasks \u2014 like a personal assistant on WhatsApp" },
+      { emoji: "\u{1F46B}", title: "Roommates?", text: "Add Sheli to the group \u2014 who buys, who cleans, all coordinated" },
+      { emoji: "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}", title: "Family?", text: "Manage the household \u2014 shopping, rides, activities, tasks and reminders for everyone" },
     ],
     stepsTitle: "How does it work?",
     steps: [
-      { title: "Add Sheli to your WhatsApp group", subtitle: "Tap the button and Sheli joins your group" },
-      { title: "Just talk normally", subtitle: "Sheli understands natural language: shopping, tasks, events" },
+      { title: "Send Sheli a message on WhatsApp", subtitle: "Tap the button and Sheli starts helping" },
+      { title: "Just talk naturally", subtitle: "Sheli understands natural language: shopping, tasks, reminders" },
       { title: "Everything stays organized", subtitle: "Lists, calendar and tasks update automatically" },
     ],
     faqTitle: "FAQ",
     faq: [
-      { q: "How does Sheli work?", a: "Sheli is a smart AI that understands natural language — say \"milk\" and it's on the list, write \"pick up Emma from class at 5\" and she'll remind you on time, even assign chores around the house. She learns your style over time — nicknames, regular products, recurring schedules. The more you use her, the better she gets." },
-      { q: "Is there also an app?", a: "Yes! Sheli has an amazing app — your shopping list, tasks and calendar sync in real time, both from WhatsApp and the app. View, edit and stay up to date easily. Visit: sheli.ai" },
-      { q: "How much does it cost?", a: "30 actions per month for free, no credit card needed. Want unlimited? Premium is $2.70/month." },
-      { q: "What about privacy?", a: "Sheli doesn't store photos or videos. She can listen to short voice messages — you can record your shopping list or household tasks just like a text message. She doesn't save the recording, only its content, just like a regular message. All data is deleted after 30 days. Personal conversations? Sheli doesn't see them at all. Only your household members can see your data — nobody else, including us." },
-      { q: "How do I start? And stop?", a: "Add Sheli to any existing WhatsApp group — she starts helping right away. Want to stop? Just remove her from the group. Everything is deleted automatically, no strings attached." },
+      { q: "How does Sheli work?", a: "Sheli is a smart WhatsApp assistant that understands natural language. Say \u0022milk\u0022 and it's on the list, say \u0022remind me...\u0022 and she'll remind you on time. Sheli works in private chat and in groups \u2014 alone or with everyone in your home. She learns your style over time: nicknames, regular products, routines." },
+      { q: "I live alone \u2014 is Sheli for me?", a: "Absolutely! Sheli is for anyone who wants a bit more order in life. Shopping, reminders, daily tasks \u2014 all in a simple WhatsApp message." },
+      { q: "I have roommates \u2014 can Sheli help?", a: "Of course! Add Sheli to your apartment group and she'll coordinate everything \u2014 who buys milk, cleaning turns, and who does the dishes \u{1F9F9}" },
+      { q: "Is there also an app?", a: "Yes! Sheli has a great app \u2014 your shopping list, tasks and calendar sync in real time, from both WhatsApp and the app. Visit: sheli.ai" },
+      { q: "How much does it cost?", a: "30 actions per month for free, every month!\nNeed more? Unlimited Premium for just $2.70/month." },
+      { q: "What about privacy?", a: "Sheli doesn't store photos or videos. Short voice messages? Sheli listens and understands, but doesn't save the recording \u2014 only the content, just like a text message. All data is deleted after 30 days. Only you can see your data \u2014 nobody else, including us." },
+      { q: "How do I start? And stop?", a: "Send Sheli a message on WhatsApp \u2014 she starts helping right away. Want everyone at home to join? Add her to a WhatsApp group. Want to stop? Just stop writing. All data is deleted automatically, no strings attached." },
     ],
     bottomTitle: "Ready to get started?",
     bottomLink: "Take me to the app",
     bottomOr: "or",
-    langToggle: "עב",
+    langToggle: "\u05E2\u05D1",
   },
 };
 
@@ -121,29 +153,25 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <section className="landing-hero">
         <h1 className="landing-wordmark">sheli</h1>
         <p className="landing-tagline">{c.tagline}</p>
+        <p className="landing-subline">{c.subline}</p>
 
-        {/* WhatsApp Mock */}
+        {/* WhatsApp Mock — 1:1 personal chat */}
         <div className="wa-mock">
           <div className="wa-mock-header">
-            <div className="wa-mock-avatar">👨‍👩‍👧</div>
-            <div className="wa-mock-group-info">
-              <span className="wa-mock-group-name">{c.mockGroup}</span>
-              <span className="wa-mock-group-members">{c.mockMembers}</span>
+            <div className="wa-mock-avatar wa-mock-avatar-sheli">{c.mockAvatar}</div>
+            <div className="wa-mock-contact-info">
+              <span className="wa-mock-contact-name">{c.mockChatName}</span>
+              <span className="wa-mock-contact-status">{c.mockStatus}</span>
             </div>
           </div>
-          <div className="wa-mock-chat" style={{ direction: lang === "he" ? "rtl" : "ltr" }}>
+          <div className="wa-mock-chat">
             {c.mockMessages.map((msg, i) => (
               <div
                 key={i}
                 className={`wa-bubble wa-bubble-${msg.type}`}
-                style={{ animationDelay: `${i * 0.15}s` }}
+                style={{ animationDelay: `${i * 0.15}s`, direction: c.dir }}
               >
-                <span className={`wa-bubble-sender wa-bubble-sender-${msg.type}`}>
-                  {msg.sender}
-                </span>
-                {msg.mention
-                  ? <>{msg.text.split(msg.mention)[0]}<span className="wa-mention">{msg.mention}</span>{msg.text.split(msg.mention)[1]}</>
-                  : msg.text}
+                {msg.text}
                 <span className="wa-bubble-time">
                   {`${14 + Math.floor(i / 2)}:${i % 2 === 0 ? "32" : "33"}`}
                 </span>
@@ -160,7 +188,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
         <div className="landing-free-badge">{c.freeBadge}</div>
 
         <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-qr">
-          <img src="/qr-whatsapp.svg" alt="QR code to add Sheli on WhatsApp" width="140" height="140" />
+          <img src="/qr-whatsapp.svg" alt="QR code to message Sheli on WhatsApp" width="140" height="140" />
           <span className="landing-qr-label">{c.qrLabel}</span>
         </a>
 
@@ -169,7 +197,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
         </button>
       </section>
 
-      {/* ─── Features ─── */}
+      {/* ─── Features (5 cards) ─── */}
       <section className="landing-features">
         <h2 className="landing-section-title">{c.featuresTitle}</h2>
         <div className="feature-cards">
@@ -182,6 +210,20 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
                 <h3>{f.title}</h3>
                 <p>{f.subtitle}</p>
               </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── Personas — "Works for everyone" ─── */}
+      <section className="landing-personas">
+        <h2 className="landing-section-title">{c.personasTitle}</h2>
+        <div className="persona-cards">
+          {c.personas.map((p, i) => (
+            <div key={i} className="persona-card">
+              <span className="persona-emoji">{p.emoji}</span>
+              <h3>{p.title}</h3>
+              <p>{p.text}</p>
             </div>
           ))}
         </div>

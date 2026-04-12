@@ -1,4 +1,4 @@
-/* Landing Page — Mobile-first, RTL Hebrew */
+/* Landing Page — Mobile-first, personal + family positioning */
 
 .landing {
   height: 100dvh;
@@ -60,13 +60,22 @@
   font-size: 16px;
   font-weight: 400;
   color: var(--warm);
-  margin: 8px 0 28px;
+  margin: 8px 0 4px;
   text-align: center;
   max-width: 320px;
   line-height: 1.5;
 }
 
-/* ─── WhatsApp Mock ─── */
+.landing-subline {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent, #2AB673);
+  margin: 0 0 28px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+/* ─── WhatsApp Mock — 1:1 personal chat ─── */
 
 .wa-mock {
   width: 100%;
@@ -98,18 +107,26 @@
   flex-shrink: 0;
 }
 
-.wa-mock-group-info {
+.wa-mock-avatar-sheli {
+  background: linear-gradient(135deg, #E8725C, #D4507A);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Heebo', sans-serif;
+}
+
+.wa-mock-contact-info {
   display: flex;
   flex-direction: column;
 }
 
-.wa-mock-group-name {
+.wa-mock-contact-name {
   color: #e9edef;
   font-size: 14px;
   font-weight: 500;
 }
 
-.wa-mock-group-members {
+.wa-mock-contact-status {
   color: #8696a0;
   font-size: 11px;
 }
@@ -120,7 +137,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 200px;
+  min-height: 180px;
+  /* Always LTR layout — user msgs on right, bot msgs on left */
+  direction: ltr;
 }
 
 .wa-bubble {
@@ -138,7 +157,7 @@
   color: #e9edef;
   align-self: flex-end;
   border-bottom-left-radius: 2px;
-  direction: rtl;
+  /* text direction set inline per language */
 }
 
 .wa-bubble-bot {
@@ -147,27 +166,7 @@
   align-self: flex-start;
   border-bottom-right-radius: 2px;
   border: 1px solid #25D366;
-  direction: rtl;
-}
-
-.wa-bubble-sender {
-  font-size: 11px;
-  font-weight: 600;
-  margin-bottom: 2px;
-  display: block;
-}
-
-.wa-bubble-sender-user {
-  color: #53bdeb;
-}
-
-.wa-bubble-sender-bot {
-  color: #25D366;
-}
-
-.wa-mention {
-  color: #53bdeb;
-  font-weight: 500;
+  /* text direction set inline per language */
 }
 
 .wa-bubble-time {
@@ -329,6 +328,53 @@
   line-height: 1.5;
 }
 
+/* ─── Personas — "Works for everyone" ─── */
+
+.landing-personas {
+  padding: 48px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--white);
+}
+
+.persona-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.persona-card {
+  background: var(--cream, #FAFCFB);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: var(--sh);
+}
+
+.persona-emoji {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.persona-card h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dark);
+}
+
+.persona-card p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--warm);
+  line-height: 1.5;
+}
+
 /* ─── How It Works ─── */
 
 .landing-steps {
@@ -336,7 +382,6 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--white);
 }
 
 .steps-list {
@@ -388,6 +433,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  background: var(--white);
 }
 
 .faq-list {
@@ -447,7 +493,7 @@
 }
 
 .faq-answer.open {
-  max-height: 200px;
+  max-height: 300px;
   padding: 0 0 16px;
 }
 
@@ -458,7 +504,6 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--white);
 }
 
 .landing-bottom-cta .landing-section-title {
@@ -503,14 +548,27 @@
 
   .feature-cards {
     flex-direction: row;
+    flex-wrap: wrap;
     max-width: 720px;
+    justify-content: center;
   }
 
   .feature-card {
-    flex: 1;
+    flex: 1 1 calc(33% - 12px);
+    min-width: 200px;
+    max-width: 240px;
     flex-direction: column;
     align-items: center;
     text-align: center;
+  }
+
+  .persona-cards {
+    flex-direction: row;
+    max-width: 720px;
+  }
+
+  .persona-card {
+    flex: 1;
   }
 
   .steps-list {

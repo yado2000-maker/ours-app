@@ -617,6 +617,54 @@ export function ChoresFeatureIcon({ size = 28 }) {
   );
 }
 
+/** Bell icon — reminders feature highlight */
+export function ReminderFeatureIcon({ size = 28 }) {
+  const accent = 'var(--accent, #C4714A)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Bell body */}
+      <path
+        d="M14 4C10.686 4 8 6.686 8 10V15C8 15.8 7.2 16.8 6 17.5H22C20.8 16.8 20 15.8 20 15V10C20 6.686 17.314 4 14 4Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Clapper */}
+      <path
+        d="M12 20.5C12 21.6 12.9 22.5 14 22.5C15.1 22.5 16 21.6 16 20.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      {/* Top knob */}
+      <circle cx="14" cy="4" r="1.2" fill={accent} />
+    </svg>
+  );
+}
+
+/** Sparkle icon — learning/AI feature highlight */
+export function LearningFeatureIcon({ size = 28 }) {
+  const accent = 'var(--accent, #C4714A)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Main 4-point sparkle */}
+      <path
+        d="M14 3L16 11L24 14L16 17L14 25L12 17L4 14L12 11Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      {/* Small accent sparkle */}
+      <path
+        d="M22 5L22.8 7.5L25 8.5L22.8 9.5L22 12L21.2 9.5L19 8.5L21.2 7.5Z"
+        fill={accent}
+        opacity="0.6"
+      />
+    </svg>
+  );
+}
+
 // -----------------------------------------------------------------------------
 // UTILITY — Additional commonly needed icons
 // -----------------------------------------------------------------------------
