@@ -39,6 +39,17 @@ const FUNNEL_LABELS = {
   nudging: "Nudging", sleeping: "Sleeping", dormant: "Dormant",
 };
 
+const CHANNEL_LABELS = {
+  personal_only: "Personal only",
+  group_only:    "Group only",
+  both:          "Both",
+};
+const CHANNEL_COLORS = {
+  personal_only: "#E8725C", // coral
+  group_only:    "#2AB673", // green
+  both:          "#5B8DEF", // blue
+};
+
 // ── Helpers ──
 
 function relativeTime(dateStr) {
@@ -828,6 +839,87 @@ export default function AdminDashboard({ session, onBack }) {
               <p style={{ fontSize: 14, color: "var(--muted)" }}>No web traffic yet</p>
               <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Sessions will appear after users open the app</p>
             </div>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 5b: Channels — 1:1 / group / both breakdown
+        ══════════════════════════════════════════════ */}
+        <Section title="Channels" subtitle="How the user base splits between personal and group usage">
+          {channelStats && Object.keys(channelStats).length > 0 ? (
+            <>
+              {/* Top: 3 stat cards */}
+              <div className="adm-grid3" style={{ marginBottom: 16 }}>
+                <StatCard
+                  label="Personal only"
+                  value={channelStats.channels.personal_only.households}
+                  sub={`${channelStats.channels.personal_only.active_7d} active this week`}
+                  color={CHANNEL_COLORS.personal_only}
+                />
+                <StatCard
+                  label="Group only"
+                  value={channelStats.channels.group_only.households}
+                  sub={`${channelStats.channels.group_only.active_7d} active this week`}
+                  color={CHANNEL_COLORS.group_only}
+                />
+                <StatCard
+                  label="Both channels"
+                  value={channelStats.channels.both.households}
+                  sub={`${channelStats.channels.both.active_7d} active this week`}
+                  color={CHANNEL_COLORS.both}
+                />
+              </div>
+
+              {/* Middle: donut chart of channel distribution */}
+              <div style={{
+                background: "var(--white)", borderRadius: "var(--radius-card)",
+                boxShadow: "var(--sh)", padding: 20, marginBottom: 16,
+                display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap",
+              }}>
+                <DonutChart
+                  data={[
+                    { label: CHANNEL_LABELS.personal_only, value: channelStats.channels.personal_only.households, color: CHANNEL_COLORS.personal_only },
+                    { label: CHANNEL_LABELS.group_only,    value: channelStats.channels.group_only.households,    color: CHANNEL_COLORS.group_only },
+                    { label: CHANNEL_LABELS.both,          value: channelStats.channels.both.households,          color: CHANNEL_COLORS.both },
+                  ]}
+                  size={160}
+                />
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>Household distribution</div>
+                  {["personal_only", "group_only", "both"].map((key) => {
+                    const total = channelStats.channels.personal_only.households
+                                + channelStats.channels.group_only.households
+                                + channelStats.channels.both.households;
+                    const n = channelStats.channels[key].households;
+                    const pct = total === 0 ? 0 : ((n / total) * 100).toFixed(1);
+                    return (
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, fontSize: 14 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: CHANNEL_COLORS[key] }} />
+                        <span style={{ flex: 1, color: "var(--dark)" }}>{CHANNEL_LABELS[key]}</span>
+                        <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{n} ({pct}%)</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Bottom: retention by channel table */}
+              <div style={{ background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 12px", color: "var(--dark)" }}>7-day retention by channel</h3>
+                <DataTable
+                  columns={[
+                    { key: "channel", label: "Channel", render: (r) => CHANNEL_LABELS[r.channel] || r.channel },
+                    { key: "total", label: "Households" },
+                    { key: "active_7d", label: "Active 7d" },
+                    { key: "pct", label: "Retention %", render: (r) => `${r.pct}%` },
+                  ]}
+                  rows={channelStats.retention_by_channel || []}
+                  emptyMsg="No channel data yet."
+                />
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 13, color: "var(--muted)" }}>Loading channels…</p>
           )}
         </Section>
 
