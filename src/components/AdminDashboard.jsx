@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase } from "../lib/supabase.js";
+import { supabase, fetchAdminChannelStats } from "../lib/supabase.js";
 
 const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c", "9698d5df-e40e-4f2b-a91e-a911f14fe1c8", "dc552ffd-65f5-4943-a64a-8f6d56c8578a"];
 const REFRESH_INTERVAL = 60000;
@@ -37,6 +37,17 @@ const FUNNEL_LABELS = {
   welcomed: "Welcomed", chatting: "Chatting", invited: "Invited",
   joined: "Joined", personal: "Personal Channel",
   nudging: "Nudging", sleeping: "Sleeping", dormant: "Dormant",
+};
+
+const CHANNEL_LABELS = {
+  personal_only: "Personal only",
+  group_only:    "Group only",
+  both:          "Both",
+};
+const CHANNEL_COLORS = {
+  personal_only: "#E8725C", // coral
+  group_only:    "#2AB673", // green
+  both:          "#5B8DEF", // blue
 };
 
 // ── Helpers ──
@@ -141,18 +152,23 @@ function Sparkline({ data = [], width = "100%", height = 120, color = "var(--acc
 
 // ── Donut Chart (CSS conic-gradient) ──
 
-function DonutChart({ data, size = 200 }) {
-  const entries = Object.entries(data).filter(([k]) => k !== "ignore").sort((a, b) => b[1] - a[1]);
-  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+function DonutChart({ data, size = 200, centerLabel = "actions" }) {
+  // Polymorphic: accept legacy {key:value} object OR [{label,value,color}] array
+  const normalized = Array.isArray(data)
+    ? data.map((d, i) => ({ key: d.label || String(i), label: d.label, value: d.value, color: d.color }))
+    : Object.entries(data)
+        .filter(([k]) => k !== "ignore")
+        .sort((a, b) => b[1] - a[1])
+        .map(([key, value]) => ({ key, label: key.replace(/_/g, " "), value, color: INTENT_COLORS[key] || INTENT_COLORS.other }));
+
+  const total = normalized.reduce((sum, n) => sum + n.value, 0);
   if (!total) return <div style={{ width: size, height: size, borderRadius: "50%", background: "var(--border)" }} />;
 
   let cumPct = 0;
-  const stops = [];
-  entries.forEach(([key, val]) => {
-    const color = INTENT_COLORS[key] || INTENT_COLORS.other;
+  const stops = normalized.map((n) => {
     const startPct = cumPct;
-    cumPct += (val / total) * 100;
-    stops.push(`${color} ${startPct}% ${cumPct}%`);
+    cumPct += (n.value / total) * 100;
+    return `${n.color} ${startPct}% ${cumPct}%`;
   });
 
   const gradient = `conic-gradient(${stops.join(", ")})`;
@@ -169,18 +185,18 @@ function DonutChart({ data, size = 200 }) {
           flexDirection: "column",
         }}>
           <span style={{ fontSize: 22, fontWeight: 800, color: "var(--dark)" }}>{total}</span>
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>actions</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{centerLabel}</span>
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {entries.map(([key, val]) => (
-          <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+        {normalized.map((n) => (
+          <div key={n.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             <span style={{
               width: 12, height: 12, borderRadius: 3, flexShrink: 0,
-              background: INTENT_COLORS[key] || INTENT_COLORS.other,
+              background: n.color,
             }} />
-            <span style={{ color: "var(--dark)", fontWeight: 600 }}>{key.replace(/_/g, " ")}</span>
-            <span style={{ color: "var(--muted)" }}>{val} ({pct(val, total)})</span>
+            <span style={{ color: "var(--dark)", fontWeight: 600 }}>{n.label}</span>
+            <span style={{ color: "var(--muted)" }}>{n.value} ({pct(n.value, total)})</span>
           </div>
         ))}
       </div>
@@ -265,6 +281,7 @@ export default function AdminDashboard({ session, onBack }) {
   const [overview, setOverview] = useState(null);
   const [funnel, setFunnel] = useState(null);
   const [features, setFeatures] = useState(null);
+  const [channelStats, setChannelStats] = useState(null);
   const [period, setPeriod] = useState(7);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
@@ -281,10 +298,11 @@ export default function AdminDashboard({ session, onBack }) {
     setError(null);
 
     try {
-      const [overviewRes, funnelRes, featuresRes] = await Promise.all([
+      const [overviewRes, funnelRes, featuresRes, chRes] = await Promise.all([
         supabase.rpc("admin_dashboard_overview", { p_days: period }),
         supabase.rpc("admin_funnel_stats"),
         supabase.rpc("admin_feature_stats", { p_days: period }),
+        fetchAdminChannelStats(period),
       ]);
 
       if (overviewRes.error) throw new Error(`Overview: ${overviewRes.error.message}`);
@@ -304,6 +322,7 @@ export default function AdminDashboard({ session, onBack }) {
       setOverview(ov);
       setFunnel(fn);
       setFeatures(ft);
+      setChannelStats(chRes || null);
       setLastRefresh(new Date());
     } catch (err) {
       console.error("[AdminDashboard] fetch error:", err);
@@ -825,6 +844,105 @@ export default function AdminDashboard({ session, onBack }) {
               <p style={{ fontSize: 14, color: "var(--muted)" }}>No web traffic yet</p>
               <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Sessions will appear after users open the app</p>
             </div>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 5b: Channels — 1:1 / group / both breakdown
+        ══════════════════════════════════════════════ */}
+        <Section title="Channels" subtitle="How the user base splits between personal and group usage">
+          {channelStats && Object.keys(channelStats).length > 0 ? (
+            <>
+              {/* NOTE: channelStats.funnel_counts is unused — duplicates admin_funnel_stats. Remove from RPC later. */}
+              {/* Top: 3 stat cards */}
+              <div className="adm-grid3" style={{ marginBottom: 16 }}>
+                <StatCard
+                  label="Personal only"
+                  value={channelStats.channels.personal_only.households}
+                  sub={`${channelStats.channels.personal_only.active_7d} active this week`}
+                  color={CHANNEL_COLORS.personal_only}
+                />
+                <StatCard
+                  label="Group only"
+                  value={channelStats.channels.group_only.households}
+                  sub={`${channelStats.channels.group_only.active_7d} active this week`}
+                  color={CHANNEL_COLORS.group_only}
+                />
+                <StatCard
+                  label="Both channels"
+                  value={channelStats.channels.both.households}
+                  sub={`${channelStats.channels.both.active_7d} active this week`}
+                  color={CHANNEL_COLORS.both}
+                />
+              </div>
+
+              {/* Middle: donut chart of channel distribution */}
+              <div style={{
+                background: "var(--white)", borderRadius: "var(--radius-card)",
+                boxShadow: "var(--sh)", padding: 20, marginBottom: 16,
+              }}>
+                <DonutChart
+                  data={Object.keys(CHANNEL_LABELS).map((key) => ({
+                    label: CHANNEL_LABELS[key],
+                    value: channelStats.channels[key].households,
+                    color: CHANNEL_COLORS[key],
+                  }))}
+                  size={160}
+                  centerLabel="homes"
+                />
+              </div>
+
+              {/* Group nudge conversion — singles who added Sheli to a group after being nudged */}
+              <div style={{
+                background: "var(--white)", borderRadius: "var(--radius-card)",
+                boxShadow: "var(--sh)", padding: 20, marginBottom: 16,
+                display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap",
+              }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 4px", color: "var(--dark)" }}>Group-nudge conversion</h3>
+                  <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
+                    1:1 users who added Sheli to a group after being nudged about it (one-time mention, 2d or 5 actions)
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: "var(--dark)", lineHeight: 1 }}>
+                      {channelStats.group_nudge?.nudged ?? 0}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Nudged</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: CHANNEL_COLORS.both, lineHeight: 1 }}>
+                      {channelStats.group_nudge?.added_group ?? 0}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Added group</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", lineHeight: 1 }}>
+                      {(channelStats.group_nudge?.conversion_pct ?? 0).toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Conversion</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom: retention by channel table */}
+              <div style={{ background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20 }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 12px", color: "var(--dark)" }}>7-day retention by channel</h3>
+                <DataTable
+                  columns={[
+                    { key: "channel", label: "Channel", render: (r) => CHANNEL_LABELS[r.channel] || r.channel },
+                    { key: "total", label: "Households" },
+                    { key: "active_7d", label: "Active 7d" },
+                    { key: "pct", label: "Retention %", render: (r) => `${r.pct}%` },
+                  ]}
+                  rows={channelStats.retention_by_channel || []}
+                  emptyMsg="No channel data yet."
+                />
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 13, color: "var(--muted)" }}>Loading channels…</p>
           )}
         </Section>
 
