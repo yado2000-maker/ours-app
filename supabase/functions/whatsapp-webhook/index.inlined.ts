@@ -2629,14 +2629,16 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
     }
 
     // Defense-in-depth: drop garbage actions even if Sonnet violates the prompt rules.
-    // Catches: trigger-word-only content, dateless events, missing reminder fields.
+    // TRIGGER_WORDS = command verbs that are NEVER valid content (only trigger words).
+    // Bare nouns like "מסיבה", "פגישה", "תור" are NOT here — they're valid content,
+    // just need additional info (date for events, time for reminders) which the
+    // type-specific checks below enforce separately.
     const TRIGGER_WORDS = new Set([
       "תזכירי לי", "תזכירי", "תזכורת", "תזכור", "תזכרי",
       "תוסיפי", "תוסיף", "להוסיף", "תכניסי", "תכניס",
       "תרשמי", "תרשום", "לרשום", "שמרי", "שמור", "לשמור",
-      "מסיבה", "אירוע", "פגישה", "תור",
       "לעשות", "לבצע", "לטפל",
-      "remind me", "reminder", "event", "task", "add",
+      "remind me", "reminder", "add",
     ]);
     const isTriggerWordOnly = (text: string): boolean => {
       const trimmed = (text || "").trim().toLowerCase();
