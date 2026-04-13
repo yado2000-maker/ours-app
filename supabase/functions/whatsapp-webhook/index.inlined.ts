@@ -992,7 +992,7 @@ ${isHe ? `Example vibes (create your OWN each time — never copy these verbatim
   "That's outside my wheelhouse 🤷‍♀️ But need to add something to the list?"
   "Sorry, not my area! I'm your household brain — chores, shopping, and scheduling."`}
 
-For info_request — Sheli's scope is ONLY her own data (lists, tasks, reminders, events). She has zero visibility into the real world. Identify which case this is:
+For info_request — Sheli's scope is ONLY her own data (lists, tasks, reminders, events). She has zero visibility into the real world. Two valid cases:
 
   (a) FEATURE SUGGESTION ("would be nice if you could X", "what if you tracked expenses", "אפשר להוסיף ש...", "יש לי הצעה ש...", "כדאי שתעשי X"):
       → Acknowledge warmly + commit to passing it on. Examples (vary, never copy verbatim):
@@ -1005,15 +1005,12 @@ For info_request — Sheli's scope is ONLY her own data (lists, tasks, reminders
         sheli.ai
       → Example: "הכל מרוכז פה:\n\nsheli.ai"
 
-  (c) REAL-WORLD ACTIONS / PURCHASES / WHEREABOUTS ("did mom buy milk?", "האם אבא קנה X?", "מי לקח את הילדים?", "did anyone do Y?"):
-      → This is OUTSIDE Sheli's scope. She has no surveillance, no tracking, no idea what people did in real life. She only knows what's been added to HER lists/reminders/events.
-      → DO NOT answer. DO NOT deflect to a specific family member by name. DO NOT pretend to know.
-      → Either stay silent (if message is ambient family chatter) OR give a brief honest non-answer like "אני לא בעניין הזה 🤷‍♀️" — and pivot to what you DO know if natural.
-      → Same principle as the existing location-question rule (איפה הבנות?) — Sheli stays out.
+NOTE: Real-world questions ("did mom buy milk?", "מי לקח את הילדים?", "אמור ואופק מתי תוכלו...") are filtered OUT before reaching this prompt by the routing-layer silence guard (addressed_to_bot=false). If you somehow receive one anyway, the rule is: STAY SILENT — return an empty reply. Do NOT improvise an opinion. Do NOT use phrases like "אני לא בעניין" or "I'm not into that" — those sound dismissive/judgmental and have caused families to churn.
 
 ABSOLUTE RULES:
 - Sheli is the product. Family members are users. NEVER suggest a user "ask [Name]" about anything — not Sheli's features, not real-world facts. Pulling names from FAMILY MEMORIES or member lists for deflection is forbidden.
 - Sheli only knows what's in her own data. She is not omniscient about the household.
+- When in doubt, SILENCE > opinion. Family chatter that wasn't directed at Sheli should not get a Sheli reply.
 
 APOLOGY STYLE — MANDATORY:
 When you make a mistake, misunderstand, or need to correct yourself:
@@ -3965,6 +3962,32 @@ Deno.serve(async (req: Request) => {
     if (classification.addressed_to_bot && !directAddress) {
       directAddress = true;
       console.log(`[Webhook] Layer 2: Haiku detected שלי as bot name (Layer 1 missed it)`);
+    }
+
+    // SILENCE GUARD — trust the classifier's "this isn't for the bot" verdict.
+    // Triggered by the AMOR/Tamar group case (Apr 13): Tamar wrote "אמור ואופק,
+    // מתי שניכם יכולים להבריז" — a coordination question to specific family
+    // members. Haiku correctly set addressed_to_bot=false. But routing fell
+    // through to Sonnet, which improvised a reply that AMOR perceived as Sheli
+    // having an opinion ("לא שאלנו מה דעתך" / "we didn't ask your opinion").
+    // This is the same churn pattern that lost the Ventura family.
+    //
+    // Rule: for any "talk-only" intent (question, info_request) where the
+    // classifier says addressed_to_bot=false AND the user didn't @-mention Sheli,
+    // STAY SILENT. No Sonnet call. No reply. This is preferred over chattiness
+    // because false-positive replies cause hostile reactions, while false-negative
+    // silences just teach users to write "שלי, ..." to engage the bot.
+    //
+    // Does NOT apply to actionable intents (add_*, complete_*, claim_*) — those
+    // require the user's text to be processable as an action regardless of address.
+    if (
+      !classification.addressed_to_bot &&
+      !directAddress &&
+      (classification.intent === "question" || classification.intent === "info_request")
+    ) {
+      console.log(`[Webhook] Silence guard: intent=${classification.intent} but addressed_to_bot=false and no direct mention — staying out of family chatter`);
+      await logMessage(message, "haiku_ignore", householdId, classification);
+      return new Response("OK", { status: 200 });
     }
 
     // 8. Route based on intent + confidence
