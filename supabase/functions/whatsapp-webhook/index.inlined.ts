@@ -3739,10 +3739,29 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // 6. Hebrew feminine imperative as FIRST word — strong "addressed to Sheli" signal.
+    // Sheli is the only feminine "you" in the household conversation context (the bot is
+    // grammatically female). When a user opens a message with תזכירי / תוסיפי / תרשמי / תגידי
+    // etc., they're commanding the bot. This catches messages like "תזכירי לנו מה יש היום"
+    // that don't say "שלי" but ARE addressed to Sheli via verb conjugation.
+    //
+    // Restricted to FIRST WORD only — avoids false positives like "אמא, תזכירי לי" where
+    // a family member is being addressed by name first.
+    const SHELI_IMPERATIVES = new Set([
+      "תזכירי", "תזכרי", "תוסיפי", "תרשמי", "תכתבי", "תגידי", "תאמרי",
+      "תספרי", "תבדקי", "תראי", "תפתחי", "תסגרי", "תעדכני", "תמחקי",
+      "תבטלי", "תסירי", "תוציאי", "תכניסי", "תיצרי", "תקבעי", "תסדרי",
+      "תספקי", "תעני", "תעזרי", "תנסי", "תחזרי", "תמצאי", "תפרטי",
+      "תסבירי", "תאשרי", "תקראי", "תחפשי", "תעבירי", "תשלחי",
+    ]);
+    const trimmedTxt = txt.replace(/^[\s!?.,]+/, "");
+    const firstWordOnly = trimmedTxt.split(/[\s,.:;!?\n]/)[0];
+    const imperativeFirstWord = SHELI_IMPERATIVES.has(firstWordOnly);
+
     const highConfidenceName = !sheliIsMine && (
       atMention || numericMention || englishMention ||
       sheliFirstWord || sheliAfterGreeting || sheliAfterThanks || sheliStandaloneEnd ||
-      voiceFuzzyMatch
+      voiceFuzzyMatch || imperativeFirstWord
     );
     // For ambiguous cases (שלי mid-sentence), directAddress stays false — Haiku Layer 2 decides
     let directAddress = highConfidenceName;
@@ -3758,7 +3777,7 @@ Deno.serve(async (req: Request) => {
       : txt;
 
     if (directAddress) {
-      console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention}, voiceFuzzy=${voiceFuzzyMatch})`);
+      console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention}, voiceFuzzy=${voiceFuzzyMatch}, imperative=${imperativeFirstWord ? firstWordOnly : false})`);
     }
 
     // 6b. Check for pending confirmation response
