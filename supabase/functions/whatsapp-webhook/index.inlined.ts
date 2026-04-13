@@ -2282,6 +2282,24 @@ RULES:
 12. Hebrew grammar: in construct state (סמיכות), ONLY the second noun gets ה. "שם המשתמש" NOT "השם המשתמש". "רשימת הקניות" NOT "הרשימת הקניות". "מספר הטלפון" NOT "המספר הטלפון".
 13. NEVER correct the user's Hebrew gender forms. If they write "אני צריך" — they are male. If "אני צריכה" — female. Their verb form IS their gender. Do not add asterisks (*), do not "fix" their grammar, do not suggest alternative forms. Match THEIR gender in your reply.
 
+ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
+14. NEVER store an action whose text is just a TRIGGER WORD with no real content:
+    - BAD: {"type":"reminder","text":"תזכירי לי"} ← "remind me" is the verb, not the content
+    - BAD: {"type":"event","text":"תזכורת"} ← "reminder" is a category, not an event title
+    - BAD: {"type":"task","text":"לעשות"} ← "to do" alone has no body
+    - If user says "תזכירי לי" with no follow-up → DO NOT create an action. Reply: "בשמחה! מה להזכיר ומתי? ⏰" and wait for them to provide content.
+    - If user says "תוסיפי לרשימה" with no item → reply: "מה להוסיף?" and wait.
+    - Same for: "תרשמי", "שמרי", "תזכרי", "להוסיף", "תזכורת" alone, "מסיבה" alone, "אירוע" alone.
+15. EVENTS MUST HAVE A DATE. If user mentions an event but no date/time → DO NOT store as event. Either:
+    (a) Ask: "מתי המסיבה? אני אשמור ביומן 📅" and wait.
+    (b) If they hint at a vague time ("בקרוב", "בעתיד") → store as TASK instead of event ({"type":"task","text":"לתכנן את המסיבה"}).
+    A bare "מסיבה" or "פגישה" with no date is NEVER a valid event.
+16. REMINDERS MUST HAVE BOTH content AND time. If either is missing → ask for the missing piece, do NOT store partial.
+    - "תזכירי לי לקחת ויטמינים" → MISSING TIME → ask "באיזו שעה?" and wait.
+    - "תזכירי לי בשעה 8" → MISSING CONTENT → ask "מה להזכיר ב-8?" and wait.
+    - Only when both are present, create the reminder action.
+17. If your extracted action text is < 3 chars or matches a known trigger word → drop the action and ask for clarification instead.
+
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
 <!--ACTIONS:[]-->
 <!--TRIED:[]-->
@@ -2608,6 +2626,46 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
     let actions: any[] = [];
     if (actionsMatch) {
       try { actions = JSON.parse(actionsMatch[1]); } catch {}
+    }
+
+    // Defense-in-depth: drop garbage actions even if Sonnet violates the prompt rules.
+    // Catches: trigger-word-only content, dateless events, missing reminder fields.
+    const TRIGGER_WORDS = new Set([
+      "תזכירי לי", "תזכירי", "תזכורת", "תזכור", "תזכרי",
+      "תוסיפי", "תוסיף", "להוסיף", "תכניסי", "תכניס",
+      "תרשמי", "תרשום", "לרשום", "שמרי", "שמור", "לשמור",
+      "מסיבה", "אירוע", "פגישה", "תור",
+      "לעשות", "לבצע", "לטפל",
+      "remind me", "reminder", "event", "task", "add",
+    ]);
+    const isTriggerWordOnly = (text: string): boolean => {
+      const trimmed = (text || "").trim().toLowerCase();
+      if (trimmed.length < 3) return true;
+      return TRIGGER_WORDS.has(trimmed);
+    };
+    const droppedActions: any[] = [];
+    actions = actions.filter((action: any) => {
+      if (!action?.type) return false;
+      const text = action.text || action.title || "";
+      // Reject empty or trigger-word-only actions
+      if (!text || isTriggerWordOnly(text)) {
+        droppedActions.push({ reason: "trigger_word_only", action });
+        return false;
+      }
+      // Events MUST have a date (ISO or string in any of: date, scheduled_for)
+      if (action.type === "event" && !action.date && !action.scheduled_for) {
+        droppedActions.push({ reason: "event_no_date", action });
+        return false;
+      }
+      // Reminders MUST have a time (send_at or time field)
+      if (action.type === "reminder" && !action.send_at && !action.time) {
+        droppedActions.push({ reason: "reminder_no_time", action });
+        return false;
+      }
+      return true;
+    });
+    if (droppedActions.length > 0) {
+      console.warn(`[1:1 Guardrail] Dropped ${droppedActions.length} bad actions for ${phone}:`, JSON.stringify(droppedActions));
     }
 
     // Parse tried capabilities
