@@ -279,7 +279,11 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **Beta mode:** `BETA_MODE=true` env var on whatsapp-webhook disables 30-action paywall. Remove to activate monetization.
 - **Referral system:** "Family brings Family" — referral code on `households_v2`, Vercel redirect `/r/:code` → WhatsApp, bot detects code in 1:1, rewards both families 30 days free at 10 actions. Design: `docs/plans/2026-04-07-family-brings-family-design.md`
 - **Implementation plan:** V3 active (`docs/implementation-plan-v3.md`), V2 superseded
+- **Admin Channels section** (2026-04-13): `admin_channel_stats(p_days)` RPC + Channels section in `AdminDashboard.jsx` showing 1:1/group/both breakdown, group-nudge conversion, and 7d retention by channel. Plan: `docs/plans/2026-04-13-admin-channels-section.md`.
 
 ## TODO
 - **Whapi group removal webhook unreliable** — Ventura family removed Sheli from group but `handleBotRemoved` never fired (`bot_active` stayed true). Manually fixed. Investigate: does Whapi send `remove` events for bot removal? Check webhook payload format, event subtype matching, and add logging/alerting for missed removal events.
 - **Submit Google OAuth consent screen for review** — Calendar API requires sensitive scope (`calendar.events`). Google review takes 2-6 weeks. Submit now so it's approved by the time we build Google Calendar sync (Phase 3). Needs: privacy policy URL, terms of service URL, OAuth consent screen config in Google Cloud Console, video walkthrough of the permission flow.
+- **Admin dashboard: Morning briefing stats** — design doc §9 metric deferred from admin-channels-section plan. Needs new columns on `onboarding_conversations` (briefing_count, briefing_opted_out) AND the briefing free-tier feature itself. Revisit when briefing ships.
+- **Admin dashboard: Revenue per channel** — design doc §9 metric deferred from admin-channels-section plan. Currently 0 paying subs makes the metric uninformative. Revisit at ≥10 paying subscriptions.
+- **Admin dashboard: Deduplicate `funnel_counts` from `admin_channel_stats`** — the RPC returns `funnel_counts` (duplicating `admin_funnel_stats`) but the frontend ignores it. Tracked as a JSX `NOTE` comment in the Channels section. Remove the field from `admin_channel_stats` SQL in a future cleanup pass.
