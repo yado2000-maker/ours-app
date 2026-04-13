@@ -621,6 +621,14 @@ SHOPPING ITEM CLEANUP — strip these from item names:
 - Voice transcription artifacts: filler words, repeated phrases → clean up
 - Each item name should be the PRODUCT ONLY — "חלב" not "אני צריכה לקנות חלב"
 
+TYPO RECOGNITION (within a single message):
+When the user lists multiple items in one message, recognize obvious typos and treat them as ONE item, not separate ones.
+- "חסה, מלפפונים, מלפפוץ" → "מלפפוץ" is a typo of "מלפפונים" (final ץ instead of ן). Extract: ["חסה", "מלפפונים"]. Do NOT add "מלפפוץ" as a separate item.
+- "אבוקדו, אבוקדן" → typo, extract ONE: ["אבוקדו"].
+- "גבינה, גבונה" → typo, extract ONE: ["גבינה"].
+- Common Hebrew typo patterns: terminal letter swaps (ן↔ץ↔ם↔ף↔ך), repeated letters, voice-transcription artifacts, missing/extra final ה.
+- When in doubt (the items might be intentionally different), keep them separate. Only merge when it's CLEARLY a typo of an item already mentioned in the same message.
+
 ${ctx.conversationHistory ? `
 RECENT CONVERSATION (oldest first, for context):
 ${ctx.conversationHistory}
@@ -984,7 +992,28 @@ ${isHe ? `Example vibes (create your OWN each time — never copy these verbatim
   "That's outside my wheelhouse 🤷‍♀️ But need to add something to the list?"
   "Sorry, not my area! I'm your household brain — chores, shopping, and scheduling."`}
 
-For info_request: say you don't have that info and suggest asking someone at home.
+For info_request — Sheli's scope is ONLY her own data (lists, tasks, reminders, events). She has zero visibility into the real world. Identify which case this is:
+
+  (a) FEATURE SUGGESTION ("would be nice if you could X", "what if you tracked expenses", "אפשר להוסיף ש...", "יש לי הצעה ש...", "כדאי שתעשי X"):
+      → Acknowledge warmly + commit to passing it on. Examples (vary, never copy verbatim):
+        "רעיון מעולה! אעביר את זה לצוות הפיתוח 💡"
+        "אהבתי את הרעיון! מעבירה לצוות שלי 🚀"
+        "מחשבה טובה — שולחת את זה הלאה ✨"
+
+  (b) HOW-TO ABOUT SHELI / THE APP ("איך אני רואה את הרשימה?", "איפה זה בטלפון?", "how do I see X?"):
+      → Answer directly with the app link on its own line:
+        sheli.ai
+      → Example: "הכל מרוכז פה:\n\nsheli.ai"
+
+  (c) REAL-WORLD ACTIONS / PURCHASES / WHEREABOUTS ("did mom buy milk?", "האם אבא קנה X?", "מי לקח את הילדים?", "did anyone do Y?"):
+      → This is OUTSIDE Sheli's scope. She has no surveillance, no tracking, no idea what people did in real life. She only knows what's been added to HER lists/reminders/events.
+      → DO NOT answer. DO NOT deflect to a specific family member by name. DO NOT pretend to know.
+      → Either stay silent (if message is ambient family chatter) OR give a brief honest non-answer like "אני לא בעניין הזה 🤷‍♀️" — and pivot to what you DO know if natural.
+      → Same principle as the existing location-question rule (איפה הבנות?) — Sheli stays out.
+
+ABSOLUTE RULES:
+- Sheli is the product. Family members are users. NEVER suggest a user "ask [Name]" about anything — not Sheli's features, not real-world facts. Pulling names from FAMILY MEMORIES or member lists for deflection is forbidden.
+- Sheli only knows what's in her own data. She is not omniscient about the household.
 
 APOLOGY STYLE — MANDATORY:
 When you make a mistake, misunderstand, or need to correct yourself:
@@ -1456,13 +1485,44 @@ function extractProduct(text: string): ParsedProduct {
   return { name: remaining.trim(), qty, fullName };
 }
 
+// Levenshtein edit distance — used for fuzzy matching shopping items so typos like
+// "מלפפוץ" (typo of "מלפפון") get merged with the existing item instead of added separately.
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  // Quick reject if length difference exceeds 1 (can't be Lev <= 1)
+  if (Math.abs(a.length - b.length) > 1) return Math.abs(a.length - b.length);
+  const m = a.length, n = b.length;
+  const prev = new Array(n + 1).fill(0);
+  const curr = new Array(n + 1).fill(0);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        prev[j] + 1,        // deletion
+        curr[j - 1] + 1,    // insertion
+        prev[j - 1] + cost, // substitution
+      );
+    }
+    for (let j = 0; j <= n; j++) prev[j] = curr[j];
+  }
+  return prev[n];
+}
+
 function isSameProduct(a: string, b: string): boolean {
   const na = a.replace(REPEATED_LETTERS, "$1$1").trim();
   const nb = b.replace(REPEATED_LETTERS, "$1$1").trim();
   if (na === nb) return true;
-  if (na.length >= 2 && nb.length >= 2) {
-    return na.includes(nb) || nb.includes(na);
-  }
+  // Substring match — handles "חלב" vs "חלב מלא"
+  if (na.length >= 2 && nb.length >= 2 && (na.includes(nb) || nb.includes(na))) return true;
+  // Fuzzy match for typos — only for items >= 5 chars (avoids false matches between
+  // short distinct words like "תפוח" vs "תפוז" which differ by 1 char but mean
+  // apple vs orange). At 5+ chars, single-char typos are almost always real typos
+  // (e.g. מלפפון/מלפפוץ, אבוקדו/אבוקדן, גבינה/גבונה).
+  if (na.length >= 5 && nb.length >= 5 && levenshtein(na, nb) <= 1) return true;
   return false;
 }
 
