@@ -827,6 +827,7 @@ When addressing the whole household (not a specific person), use plural: "תוס
 Use names naturally. Give credit when tasks are done.
 Occasional dry humor when natural: "חלב? שלישי השבוע".
 Emoji when natural — like a 30-year-old Israeli woman would.
+Common Hebrew verb fix: say "תפסת אותי" (you caught me), never "נתפסת אותי".
 Never nag. Never over-explain. Never sound like a chatbot.`
     : `Respond in English. Warm and direct, like a helpful friend.
 Keep responses SHORT — 1-2 lines max.`;
@@ -2270,6 +2271,11 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
     topic: "name-correction",
     keyFacts: "User is correcting their name. Apologize warmly with humor (סורי! 🙈), use the CORRECT name they provided. Be personal and friendly. Make them feel seen.",
   },
+  {
+    patterns: [/הודע.*קולי|הקלט|קולית|שומעת.*הודעות|מקשיבה.*הודעות|voice.*message|can you hear|listen.*voice|מבינה.*קול/i],
+    topic: "voice-privacy",
+    keyFacts: "Yes, Sheli transcribes short voice messages (up to 30 seconds) and processes them the same as typed text. Longer voice notes are skipped — they're usually personal family conversations, not requests. Audio itself isn't stored; only the transcribed text is kept, and all conversation data auto-deletes after 30 days.",
+  },
 ];
 
 function matchOnboardingQA(text: string): { topic: string; keyFacts: string } | null {
@@ -2285,7 +2291,7 @@ function matchOnboardingQA(text: string): { topic: string; keyFacts: string } | 
 // ─── Sonnet-powered 1:1 conversational onboarding ("The Natural Friend") ───
 
 const ONBOARDING_1ON1_PROMPT = `You are שלי (Sheli) — a smart personal helper on WhatsApp.
-You're chatting 1:1 with a new user who just reached out.
+You're chatting 1:1 with a user on WhatsApp — this may be the first message or message #50. Always check the CONVERSATION STATE for Message #N before deciding how to open.
 
 PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Hebrew feminine verbs always (הוספתי, שמרתי, סידרתי, רשמתי)
@@ -2293,7 +2299,6 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Hebrew slang where natural (יאללה, סבבה, אחלה)
 - NEVER ignore a message — always reply, even to jokes, trolling, or nonsense
 - Match their energy: trolling gets witty trolling back, warmth gets warmth
-- Every reply ends with soft forward motion toward your capabilities
 - Keep replies under 300 characters. This is WhatsApp, not email.
 - Sheli speaks feminine first person always (הוספתי, not הוספנו).
 - GENDERED ADDRESS: Check the CONVERSATION STATE for "gender" field:
@@ -2336,7 +2341,10 @@ RULES:
 9. Compound Hebrew product names (חלב אורז, שמן זית, נייר טואלט, חמאת בוטנים) are ONE item. Never split.
 10. First interaction with a new name: say "נעים להכיר" (NOT "נעים לפגוש אותך" — we haven't met in person). After a voice message specifically: "נעים לשמוע אותך" (nice to hear you — personal touch).
 11. Voice messages: user may send transcribed voice text — handle identically to typed text. If the user already SENT a voice message, do NOT suggest voice as a new feature — they already know.
-12. Hebrew grammar: in construct state (סמיכות), ONLY the second noun gets ה. "שם המשתמש" NOT "השם המשתמש". "רשימת הקניות" NOT "הרשימת הקניות". "מספר הטלפון" NOT "המספר הטלפון".
+12. Hebrew grammar:
+    - Construct state (סמיכות): ONLY the second noun gets ה. "שם המשתמש" NOT "השם המשתמש". "רשימת הקניות" NOT "הרשימת הקניות". "מספר הטלפון" NOT "המספר הטלפון".
+    - Verb forms — common mistakes to avoid:
+      - "תפסת אותי" NOT "נתפסת אותי" (you caught me — pa'al, not nif'al). When playfully caught/teased: "חח תפסת אותי!" or "אוקיי, תפסת אותי 🙈". "נתפסת" means "I got caught" (passive reflexive), which is wrong here.
 13. NEVER correct the user's Hebrew gender forms. If they write "אני צריך" — they are male. If "אני צריכה" — female. Their verb form IS their gender. Do not add asterisks (*), do not "fix" their grammar, do not suggest alternative forms. Match THEIR gender in your reply.
 
 ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
@@ -2661,6 +2669,17 @@ CONVERSATION STATE:
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
+${msgCount > 1 ? `
+CONVERSATION CONTINUITY — CRITICAL:
+- This is message #${msgCount}. The user already knows who you are.
+- Do NOT re-introduce yourself.
+- Do NOT say "אני שלי" or explain what you can do ("קניות? מטלות? משהו שצריך לזכור?").
+- Do NOT open with "יאללה בואי נראה" or equivalent welcome energy.
+- You are mid-conversation. Reply to what they just said, the way a friend would.
+- If they ask a question, answer it directly.
+- If they send an action, execute it naturally.
+- Follow rule 4 for capability hints: ONLY when ${msgCount} is divisible by 3.` : `
+FIRST MESSAGE: This is the user's first reply after your welcome. Brief warmth is fine, but focus on what they said.`}
 ${ambiguousOptions && !nameAskedAlready ? `\nNAME SPELLING: The user's name "${userName}" could be spelled ${ambiguousOptions.join(" or ")} in Hebrew. In your FIRST reply, ask naturally which spelling they prefer. Example: "אגב, ${ambiguousOptions[0]} או ${ambiguousOptions[1]}? אני אוהבת לדייק 😊". After asking, include a name_correction action with their answer. This is a ONE-TIME question — do not ask again.` : ""}
 ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
 ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — vary your style and content):\n${recentReplies.map((r: string) => `- "${r.slice(0, 120)}"`).join("\n")}` : ""}`;
@@ -2949,7 +2968,13 @@ async function handlePersonalChannelMessage(
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 512,
-        system: ONBOARDING_1ON1_PROMPT + `\n\nPERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally, shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.`,
+        system: ONBOARDING_1ON1_PROMPT + `\n\nPERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally, shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.
+
+CONVERSATION CONTINUITY — CRITICAL:
+- This user is already onboarded and has you in their group. They know who you are.
+- Do NOT re-introduce yourself. Do NOT say "אני שלי" or explain your capabilities.
+- Do NOT open with "יאללה בואי נראה" or welcome-style intros.
+- Reply to what they just said, the way a friend would mid-conversation.`,
         messages: [{ role: "user", content: text }],
       }),
     });
@@ -3529,19 +3554,48 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 3a. Handle voice messages: transcribe short ones, skip long ones
+    // 3a. Handle voice messages: transcribe short ones, politely reject long ones
     if (message.type === "voice") {
       const duration = message.mediaDuration || 0;
       if (duration > 30) {
-        console.log(`[Webhook] Skipping long voice (${duration}s) from ${message.senderName}`);
+        console.log(`[Webhook] Long voice (${duration}s) from ${message.senderName}`);
+        const chatTarget = message.groupId;
+        const isGroup = !!message.groupId?.includes("@g.us");
+        if (chatTarget) {
+          // Is this the first long-voice skip in this chat?
+          const { data: priorSkips } = await supabase
+            .from("whatsapp_messages")
+            .select("id")
+            .eq("group_id", chatTarget)
+            .eq("classification", "skipped_long_voice")
+            .limit(1);
+          const isFirstLongVoice = !priorSkips || priorSkips.length === 0;
+
+          // Group: reply only on first occurrence, ever. 1:1: reply every time (casual variant from 2nd).
+          const shouldReply = isFirstLongVoice || !isGroup;
+
+          if (shouldReply) {
+            let longVoiceText: string;
+            if (isFirstLongVoice) {
+              longVoiceText = "הודעה קולית ארוכה 🎤\nאני מקשיבה רק עד 30 שניות — הארוכות יותר הן בדרך כלל שיחות משפחתיות, לא בקשות ממני.\nבקשה — אם זאת בקשה ממני, שלחו הודעה קצרה יותר או כתבו בטקסט 😊";
+            } else {
+              const casual = [
+                "זוכרים שאני מקשיבה רק עד 30 שניות? 🎤 שלחו קצר יותר או בטקסט 😊",
+                "אה, ארוך מדי שוב 🙈 עד 30 שניות בלבד — או בטקסט אם יותר נוח",
+                "רק עד 30 שניות בשבילי, חסר לי סבלנות 😅 אפשר טקסט?",
+              ];
+              longVoiceText = casual[Math.floor(Math.random() * casual.length)];
+            }
+            try {
+              await provider.sendMessage({ groupId: chatTarget, text: longVoiceText });
+            } catch (e) { console.error("[LongVoice] reply failed:", e); }
+          }
+        }
         await logMessage(message, "skipped_long_voice");
         return new Response("OK", { status: 200 });
       }
 
-      // Check if this is the first voice message in the group/chat — for privacy explanation
-      const isFirstVoice = await isFirstVoiceInChat(message.groupId || message.chatId);
-
-      console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}${isFirstVoice ? " (first voice!)" : ""}`);
+      console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}`);
       const transcribed = await transcribeVoice(message.mediaUrl, message.mediaId);
       if (!transcribed) {
         console.log(`[Webhook] Transcription failed for ${message.senderName}`);
@@ -3571,22 +3625,6 @@ Deno.serve(async (req: Request) => {
 
       message.text = cleanTranscript;
       console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}" → final: "${cleanTranscript.slice(0, 80)}"`);
-
-      // First voice message in this chat? Send a one-time privacy explanation
-      if (isFirstVoice) {
-        const chatTarget = message.groupId || message.chatId;
-        if (chatTarget) {
-          const privacyNote = "🎤 אגב, אני בודקת רק הודעות קוליות קצרות (עד 30 שניות) — " +
-            "הארוכות יותר הן כנראה עניינים משפחתיים ולא בקשות ממני.\n" +
-            "שום דבר לא נשמר אצלי יותר מ-30 יום, וגם זה רק כדי שאוכל להכיר אתכם ולהיות יעילה יותר עבורכם 😊";
-          // Send after a small delay so the main reply goes first
-          setTimeout(async () => {
-            try {
-              await provider.sendMessage({ groupId: chatTarget, text: privacyNote });
-            } catch (e) { console.error("[VoicePrivacy] Failed to send:", e); }
-          }, 3000);
-        }
-      }
     }
 
     // 3b. Skip all non-text/non-voice messages (photos, stickers, video, etc.)
@@ -5510,13 +5548,29 @@ async function handleCorrection(
     corrected_data: classification,
   });
 
-  // 5. Reply with confirmation
-  const replyParts: string[] = [];
-  if (undone.length > 0) replyParts.push(`ביטלתי: ${undone.join(", ")}`);
-  if (redone.length > 0) replyParts.push(`הוספתי: ${redone.join(", ")}`);
-  const reply = replyParts.length > 0
-    ? `סורי! 😅 ${replyParts.join(". ")}`
-    : "סורי! תיקנתי 😅";
+  // 5. Reply with warm confirmation + learning acknowledgement
+  const openers = [
+    "תודה על תשומת הלב! 🙏",
+    "תודה שתיקנת אותי! 🙏",
+    "אוי, טוב שאמרת! 🙏",
+  ];
+  const learningLines = [
+    "אני עדיין לומדת ומשתפרת כל הזמן 😅",
+    "ככה אני משתפרת — בזכותך 😅",
+    "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
+  ];
+  const opener = openers[Math.floor(Math.random() * openers.length)];
+  const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
+
+  const actionParts: string[] = [];
+  if (undone.length > 0) actionParts.push(`ביטלתי: ${undone.join(", ")}`);
+  if (redone.length > 0) actionParts.push(`הוספתי: ${redone.join(", ")}`);
+
+  const replyLines = [opener, learning];
+  if (actionParts.length > 0) replyLines.push(...actionParts);
+  replyLines.push("✨");
+
+  const reply = replyLines.join("\n");
 
   // 6. Auto-derive patterns from this correction
   await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification);
