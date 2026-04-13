@@ -2299,6 +2299,7 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
     - "תזכירי לי בשעה 8" → MISSING CONTENT → ask "מה להזכיר ב-8?" and wait.
     - Only when both are present, create the reminder action.
 17. If your extracted action text is < 3 chars or matches a known trigger word → drop the action and ask for clarification instead.
+18. "Items collected so far" in the CONVERSATION STATE is a LIVE snapshot of the user's real data — past reminders (already fired) and past events (already happened) are pre-filtered out. So when the user asks "מה יש היום?" / "מה ברשימה?" / "what's today" — you can list these items as-is. They are all current and relevant. Reminders include a "send_at" ISO timestamp; events include a "scheduled_for" timestamp. Use these to phrase replies naturally ("יש לך מסיבה ב-18 לאפריל" — extract the date from the timestamp).
 
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
 <!--ACTIONS:[]-->
@@ -2525,7 +2526,32 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
 
   // --- Active conversation: send to Sonnet ---
   const userName = convo.context?.name || hebrewizeName(senderName) || "";
-  const existingItems = ((convo.demo_items || []) as any[]).filter((i: any) => i.type !== "_pending_nudge");
+
+  // Read LIVE items from real tables when household exists. This filters out:
+  //   - past reminders (sent=true OR send_at < now)
+  //   - past events (scheduled_for < now)
+  //   - completed tasks (done=true)
+  //   - bought shopping (got=true)
+  // Falls back to demo_items only for users who don't yet have a household.
+  let existingItems: any[];
+  if (convo.household_id) {
+    const nowIso = new Date().toISOString();
+    const [tasksRes, shopRes, eventsRes, remindersRes] = await Promise.all([
+      supabase.from("tasks").select("title").eq("household_id", convo.household_id).eq("done", false).order("created_at", { ascending: true }).limit(10),
+      supabase.from("shopping_items").select("name").eq("household_id", convo.household_id).eq("got", false).order("created_at", { ascending: true }).limit(10),
+      supabase.from("events").select("title, scheduled_for").eq("household_id", convo.household_id).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(10),
+      supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", convo.household_id).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(10),
+    ]);
+    existingItems = [
+      ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
+      ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
+      ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: r.scheduled_for })),
+      ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: r.send_at })),
+    ];
+  } else {
+    existingItems = ((convo.demo_items || []) as any[]).filter((i: any) => i.type !== "_pending_nudge");
+  }
+
   const triedCaps: string[] = convo.tried_capabilities || [];
   // Auto-mark voice as tried if user sent a voice message
   if (message.type === "voice" && !triedCaps.includes("voice")) {
@@ -2676,7 +2702,10 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
       try { newTried = JSON.parse(triedMatch[1]); } catch {}
     }
 
-    // Process actions → execute REAL DB operations (not just demo_items)
+    // Process actions → execute REAL DB operations.
+    // demo_items is now a vestigial cache (real tables are source of truth for
+    // briefings + Sonnet context). We keep updating it for backward compat; safe
+    // to remove in a future cleanup once we verify nothing else reads it.
     const newItems = [...existingItems];
     let hhId: string | null = null;
 
