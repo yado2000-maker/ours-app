@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase } from "../lib/supabase.js";
+import { supabase, fetchAdminChannelStats } from "../lib/supabase.js";
 
 const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c", "9698d5df-e40e-4f2b-a91e-a911f14fe1c8", "dc552ffd-65f5-4943-a64a-8f6d56c8578a"];
 const REFRESH_INTERVAL = 60000;
@@ -265,6 +265,7 @@ export default function AdminDashboard({ session, onBack }) {
   const [overview, setOverview] = useState(null);
   const [funnel, setFunnel] = useState(null);
   const [features, setFeatures] = useState(null);
+  const [channelStats, setChannelStats] = useState(null);
   const [period, setPeriod] = useState(7);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
@@ -281,10 +282,11 @@ export default function AdminDashboard({ session, onBack }) {
     setError(null);
 
     try {
-      const [overviewRes, funnelRes, featuresRes] = await Promise.all([
+      const [overviewRes, funnelRes, featuresRes, chRes] = await Promise.all([
         supabase.rpc("admin_dashboard_overview", { p_days: period }),
         supabase.rpc("admin_funnel_stats"),
         supabase.rpc("admin_feature_stats", { p_days: period }),
+        fetchAdminChannelStats(period),
       ]);
 
       if (overviewRes.error) throw new Error(`Overview: ${overviewRes.error.message}`);
@@ -304,6 +306,7 @@ export default function AdminDashboard({ session, onBack }) {
       setOverview(ov);
       setFunnel(fn);
       setFeatures(ft);
+      setChannelStats(chRes || null);
       setLastRefresh(new Date());
     } catch (err) {
       console.error("[AdminDashboard] fetch error:", err);
