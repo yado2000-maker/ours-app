@@ -903,6 +903,40 @@ export default function AdminDashboard({ session, onBack }) {
                 </div>
               </div>
 
+              {/* Group nudge conversion — singles who added Sheli to a group after being nudged */}
+              <div style={{
+                background: "var(--white)", borderRadius: "var(--radius-card)",
+                boxShadow: "var(--sh)", padding: 20, marginBottom: 16,
+                display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap",
+              }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 4px", color: "var(--dark)" }}>Group-nudge conversion</h3>
+                  <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
+                    1:1 users who added Sheli to a group after being nudged about it (one-time mention, 2d or 5 actions)
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: "var(--dark)", lineHeight: 1 }}>
+                      {channelStats.group_nudge?.nudged ?? 0}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Nudged</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: CHANNEL_COLORS.both, lineHeight: 1 }}>
+                      {channelStats.group_nudge?.added_group ?? 0}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Added group</div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", lineHeight: 1 }}>
+                      {(channelStats.group_nudge?.conversion_pct ?? 0).toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Conversion</div>
+                  </div>
+                </div>
+              </div>
+
               {/* Bottom: retention by channel table */}
               <div style={{ background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20 }}>
                 <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 12px", color: "var(--dark)" }}>7-day retention by channel</h3>
