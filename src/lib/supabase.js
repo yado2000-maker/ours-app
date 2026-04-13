@@ -227,3 +227,13 @@ export const trackWebSession = async (userId, hhId) => {
   });
   if (error) console.error("[trackWebSession]", error);
 };
+
+// Admin dashboard — Channels section data. Returns {} if caller isn't in admin_users.
+export const fetchAdminChannelStats = async (days = 7) => {
+  const { data, error } = await supabase.rpc("admin_channel_stats", { p_days: days });
+  if (error) {
+    console.error("[fetchAdminChannelStats]", error);
+    return null;
+  }
+  return data;
+};
