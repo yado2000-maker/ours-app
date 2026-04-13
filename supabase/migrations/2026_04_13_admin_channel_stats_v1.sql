@@ -6,6 +6,7 @@ AS $function$
 DECLARE
   result JSONB;
   is_admin BOOLEAN;
+  -- Retention always uses a fixed 7-day window (not p_days) so the % is comparable across periods.
   v_active_cutoff timestamptz := now() - interval '7 days';
 BEGIN
   -- Admin gate: identical pattern to existing admin_* RPCs
@@ -117,3 +118,7 @@ BEGIN
   RETURN result;
 END;
 $function$;
+
+-- Supporting index: classified/nudge CTEs do EXISTS lookups keyed on household_id.
+-- Invisible at 22 rows, prevents seq scans as the table grows.
+CREATE INDEX IF NOT EXISTS idx_onboarding_household ON onboarding_conversations(household_id);
