@@ -712,4 +712,54 @@ Before declaring done:
 
 ## Appendix A: RPC contract
 
-(Added in Task 1 — see Task 1 Step 1 for the full JSON shape.)
+Canonical JSONB shape returned by `admin_channel_stats(p_days)`. Both SQL and JSX must conform to this exactly.
+
+```json
+{
+  "period_days": 7,
+  "channels": {
+    "personal_only": { "households": 3, "active_7d": 2 },
+    "group_only":    { "households": 5, "active_7d": 4 },
+    "both":          { "households": 2, "active_7d": 2 }
+  },
+  "funnel_counts": {
+    "welcomed":  { "count": 4 },
+    "chatting":  { "count": 12 },
+    "invited":   { "count": 0 },
+    "joined":    { "count": 3 },
+    "personal":  { "count": 2 },
+    "nudging":   { "count": 1 },
+    "sleeping":  { "count": 0 },
+    "dormant":   { "count": 0 }
+  },
+  "group_nudge": {
+    "nudged":         8,
+    "added_group":    2,
+    "conversion_pct": 25.0
+  },
+  "retention_by_channel": [
+    { "channel": "personal_only", "total": 3, "active_7d": 2, "pct": 66.7 },
+    { "channel": "group_only",    "total": 5, "active_7d": 4, "pct": 80.0 },
+    { "channel": "both",          "total": 2, "active_7d": 2, "pct": 100.0 }
+  ]
+}
+```
+
+**Classification logic (households → channel):**
+- **`both`** — has BOTH a `@g.us` row in `whatsapp_config` AND an `onboarding_conversations` row
+- **`group_only`** — has `@g.us` row, no `onboarding_conversations`
+- **`personal_only`** — has `onboarding_conversations`, no `@g.us`
+- Households with neither are excluded from all `channels.*` counts
+
+**`active_7d` definition:** any `whatsapp_messages` OR `web_sessions` for that `household_id` in the last 7 days. Fixed 7-day window regardless of `p_days` parameter (retention needs a fixed frame to be meaningful).
+
+**`group_nudge`:**
+- `nudged` = `onboarding_conversations` rows where `context ? 'group_nudge_sent_at'`
+- `added_group` = subset of nudged whose `household_id` now has a `@g.us` row in `whatsapp_config`
+- `conversion_pct` = `(added_group / nudged) * 100`, rounded 1 decimal, returns `0` when `nudged = 0` (no divide-by-zero)
+
+**`retention_by_channel.pct`:** rounded 1 decimal; `0` when `total = 0`.
+
+**Empty-state rule:** all counts default to 0 (not null). Frontend can safely do arithmetic without null-guards.
+
+**Admin gate:** RPC returns `{}` (empty object) when caller is not in `admin_users` table. Frontend helper returns `null` on error; Channels section shows "Loading channels…" if data is null.
