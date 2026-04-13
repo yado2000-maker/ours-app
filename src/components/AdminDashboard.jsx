@@ -848,6 +848,7 @@ export default function AdminDashboard({ session, onBack }) {
         <Section title="Channels" subtitle="How the user base splits between personal and group usage">
           {channelStats && Object.keys(channelStats).length > 0 ? (
             <>
+              {/* NOTE: channelStats.funnel_counts is unused — duplicates admin_funnel_stats. Remove from RPC later. */}
               {/* Top: 3 stat cards */}
               <div className="adm-grid3" style={{ marginBottom: 16 }}>
                 <StatCard
