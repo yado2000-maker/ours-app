@@ -152,18 +152,23 @@ function Sparkline({ data = [], width = "100%", height = 120, color = "var(--acc
 
 // ── Donut Chart (CSS conic-gradient) ──
 
-function DonutChart({ data, size = 200 }) {
-  const entries = Object.entries(data).filter(([k]) => k !== "ignore").sort((a, b) => b[1] - a[1]);
-  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+function DonutChart({ data, size = 200, centerLabel = "actions" }) {
+  // Polymorphic: accept legacy {key:value} object OR [{label,value,color}] array
+  const normalized = Array.isArray(data)
+    ? data.map((d, i) => ({ key: d.label || String(i), label: d.label, value: d.value, color: d.color }))
+    : Object.entries(data)
+        .filter(([k]) => k !== "ignore")
+        .sort((a, b) => b[1] - a[1])
+        .map(([key, value]) => ({ key, label: key.replace(/_/g, " "), value, color: INTENT_COLORS[key] || INTENT_COLORS.other }));
+
+  const total = normalized.reduce((sum, n) => sum + n.value, 0);
   if (!total) return <div style={{ width: size, height: size, borderRadius: "50%", background: "var(--border)" }} />;
 
   let cumPct = 0;
-  const stops = [];
-  entries.forEach(([key, val]) => {
-    const color = INTENT_COLORS[key] || INTENT_COLORS.other;
+  const stops = normalized.map((n) => {
     const startPct = cumPct;
-    cumPct += (val / total) * 100;
-    stops.push(`${color} ${startPct}% ${cumPct}%`);
+    cumPct += (n.value / total) * 100;
+    return `${n.color} ${startPct}% ${cumPct}%`;
   });
 
   const gradient = `conic-gradient(${stops.join(", ")})`;
@@ -180,18 +185,18 @@ function DonutChart({ data, size = 200 }) {
           flexDirection: "column",
         }}>
           <span style={{ fontSize: 22, fontWeight: 800, color: "var(--dark)" }}>{total}</span>
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>actions</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{centerLabel}</span>
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {entries.map(([key, val]) => (
-          <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+        {normalized.map((n) => (
+          <div key={n.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             <span style={{
               width: 12, height: 12, borderRadius: 3, flexShrink: 0,
-              background: INTENT_COLORS[key] || INTENT_COLORS.other,
+              background: n.color,
             }} />
-            <span style={{ color: "var(--dark)", fontWeight: 600 }}>{key.replace(/_/g, " ")}</span>
-            <span style={{ color: "var(--muted)" }}>{val} ({pct(val, total)})</span>
+            <span style={{ color: "var(--dark)", fontWeight: 600 }}>{n.label}</span>
+            <span style={{ color: "var(--muted)" }}>{n.value} ({pct(n.value, total)})</span>
           </div>
         ))}
       </div>
@@ -875,33 +880,16 @@ export default function AdminDashboard({ session, onBack }) {
               <div style={{
                 background: "var(--white)", borderRadius: "var(--radius-card)",
                 boxShadow: "var(--sh)", padding: 20, marginBottom: 16,
-                display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap",
               }}>
                 <DonutChart
-                  data={[
-                    { label: CHANNEL_LABELS.personal_only, value: channelStats.channels.personal_only.households, color: CHANNEL_COLORS.personal_only },
-                    { label: CHANNEL_LABELS.group_only,    value: channelStats.channels.group_only.households,    color: CHANNEL_COLORS.group_only },
-                    { label: CHANNEL_LABELS.both,          value: channelStats.channels.both.households,          color: CHANNEL_COLORS.both },
-                  ]}
+                  data={Object.keys(CHANNEL_LABELS).map((key) => ({
+                    label: CHANNEL_LABELS[key],
+                    value: channelStats.channels[key].households,
+                    color: CHANNEL_COLORS[key],
+                  }))}
                   size={160}
+                  centerLabel="homes"
                 />
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>Household distribution</div>
-                  {["personal_only", "group_only", "both"].map((key) => {
-                    const total = channelStats.channels.personal_only.households
-                                + channelStats.channels.group_only.households
-                                + channelStats.channels.both.households;
-                    const n = channelStats.channels[key].households;
-                    const pct = total === 0 ? 0 : ((n / total) * 100).toFixed(1);
-                    return (
-                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, fontSize: 14 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: CHANNEL_COLORS[key] }} />
-                        <span style={{ flex: 1, color: "var(--dark)" }}>{CHANNEL_LABELS[key]}</span>
-                        <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{n} ({pct}%)</span>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
 
               {/* Group nudge conversion — singles who added Sheli to a group after being nudged */}
