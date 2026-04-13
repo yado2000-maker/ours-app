@@ -100,7 +100,16 @@ export default function Sheli() {
 
     if (!session) {
       // ?source=wa → skip landing page, go straight to auth (Path B: WhatsApp dashboard users)
+      // ?join=hh_xxx → user clicked a household invite link from another member.
+      //   Persist the joinId so it survives the auth flow (OAuth redirects can strip
+      //   query params). After sign-in, the bootAsync below will read it back.
       const params = new URLSearchParams(window.location.search);
+      const joinIdFromUrl = params.get("join");
+      if (joinIdFromUrl) {
+        try { localStorage.setItem("sheli-pending-join", joinIdFromUrl); } catch { /* private mode */ }
+        setScreen("auth");
+        return;
+      }
       if (params.get("source") === "wa") {
         setScreen("auth");
       } else {
@@ -112,7 +121,14 @@ export default function Sheli() {
     // Authenticated → proceed with household loading (with 8s global timeout)
     const bootAsync = async () => {
       const params = new URLSearchParams(window.location.search);
-      const joinId = params.get("join");
+      // Prefer URL param; fall back to the persisted one (set when an unauth user
+      // clicked a join link and was routed through auth).
+      let joinId = params.get("join");
+      if (!joinId) {
+        try { joinId = localStorage.getItem("sheli-pending-join"); } catch { /* private mode */ }
+      }
+      // Always clear once consumed — even on failure — to avoid sticky stale joins.
+      try { localStorage.removeItem("sheli-pending-join"); } catch { /* private mode */ }
       console.log("[Boot] Starting async boot. joinId:", joinId, "hhId:", lsGet("sheli-hhid"));
 
       const loadData = async (id) => {
