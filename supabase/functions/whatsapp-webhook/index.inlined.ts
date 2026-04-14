@@ -2197,19 +2197,34 @@ const GROUP_NUDGE_MESSAGE = "אגב, אם גרים איתך עוד מישהו, �
 const GROUP_NUDGE_MIN_DAYS = 2;
 const GROUP_NUDGE_MIN_ACTIONS = 5;
 
-function shouldSendGroupNudge(convo: Record<string, any>): boolean {
+// Count real actions (tasks + shopping + events + reminders) for a household.
+// Reusable for nudge threshold + future paywall.
+async function countHouseholdActions(householdId: string | null): Promise<number> {
+  if (!householdId) return 0;
+  const [t, s, e, r] = await Promise.all([
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("household_id", householdId),
+    supabase.from("shopping_items").select("id", { count: "exact", head: true }).eq("household_id", householdId),
+    supabase.from("events").select("id", { count: "exact", head: true }).eq("household_id", householdId),
+    supabase.from("reminder_queue").select("id", { count: "exact", head: true }).eq("household_id", householdId),
+  ]);
+  return (t.count || 0) + (s.count || 0) + (e.count || 0) + (r.count || 0);
+}
+
+async function shouldSendGroupNudge(convo: Record<string, any>): Promise<boolean> {
   // Already sent
   if (convo.context?.group_nudge_sent_at) return false;
   // Already in a real group
   if (convo.state === "personal" || convo.state === "joined") return false;
 
-  const msgCount = convo.message_count || 0;
   const createdAt = convo.created_at ? new Date(convo.created_at) : null;
   const daysSinceCreated = createdAt
     ? (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
     : 0;
 
-  return msgCount >= GROUP_NUDGE_MIN_ACTIONS || daysSinceCreated >= GROUP_NUDGE_MIN_DAYS;
+  // Check real action count (not message count — "lol" x5 shouldn't trigger nudge)
+  const actionCount = await countHouseholdActions(convo.household_id);
+
+  return actionCount >= GROUP_NUDGE_MIN_ACTIONS || daysSinceCreated >= GROUP_NUDGE_MIN_DAYS;
 }
 
 // (Removed: DEMO_CATEGORIES — categorization now handled by Sonnet in 1:1 prompt)
@@ -2565,7 +2580,27 @@ function prepareSonnetTurns(turns: { role: string; content: string }[]): { role:
   return merged;
 }
 
+// Format a UTC date as a human-readable Israel time string for Sonnet context.
+// Prevents timezone confusion: Sonnet sees "Wednesday 16/4 16:00" not "2026-04-16T13:00:00+00:00".
+function toIsraelTimeStr(utcDate: string): string {
+  try {
+    const d = new Date(utcDate);
+    return d.toLocaleString("he-IL", {
+      timeZone: "Asia/Jerusalem",
+      weekday: "short",
+      day: "numeric",
+      month: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return utcDate;
+  }
+}
+
 // Load active household items (tasks, shopping, events, reminders) for Sonnet context.
+// Times are converted to Israel timezone strings so Sonnet doesn't misread UTC as local.
 async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; scheduled_for?: string; send_at?: string }[]> {
   const nowIso = new Date().toISOString();
   const [tasksRes, shopRes, eventsRes, remindersRes] = await Promise.all([
@@ -2577,8 +2612,8 @@ async function loadHouseholdItems(householdId: string): Promise<{ type: string; 
   return [
     ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
     ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
-    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: r.scheduled_for })),
-    ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: r.send_at })),
+    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: toIsraelTimeStr(r.scheduled_for) })),
+    ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: toIsraelTimeStr(r.send_at) })),
   ];
 }
 
@@ -2786,10 +2821,18 @@ async function execute1on1Actions(params: {
             ? (action.name || action.text || action.title)
             : (action.old_name || action.old_text || action.old_title);
           if (!searchText) break;
-          // Find matching row
-          let query = supabase.from(cfg.table).select("id").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
+          // Find matching row (include scheduled_for for time-only event updates)
+          // Try exact match first, fall back to substring (ilike). Order by most recent to prefer latest.
+          let query = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId);
           if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) query = query.eq(k, v);
-          const { data: match, error: findErr } = await query.limit(1).single();
+          // Prefer exact match
+          let { data: match, error: findErr } = await query.eq(cfg.matchCol, searchText).order("created_at", { ascending: false }).limit(1).single();
+          if (!match) {
+            // Fall back to substring match
+            let fallbackQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
+            if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fallbackQ = fallbackQ.eq(k, v);
+            ({ data: match, error: findErr } = await fallbackQ.order("created_at", { ascending: false }).limit(1).single());
+          }
           if (findErr || !match) { console.warn(`${logPrefix} ${action.type}: not found for "${searchText}"`); break; }
           if (isRemove) {
             const { error: delErr } = await supabase.from(cfg.table).delete().eq("id", match.id);
@@ -2802,7 +2845,13 @@ async function execute1on1Actions(params: {
             if (action.new_text) updates[cfg.matchCol] = action.new_text;
             if (action.new_title) updates.title = action.new_title;
             if (action.new_send_at) updates.send_at = new Date(action.new_send_at).toISOString();
-            if (action.new_date) updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
+            if (action.new_date) {
+              updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
+            } else if (action.new_time && match.scheduled_for) {
+              // Time-only update: keep existing date, replace time
+              const existingDate = new Date(match.scheduled_for).toISOString().slice(0, 10);
+              updates.scheduled_for = `${existingDate}T${action.new_time}:00+03:00`;
+            }
             const { error: updErr } = await supabase.from(cfg.table).update(updates).eq("id", match.id);
             if (updErr) console.error(`${logPrefix} ${action.type} error:`, updErr);
             else console.log(`${logPrefix} Updated ${cfg.table}: "${searchText}"`);
@@ -3084,9 +3133,9 @@ ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: $
       await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
     }
 
-    // Group nudge check (one-time, after 2 days OR 5 messages)
+    // Group nudge check (one-time, after 2 days OR 5 real actions)
     const updatedConvo = { ...convo, message_count: msgCount, state: newState };
-    if (shouldSendGroupNudge(updatedConvo) && !isQuietHours()) {
+    if (await shouldSendGroupNudge(updatedConvo) && !isQuietHours()) {
       await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
       await supabase.from("onboarding_conversations").update({
         context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
@@ -3202,7 +3251,7 @@ CONVERSATION CONTINUITY — CRITICAL:
         .limit(1)
         .single();
 
-      if (!groupConfig && convo && shouldSendGroupNudge(convo) && !isQuietHours()) {
+      if (!groupConfig && convo && await shouldSendGroupNudge(convo) && !isQuietHours()) {
         await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
         await supabase.from("onboarding_conversations").update({
           context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
@@ -3735,14 +3784,14 @@ Deno.serve(async (req: Request) => {
     }
 
     // 3.1 SECURITY: Deduplicate messages (prevent replay + Whapi retry double-processing)
-    if (message.id) {
+    if (message.messageId) {
       const { data: existing } = await supabase
         .from("whatsapp_messages")
         .select("id")
-        .eq("whatsapp_message_id", message.id)
+        .eq("whatsapp_message_id", message.messageId)
         .limit(1);
       if (existing && existing.length > 0) {
-        console.log(`[Webhook] Duplicate message ${message.id}, skipping`);
+        console.log(`[Webhook] Duplicate message ${message.messageId}, skipping`);
         return new Response("OK", { status: 200 });
       }
     }
@@ -4175,8 +4224,8 @@ Deno.serve(async (req: Request) => {
 
     // Fetch recent conversation for context injection
     const conversationMsgs = await fetchRecentConversation(
-      message.groupId || message.senderId,
-      message.id
+      message.groupId,
+      message.messageId
     );
     const conversationHistory = conversationMsgs.length > 0
       ? conversationMsgs.map((m) => {
@@ -4742,12 +4791,12 @@ Deno.serve(async (req: Request) => {
       let memberPhone: string | null = null;
       if (e.memory_about) {
         const { data: mapping } = await supabase.from("whatsapp_member_mapping")
-          .select("phone")
+          .select("phone_number")
           .eq("household_id", householdId)
-          .ilike("display_name", `%${e.memory_about}%`)
+          .ilike("member_name", `%${e.memory_about}%`)
           .limit(1)
           .single();
-        memberPhone = mapping?.phone || null;
+        memberPhone = mapping?.phone_number || null;
       }
 
       const { error } = await supabase.from("family_memories").insert({
@@ -5034,7 +5083,7 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
       });
       if (memErr) console.error("[upsertMemberMapping] household_members insert error:", memErr.message);
       else console.log(`[Members] Auto-added "${name}" (${memberGender || "unknown"}) to household ${householdId}`);
-    } else if (memberGender && !existing) {
+    } else if (memberGender) {
       // Update gender on existing member if we now know it
       await supabase.from("household_members").update({ gender: memberGender })
         .eq("household_id", householdId)
@@ -5437,7 +5486,7 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
       return q;
     })(),
     supabase.from("whatsapp_member_mapping")
-      .select("phone, display_name")
+      .select("phone_number, member_name")
       .eq("household_id", householdId),
   ]);
 
@@ -5465,7 +5514,7 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
       // Map member phones to display names
       const phoneName: Record<string, string> = {};
       for (const m of (mappingRes.data || [])) {
-        if (m.phone && m.display_name) phoneName[m.phone] = m.display_name;
+        if (m.phone_number && m.member_name) phoneName[m.phone_number] = m.member_name;
       }
 
       const lines = eligible.slice(0, 8).map((m: any) => {
