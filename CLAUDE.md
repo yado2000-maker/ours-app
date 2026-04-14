@@ -145,6 +145,13 @@
 - **Whapi voice payload:** Whapi sends `type: "voice"` (not `"ptt"`). Audio data under `msg.voice` with `id` (media ID), `seconds` (duration), `mime_type`. No direct download `link` — fetch via `GET /media/{mediaId}` with bearer token + `Accept: audio/ogg`. TypeMap covers `ptt`, `audio`, and `voice` → internal `"voice"` type.
 - **Family memories:** Sonnet auto-captures memorable moments via `<!--MEMORY:-->` block (max 3/day). Memories injected into Sonnet reply context after 2-day aging. Three explicit intents: `save_memory`, `recall_memory`, `delete_memory`. Scoped: group memories visible everywhere, direct memories stay in 1:1. 10/member capacity with score-based eviction. 24hr cooldown between uses.
 - **Fabrication guardrail:** GROUNDING rule in Sonnet prompt — never reference events not in conversation or provided context.
+- **`IncomingMessage` field names** — Use `message.messageId` (not `message.id`) and `message.senderPhone` (not `message.senderId`). TypeScript won't error on missing properties — they silently return `undefined`.
+- **`whatsapp_member_mapping` columns** — `phone_number` and `member_name` (NOT `phone` / `display_name`). `household_members` uses `display_name`. The two tables have different column names for the same concept.
+- **1:1 path has NO Haiku classification** — Direct messages go straight to Sonnet via `ONBOARDING_1ON1_PROMPT`. Only group messages go through Haiku classifier. `classification_data` is null for 1:1 messages.
+- **Webhook logs twice per message** — `logMessage` is called once as `received` (early) and again with the actual classification (after Haiku/Sonnet). Both rows share the same `whatsapp_message_id`. This is by design, not a dedup failure.
+- **UTC times in Sonnet context** — Always convert `send_at` / `scheduled_for` to Israel time before injecting into prompts. Raw UTC causes Sonnet to misread "13:00 UTC" as "1 PM local" and create phantom duplicate items. Use `toIsraelTimeStr()`.
+- **Classifier is example-driven, not rule-driven** — Adding a RULE to the Haiku prompt ("strip תוסיפי prefix") doesn't work without a matching EXAMPLE (`"תוסיפי חלב" → add_shopping`). Always add both.
+- **`countHouseholdActions(householdId)`** — Returns total items across tasks + shopping + events + reminders. Reusable for nudge threshold AND future paywall.
 - **NEVER use `sed -i` on source files** — Windows Git Bash `sed` corrupts file encoding invisibly (bash reads OK, editors show empty). Use `iconv` or the Edit tool for line-ending changes.
 
 ## Phone OTP Auth (deployed 2026-04-08)
@@ -258,6 +265,7 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **Vite SPA catch-all shadows API routes** — `api/r/[code].js` serves at `/api/r/:code`. For clean URLs like `/r/:code`, add rewrite in `vercel.json`: `{ "source": "/r/:code", "destination": "/api/r/:code" }`
 - **Codebase + Git:** `C:\Users\yarond\Downloads\claude code\ours-app\` — single folder, edit + commit + push here. `ours-app-git` is retired (merged 2026-04-11).
 - **Deploy process:** Edit → commit → push → Vercel auto-deploys. Edge Functions: paste `index.inlined.ts` to Supabase Dashboard.
+- **`.env` file** — Project root, gitignored. Contains `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`. Required for integration tests and classifier eval.
 - **PowerShell quirks:** `npm`/`git` not available in bash shell
 - **Browser cache aggressive** — always `Ctrl+Shift+R` after deploy, or `localStorage.clear(); location.reload()` for clean state
 
@@ -265,11 +273,17 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - `npm run dev` — Vite dev server (port 5173)
 - `npm run build` — Production build
 - `python tests/classifier_eval.py` — Run 120-case Haiku classifier eval (~26 min Tier 1, ~4 min Tier 2, needs ANTHROPIC_API_KEY)
+- `python tests/test_webhook.py` — Run 47-case webhook integration tests (~5 min, needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env). Tests classification, DB writes, dedup, edge cases against production Edge Function.
 - Edge Function deploy: `index.inlined.ts` (~89KB) too large for MCP tool. Deploy via Supabase Dashboard paste (Cursor → Ctrl+A, Ctrl+C → Dashboard → Code → paste → Deploy). Verify JWT = OFF.
 - `icount-webhook` Edge Function: separate function, deploy via Dashboard. Verify JWT = OFF. Env var: `ICOUNT_WEBHOOK_SECRET`.
 - Vite dev server: port **5173** (not 3000). launch.json uses `"C:\\Program Files\\nodejs\\node.exe"` as runtimeExecutable.
 - DB migrations: use `mcp__f5337598__apply_migration` MCP tool
 - Diagnose bot silence on a specific message: `SELECT classification, classification_data, ai_responded FROM whatsapp_messages WHERE message_text ILIKE '%<text>%' ORDER BY created_at DESC LIMIT 5;` — `classification_data` JSONB has full Haiku output, `ai_responded` shows actual delivery.
+
+## Testing
+- **Integration tests (`test_webhook.py`):** 47 end-to-end tests via real Edge Function. Tests classification + DB state. ~94% pass rate (3 flaky due to LLM non-determinism). Run before user acquisition pushes.
+- **Classifier eval (`classifier_eval.py`):** 120 Haiku-only test cases. Currently OUT OF SYNC with production prompt (missing add_reminder, compound names, etc.). Superseded by integration tests for regression coverage.
+- **LLM non-determinism:** ~6% of integration tests are flaky — same input classifies differently across runs. Ambiguous Hebrew messages at confidence boundaries. Not code bugs. Accept as known variance.
 
 ## Agent Skills
 - `product-manager` — Conversion, onboarding, feature prioritization, Hebrew CTA copy
@@ -293,6 +307,5 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - **Admin dashboard: Morning briefing stats** — design doc §9 metric deferred from admin-channels-section plan. Needs new columns on `onboarding_conversations` (briefing_count, briefing_opted_out) AND the briefing free-tier feature itself. Revisit when briefing ships.
 - **Admin dashboard: Revenue per channel** — design doc §9 metric deferred from admin-channels-section plan. Currently 0 paying subs makes the metric uninformative. Revisit at ≥10 paying subscriptions.
 - **Admin dashboard: Deduplicate `funnel_counts` from `admin_channel_stats`** — the RPC returns `funnel_counts` (duplicating `admin_funnel_stats`) but the frontend ignores it. Tracked as a JSX `NOTE` comment in the Channels section. Remove the field from `admin_channel_stats` SQL in a future cleanup pass.
-- **Deploy reminder bug fixes** — `index.inlined.ts` has 4 unreleased edits (2026-04-13): third-person reminder support, "לפני X" buffer semantics, Haiku-entity fallback for empty Sonnet replies, onboarding escalation skip for high-confidence reminders. Paste to Supabase Dashboard when ready. Manual reminder already inserted for Amitay (חיים שלה קניות) for Wed 2026-04-15 15:00.
-- **Resync `tests/classifier_eval.py` embedded prompt with production classifier** — eval script has a stripped-down copy of the Haiku prompt missing `add_reminder` entirely + many recent rules (לפני X buffer, third-person reminders, store categories, compound names, rotation detection). Running eval today doesn't test what's deployed. Either (a) load the production prompt from `index.inlined.ts`, or (b) extract the classifier prompt into a shared constant both reference. Until resynced, new `ADD_REMINDER_CASES` can't meaningfully run.
+- **Resync `tests/classifier_eval.py` embedded prompt with production classifier** — eval script has a stripped-down copy of the Haiku prompt missing `add_reminder` entirely + many recent rules. Superseded by `test_webhook.py` integration tests for regression coverage, but still useful for isolated Haiku-only testing if resynced.
 - **Classifier prompt duplication between Haiku + Sonnet** — `add_reminder` time-parsing rules are duplicated in `index.inlined.ts` ~line 512 (Haiku intent prompt) and ~line 1035 (Sonnet reply prompt). Drift risk is real (this session added "לפני X" buffer in both; next rule change could miss one). Consider extracting shared reminder rules into a single constant both prompts interpolate.
