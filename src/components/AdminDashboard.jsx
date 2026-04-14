@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { supabase, fetchAdminChannelStats } from "../lib/supabase.js";
+import { supabase } from "../lib/supabase.js";
 
 const ADMIN_IDS = ["28daa344-ad5a-449b-8e36-f6296bb2f51c", "9698d5df-e40e-4f2b-a91e-a911f14fe1c8", "dc552ffd-65f5-4943-a64a-8f6d56c8578a"];
 const REFRESH_INTERVAL = 60000;
@@ -302,12 +302,13 @@ export default function AdminDashboard({ session, onBack }) {
         supabase.rpc("admin_dashboard_overview", { p_days: period }),
         supabase.rpc("admin_funnel_stats"),
         supabase.rpc("admin_feature_stats", { p_days: period }),
-        fetchAdminChannelStats(period),
+        supabase.rpc("admin_channel_stats", { p_days: period }),
       ]);
 
       if (overviewRes.error) throw new Error(`Overview: ${overviewRes.error.message}`);
       if (funnelRes.error) throw new Error(`Funnel: ${funnelRes.error.message}`);
       if (featuresRes.error) throw new Error(`Features: ${featuresRes.error.message}`);
+      if (chRes.error) throw new Error(`Channels: ${chRes.error.message}`);
 
       // Check for empty response (non-admin RLS)
       const ov = overviewRes.data;
@@ -322,7 +323,7 @@ export default function AdminDashboard({ session, onBack }) {
       setOverview(ov);
       setFunnel(fn);
       setFeatures(ft);
-      setChannelStats(chRes || null);
+      setChannelStats(chRes.data || null);
       setLastRefresh(new Date());
     } catch (err) {
       console.error("[AdminDashboard] fetch error:", err);

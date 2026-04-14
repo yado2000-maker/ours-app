@@ -949,6 +949,34 @@ export const INFO_REQUEST_CASES: TestCase[] = [
   },
 ];
 
+// ─── ADD_REMINDER (3 cases) ───
+// Added 2026-04-13 after the Ventura-family "remind Osnat before 16:00" bug.
+// Covers third-person reminders, "לפני X" buffer semantics, and day-from-context.
+
+export const ADD_REMINDER_CASES: TestCase[] = [
+  {
+    input: "תזכירי לאמא להביא חלב מחר ב-10",
+    sender: "אבא",
+    expectedIntent: "add_reminder",
+    expectedEntities: { reminder_text: "אמא — להביא חלב", time_raw: "מחר ב-10" },
+    notes: "Third-person reminder — bot reminds Mom to do something. reminder_text should include target's name.",
+  },
+  {
+    input: "תזכירי לי לפני השעה 16 לעשות קניות",
+    sender: "אמא",
+    expectedIntent: "add_reminder",
+    expectedEntities: { reminder_text: "לעשות קניות", time_raw: "לפני השעה 16" },
+    notes: "'Before X' buffer — time_iso should be ~15:00, NOT 16:00. 1-hour buffer before the deadline.",
+  },
+  {
+    input: "ותזכיר לאסנת לעשות רשימה לפני 16",
+    sender: "אמיתי",
+    expectedIntent: "add_reminder",
+    expectedEntities: { reminder_text: "אסנת — לעשות רשימה", time_raw: "לפני 16" },
+    notes: "Combines third-person + 'before X' + day missing (should be carried from prior conversation). May set needs_conversation_review:true.",
+  },
+];
+
 // ─── ALL CASES combined ───
 
 export const ALL_CASES: TestCase[] = [
@@ -962,6 +990,7 @@ export const ALL_CASES: TestCase[] = [
   ...QUESTION_CASES,
   ...CLAIM_TASK_CASES,
   ...INFO_REQUEST_CASES,
+  ...ADD_REMINDER_CASES,
 ];
 
 export const CASE_COUNTS: Record<string, number> = {
@@ -975,6 +1004,7 @@ export const CASE_COUNTS: Record<string, number> = {
   question: QUESTION_CASES.length,
   claim_task: CLAIM_TASK_CASES.length,
   info_request: INFO_REQUEST_CASES.length,
+  add_reminder: ADD_REMINDER_CASES.length,
 };
 
 console.log(`Total test cases: ${ALL_CASES.length}`);

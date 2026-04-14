@@ -509,7 +509,7 @@ INTENTS:
 - claim_task: Self-assigning an existing open task. "אני אעשה", "אני לוקח/ת", "אני יכול".
 - info_request: Asking for information that is NOT a household task. Passwords, phone numbers, prices, codes.
 - correct_bot: Correcting something Sheli just did wrong. "התכוונתי ל...", "לא X, כן Y", "תתקני", "טעית", "זה פריט אחד".
-- add_reminder: Setting a reminder for a future time. "תזכירי לי ב-4", "תזכרו אותי מחר", "בעוד שעה תזכירי", "remind me at 5". Must contain a time reference.
+- add_reminder: Setting a reminder for a future time. "תזכירי לי ב-4", "תזכרו אותי מחר", "בעוד שעה תזכירי", "remind me at 5". Also "תזכירי ל[person]..." (third-person — still add_reminder). Must contain a time reference. For "לפני X" (before X), set time_iso to X minus ~1 hour buffer (NOT X itself). If the message references a time but NO day, and day could come from prior conversation, set needs_conversation_review: true so Sonnet can resolve from history.
 - instruct_bot: Parent EXPLAINING a rule or management preference to Sheli. Teaching/explanatory tone — "ככה...", "אמרתי ש...", "את אמורה ל...", "צריך לנהל את זה ככה ש...". NOT a direct command — it's teaching how things should work. Frustration/repetition signals also indicate instruct_bot.
 - save_memory: User asks Sheli to remember something specific. "תזכרי ש...", "תרשמי לך ש...", "אל תשכחי ש...". Must be a personal/family fact, NOT a task or reminder.
 - recall_memory: User asks what Sheli remembers about someone or the family. "מה את זוכרת על...?", "מה ידוע לך על...?", "ספרי לי מה את יודעת על...".
@@ -666,6 +666,9 @@ EXAMPLES:
 [אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"מוצרי חלב"},{"name":"קפה טחון","category":"שתייה"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"לחם ומאפים"},{"name":"חומוס","category":"שימורים ומזון יבש"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
 [אמא]: "תזכירי לי ב-4 לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לאסוף את הילדים","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 לאסוף את הילדים"}}
 [אבא]: "בעוד שעה תזכירי לקחת את הכביסה" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לקחת את הכביסה","time_raw":"בעוד שעה","raw_text":"בעוד שעה תזכירי לקחת את הכביסה"}}
+[אבא]: "תזכירי לאמא להביא חלב מחר ב-10" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"אמא — להביא חלב","time_raw":"מחר ב-10","raw_text":"תזכירי לאמא להביא חלב מחר ב-10"}}
+[אמא]: "תזכירי לי לפני השעה 16 לעשות קניות" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"לעשות קניות","time_raw":"לפני השעה 16","raw_text":"תזכירי לי לפני השעה 16 לעשות קניות"}}
+[אמיתי]: "ותזכיר לאסנת לעשות רשימה לפני 16" → {"intent":"add_reminder","confidence":0.80,"addressed_to_bot":true,"needs_conversation_review":true,"entities":{"reminder_text":"אסנת — לעשות רשימה","time_raw":"לפני 16","raw_text":"ותזכיר לאסנת לעשות רשימה לפני 16"}}
 [אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
@@ -1032,16 +1035,26 @@ Paraphrase naturally — never repeat the exact same wording twice.
 REMINDERS: When intent is add_reminder:
 - Parse the time expression into an ISO 8601 timestamp in Israel timezone (Asia/Jerusalem, currently UTC+3).
 - Time parsing rules:
-  "ב-4" or "ב-16" → today at 16:00 IST (if still in future, else tomorrow)
+  "ב-4" or "ב-16" → today at that exact hour IST (if still in future, else tomorrow)
   "מחר ב-8" → tomorrow 08:00
   "בעוד שעה" → now + 1 hour
   "בעוד 20 דקות" → now + 20 minutes
   "ביום חמישי ב-10" → next Thursday 10:00
   "בערב" → 19:00, "בצהריים" → 12:00, "בבוקר" → 08:00
-- If no time specified, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
+- "לפני X" / "before X" is NOT the same as "ב-X" / "at X". It means fire the reminder WITH BUFFER BEFORE the deadline, not AT the deadline:
+  "לפני השעה 16" → 15:00 (1 hour before). "לפני הצהריים" → 11:00. "לפני שבת" → Friday afternoon.
+  Default buffer: 1 hour earlier for hour-specific deadlines. Honor the user's word choice — "ב-X" and "לפני X" mean different things.
+- THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
+- CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
+- If no time specified at all, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
 - If time IS specified, append this EXACT format at the END of your reply (hidden from user):
   <!--REMINDER:{"reminder_text":"what to remind","send_at":"2026-04-08T16:00:00+03:00"}-->
 - Your visible reply should be a short confirmation like: "אזכיר ✓ היום ב-16:00" or "תזכורת נקבעה למחר ב-8 בבוקר ✓"
+- Examples:
+  "תזכירי לי מחר ב-10 להביא חלב" → reply "אזכיר מחר ב-10:00 ✓" + <!--REMINDER:{"reminder_text":"להביא חלב","send_at":"<tomorrow>T10:00:00+03:00"}-->
+  "תזכירי לאמא להביא חלב מחר ב-10" → reply "אזכיר לאמא להביא חלב מחר ב-10:00 ✓" + <!--REMINDER:{"reminder_text":"אמא — להביא חלב","send_at":"<tomorrow>T10:00:00+03:00"}-->
+  "תזכירי לי לפני השעה 16 לעשות קניות" → reply "אזכיר לך ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"לעשות קניות","send_at":"<today>T15:00:00+03:00"}-->
+  "תזכירי לאסנת לעשות רשימה לפני 16" (after earlier message mentioning "יום רביעי") → reply "אזכיר לאסנת לעשות רשימה יום רביעי ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"אסנת — לעשות רשימה","send_at":"<next Wednesday>T15:00:00+03:00"}-->
 - Current time: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
 
 ${ctx.familyMemories ? `
@@ -2190,13 +2203,13 @@ function shouldSendGroupNudge(convo: Record<string, any>): boolean {
   // Already in a real group
   if (convo.state === "personal" || convo.state === "joined") return false;
 
-  const actionCount = (convo.demo_items || []).filter((i: any) => i.type !== "_pending_nudge").length;
+  const msgCount = convo.message_count || 0;
   const createdAt = convo.created_at ? new Date(convo.created_at) : null;
   const daysSinceCreated = createdAt
     ? (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
     : 0;
 
-  return actionCount >= GROUP_NUDGE_MIN_ACTIONS || daysSinceCreated >= GROUP_NUDGE_MIN_DAYS;
+  return msgCount >= GROUP_NUDGE_MIN_ACTIONS || daysSinceCreated >= GROUP_NUDGE_MIN_DAYS;
 }
 
 // (Removed: DEMO_CATEGORIES — categorization now handled by Sonnet in 1:1 prompt)
@@ -2311,7 +2324,7 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Never repeat same phrasing. Every reply sounds fresh and different.
 
 CAPABILITIES YOU CAN DEMONSTRATE:
-- Shopping lists: user says items → you categorize with emoji headers (🥛 מוצרי חלב, 🍞 לחם, 🥬 ירקות ופירות, 🧴 ניקיון, 🥫 מזווה, 🍺 משקאות, 🥩 בשר ודגים, 🛒 כללי). When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
+- Shopping lists: user says items → you categorize with emoji headers (🥛 מוצרי חלב, 🍞 לחם ומאפים, 🥬 ירקות ופירות, 🧴 ניקיון, 🥫 מזווה, 🍺 משקאות, 🥩 בשר ודגים, 🌶️ תבלינים וחריפים, 🥒 חמוצים, 🧊 קפואים, 🍿 חטיפים, 🛒 כללי). ONLY use these categories — never invent new ones. When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
 - Tasks: user says chore → you say "רשמתי! ✅" with task text
 - Rotations/turns: after the FIRST task about chores, offer ONCE: "אם יש ילדים בבית — אני מעולה בתורות 😉". Do NOT offer rotations again if "rotation" already appears in TRIED. One offer is enough.
   - If user engages: ask what rotation + who participates → create it
@@ -2372,12 +2385,24 @@ OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visi
 Your visible reply here
 
 ACTIONS array: each object has "type" and relevant fields:
+ADD:
 - shopping: {"type":"shopping","items":["חלב","ביצים"]}
 - task: {"type":"task","text":"לפרוק מדיח"}
 - reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
   IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00). If user says "ב-5" → today 17:00 IST. If "בעוד שעה" → compute from current time. If time already passed today → use tomorrow. The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
+UPDATE (rename/edit existing):
+- update_shopping: {"type":"update_shopping","old_name":"פסטה","new_name":"פסטה פנה"}
+- update_task: {"type":"update_task","old_text":"לנקות","new_text":"לנקות את המטבח"}
+- update_reminder: {"type":"update_reminder","old_text":"להוציא בשר","new_text":"להוציא עוף","new_send_at":"2026-04-14T18:00:00+03:00"}
+- update_event: {"type":"update_event","old_title":"ארוחת ערב","new_title":"ארוחה עם סבתא","new_date":"2026-04-20","new_time":"19:00"}
+REMOVE (delete existing):
+- remove_shopping: {"type":"remove_shopping","name":"פסטה"}
+- remove_task: {"type":"remove_task","text":"לנקות"}
+- remove_reminder: {"type":"remove_reminder","text":"להוציא בשר"}
+- remove_event: {"type":"remove_event","title":"ארוחת ערב"}
+OTHER:
 - name_correction: {"type":"name_correction","name":"ירון"}
 
 TRIED array: list ALL capability types demonstrated so far (include previous + any new ones from this reply).
@@ -2469,6 +2494,341 @@ function parseReminderTime(timeStr: string): string | null {
   return utcTarget.toISOString();
 }
 
+// Fallback extraction: parse shopping items from Hebrew free-text when Sonnet ACTIONS block is empty.
+// Strips command verbs, splits by commas/ו, filters instruction clauses.
+function extractShoppingItemsFromText(text: string): string[] {
+  let cleaned = text
+    // Strip common command verbs at start
+    .replace(/^(תוסיפי|תוסיף|תכניסי|תכניס|תרשמי|תרשום|להוסיף|לרשום)\s*(גם\s*)?/u, "")
+    .trim();
+  if (!cleaned) return [];
+  // Remove instruction clauses like "והפסטה צריכה להיות פסטה פנה"
+  cleaned = cleaned.replace(/ו?ה?\S+\s+צריכ[הא]\s+להיות\s+.*/u, "").trim();
+  cleaned = cleaned.replace(/\s+במקום\s+.*/u, "").trim();
+  // Split by comma, "ו" conjunction (word boundary), or newline
+  const parts = cleaned.split(/\s*,\s*|\s*\n\s*/).flatMap(part =>
+    // Split "X וY" but not compound names like "אורז בסמטי ועגול"
+    // Only split on "ו" when it's between two distinct items (preceded by space)
+    part.split(/\s+ו(?=[א-ת])/)
+  );
+  return parts
+    .map(p => p.trim())
+    .filter(p => p.length >= 2 && !/^(גם|את|של|עוד|בבקשה|לי)$/u.test(p));
+}
+
+// ─── Shared 1:1 conversation history (used by both chatting + personal paths) ───
+
+async function fetch1on1History(groupId: string, currentUserName: string): Promise<{ role: string; content: string }[]> {
+  // Fetch last 10 messages (both user + bot) for this 1:1 chat, oldest first
+  const { data: history } = await supabase.from("whatsapp_messages")
+    .select("sender_phone, sender_name, message_text")
+    .eq("group_id", groupId)
+    .not("message_text", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (!history || history.length === 0) return [];
+
+  // Reverse to chronological order, map to Sonnet multi-turn format
+  const BOT_PHONE = "972555175553";
+  const turns: { role: string; content: string }[] = [];
+  for (const msg of history.reverse()) {
+    if (msg.sender_phone === BOT_PHONE) {
+      // Bot message — strip metadata blocks, keep visible text only
+      const visible = (msg.message_text || "")
+        .replace(/<!--ACTIONS:.*?-->/s, "")
+        .replace(/<!--TRIED:.*?-->/s, "")
+        .replace(/<!--MEMORY:.*?-->/s, "")
+        .replace(/<!--REMINDER:\{.*?\}-->/s, "")
+        .trim();
+      if (visible) turns.push({ role: "assistant", content: visible });
+    } else {
+      // User message
+      const name = msg.sender_name || currentUserName || "משתמש";
+      turns.push({ role: "user", content: `[${name}]: ${msg.message_text || ""}` });
+    }
+  }
+  return turns;
+}
+
+// Merge consecutive same-role messages and ensure first turn is "user" (Sonnet requirement).
+function prepareSonnetTurns(turns: { role: string; content: string }[]): { role: string; content: string }[] {
+  const merged: { role: string; content: string }[] = [];
+  for (const msg of turns) {
+    if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
+      merged[merged.length - 1].content += "\n" + msg.content;
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+  while (merged.length > 0 && merged[0].role !== "user") merged.shift();
+  return merged;
+}
+
+// Load active household items (tasks, shopping, events, reminders) for Sonnet context.
+async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; scheduled_for?: string; send_at?: string }[]> {
+  const nowIso = new Date().toISOString();
+  const [tasksRes, shopRes, eventsRes, remindersRes] = await Promise.all([
+    supabase.from("tasks").select("title").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(10),
+    supabase.from("shopping_items").select("name").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(10),
+    supabase.from("events").select("title, scheduled_for").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(10),
+    supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(10),
+  ]);
+  return [
+    ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
+    ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
+    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: r.scheduled_for })),
+    ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: r.send_at })),
+  ];
+}
+
+// ─── Shared 1:1 action execution (used by both chatting + personal paths) ───
+
+const TRIGGER_WORDS_SET = new Set([
+  "תזכירי לי", "תזכירי", "תזכורת", "תזכור", "תזכרי",
+  "תוסיפי", "תוסיף", "להוסיף", "תכניסי", "תכניס",
+  "תרשמי", "תרשום", "לרשום", "שמרי", "שמור", "לשמור",
+  "לעשות", "לבצע", "לטפל",
+  "remind me", "reminder", "add",
+]);
+
+const ITEMS_BASED_TYPES = new Set([
+  "shopping", "update_shopping", "remove_shopping",
+  "update_task", "remove_task",
+  "update_reminder", "remove_reminder",
+  "update_event", "remove_event",
+  "name_correction",
+]);
+
+async function execute1on1Actions(params: {
+  raw: string;
+  text: string;
+  phone: string;
+  householdId: string | null;
+  userName: string;
+  convoContext?: any;
+  logPrefix?: string;
+  resolveHousehold?: () => Promise<string>;
+}): Promise<{ actions: any[]; visibleReply: string; triedCaps: string[] }> {
+  const { raw, text, phone, userName, convoContext, logPrefix = "[1:1]" } = params;
+  let householdId = params.householdId;
+
+  // 1. Observability
+  console.log(`${logPrefix} Sonnet raw (${raw.length}c): ${raw.slice(0, 400)}`);
+
+  // 2. Parse hidden metadata
+  const actionsMatch = raw.match(/<!--ACTIONS:(.*?)-->/s);
+  const triedMatch = raw.match(/<!--TRIED:(.*?)-->/s);
+  const visibleReply = raw
+    .replace(/<!--ACTIONS:.*?-->/s, "")
+    .replace(/<!--TRIED:.*?-->/s, "")
+    .trim();
+
+  // 3. Parse actions JSON
+  let actions: any[] = [];
+  if (actionsMatch) {
+    try { actions = JSON.parse(actionsMatch[1]); } catch (e) {
+      console.error(`${logPrefix} Failed to parse ACTIONS JSON: ${actionsMatch[1].slice(0, 200)}`);
+    }
+  }
+  console.log(`${logPrefix} Parsed ${actions.length} actions for ${phone}`);
+
+  // 4. Guardrail filter
+  const isTriggerWordOnly = (t: string): boolean => {
+    const trimmed = (t || "").trim().toLowerCase();
+    return trimmed.length < 3 || TRIGGER_WORDS_SET.has(trimmed);
+  };
+  const droppedActions: any[] = [];
+  actions = actions.filter((action: any) => {
+    if (!action?.type) return false;
+    if (ITEMS_BASED_TYPES.has(action.type)) {
+      if (action.type === "shopping" && (!action.items || !Array.isArray(action.items) || action.items.length === 0)) {
+        droppedActions.push({ reason: "shopping_no_items", action });
+        return false;
+      }
+      return true;
+    }
+    const actionText = action.text || action.title || "";
+    if (!actionText || isTriggerWordOnly(actionText)) {
+      droppedActions.push({ reason: "trigger_word_only", action });
+      return false;
+    }
+    if (action.type === "event" && !action.date && !action.scheduled_for) {
+      droppedActions.push({ reason: "event_no_date", action });
+      return false;
+    }
+    if (action.type === "reminder" && !action.send_at && !action.time) {
+      droppedActions.push({ reason: "reminder_no_time", action });
+      return false;
+    }
+    return true;
+  });
+  if (droppedActions.length > 0) {
+    console.warn(`${logPrefix} Guardrail dropped ${droppedActions.length} actions for ${phone}:`, JSON.stringify(droppedActions));
+  }
+
+  // 5. Hallucination safety net
+  if (actions.length === 0 && /הוספתי|רשמתי|שמרתי|עדכנתי|הכנסתי/.test(visibleReply)) {
+    console.warn(`${logPrefix} Hallucination: Sonnet claimed success but ACTIONS empty for ${phone}`);
+    const fallbackItems = extractShoppingItemsFromText(text);
+    if (fallbackItems.length > 0) {
+      actions = [{ type: "shopping", items: fallbackItems }];
+      console.log(`${logPrefix} Fallback: extracted ${fallbackItems.length} items: ${fallbackItems.join(", ")}`);
+    }
+  }
+
+  // 6. Parse tried capabilities
+  let triedCaps: string[] = [];
+  if (triedMatch) {
+    try { triedCaps = JSON.parse(triedMatch[1]); } catch {}
+  }
+
+  // 7. Name correction (no household needed)
+  for (const action of actions) {
+    if (action.type === "name_correction" && action.name) {
+      const newGender = detectGender(action.name);
+      const updatedContext = { ...(convoContext || {}), name: action.name, gender: newGender, name_spelling_asked: true };
+      await supabase.from("onboarding_conversations").update({
+        context: updatedContext,
+      }).eq("phone", phone);
+      console.log(`${logPrefix} Name corrected to: ${action.name}`);
+    }
+  }
+
+  // 8. Execute real actions (need household)
+  const realActions = actions.filter((a: any) => a.type && a.type !== "name_correction");
+  if (realActions.length > 0) {
+    // Resolve household if not yet available
+    if (!householdId && params.resolveHousehold) {
+      householdId = await params.resolveHousehold();
+    }
+    if (!householdId) {
+      console.warn(`${logPrefix} No household for ${phone}, skipping ${realActions.length} actions`);
+      return { actions, visibleReply, triedCaps };
+    }
+
+    const mappedActions: any[] = [];
+    for (const action of realActions) {
+      switch (action.type) {
+        case "shopping":
+          if (action.items && Array.isArray(action.items)) {
+            mappedActions.push({
+              type: "add_shopping",
+              data: { items: action.items.map((item: string) => ({ name: item, qty: "1", category: "אחר" })) },
+            });
+          }
+          break;
+        case "task":
+          mappedActions.push({
+            type: "add_task",
+            data: { title: action.text || "", assigned_to: null },
+          });
+          break;
+        case "event":
+          mappedActions.push({
+            type: "add_event",
+            data: {
+              title: action.title || action.text || "",
+              assigned_to: null,
+              scheduled_for: action.date
+                ? `${action.date}${action.time ? "T" + action.time + ":00+03:00" : "T18:00:00+03:00"}`
+                : new Date().toISOString(),
+            },
+          });
+          break;
+        case "rotation":
+          if (action.members && Array.isArray(action.members)) {
+            mappedActions.push({
+              type: "add_task",
+              data: { rotation: { title: action.title || "", type: action.rotationType || "duty", members: action.members } },
+            });
+          }
+          break;
+        case "reminder": {
+          const sendAt = action.send_at
+            ? new Date(action.send_at).toISOString()
+            : parseReminderTime(action.time || "");
+          if (sendAt) {
+            const { error: remErr } = await supabase.from("reminder_queue").insert({
+              household_id: householdId,
+              group_id: phone + "@s.whatsapp.net",
+              message_text: action.text || "",
+              send_at: sendAt,
+              sent: false,
+              reminder_type: "user",
+              created_by_phone: phone,
+              created_by_name: userName,
+            });
+            if (remErr) console.error(`${logPrefix} Reminder insert error:`, remErr);
+            else console.log(`${logPrefix} Reminder created for ${sendAt}: "${action.text}"`);
+          } else {
+            console.warn(`${logPrefix} Could not parse reminder time: ${JSON.stringify(action)}`);
+          }
+          break;
+        }
+        // --- UPDATE / REMOVE actions (table-driven) ---
+        case "update_shopping": case "update_task": case "update_reminder": case "update_event":
+        case "remove_shopping": case "remove_task": case "remove_reminder": case "remove_event": {
+          const CRUD_MAP: Record<string, { table: string; matchCol: string; activeFilter?: Record<string, any> }> = {
+            update_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
+            update_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
+            update_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
+            update_event:     { table: "events",          matchCol: "title" },
+            remove_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
+            remove_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
+            remove_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
+            remove_event:     { table: "events",          matchCol: "title" },
+          };
+          const cfg = CRUD_MAP[action.type];
+          const isRemove = action.type.startsWith("remove_");
+          // Determine the search text (updates use old_name/old_text/old_title; removes use name/text/title)
+          const searchText = isRemove
+            ? (action.name || action.text || action.title)
+            : (action.old_name || action.old_text || action.old_title);
+          if (!searchText) break;
+          // Find matching row
+          let query = supabase.from(cfg.table).select("id").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
+          if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) query = query.eq(k, v);
+          const { data: match, error: findErr } = await query.limit(1).single();
+          if (findErr || !match) { console.warn(`${logPrefix} ${action.type}: not found for "${searchText}"`); break; }
+          if (isRemove) {
+            const { error: delErr } = await supabase.from(cfg.table).delete().eq("id", match.id);
+            if (delErr) console.error(`${logPrefix} ${action.type} error:`, delErr);
+            else console.log(`${logPrefix} Removed ${cfg.table}: "${searchText}"`);
+          } else {
+            // Build update payload
+            const updates: Record<string, any> = {};
+            if (action.new_name) updates.name = action.new_name;
+            if (action.new_text) updates[cfg.matchCol] = action.new_text;
+            if (action.new_title) updates.title = action.new_title;
+            if (action.new_send_at) updates.send_at = new Date(action.new_send_at).toISOString();
+            if (action.new_date) updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
+            const { error: updErr } = await supabase.from(cfg.table).update(updates).eq("id", match.id);
+            if (updErr) console.error(`${logPrefix} ${action.type} error:`, updErr);
+            else console.log(`${logPrefix} Updated ${cfg.table}: "${searchText}"`);
+          }
+          break;
+        }
+        default:
+          console.warn(`${logPrefix} Unknown action type: ${action.type}`);
+          break;
+      }
+    }
+
+    // Execute mapped add-actions via the real executor
+    if (mappedActions.length > 0) {
+      try {
+        const { summary } = await executeActions(householdId, mappedActions, userName);
+        console.log(`${logPrefix} Executed ${summary.length} actions for ${phone}:`, summary);
+      } catch (err) {
+        console.error(`${logPrefix} executeActions error:`, err);
+      }
+    }
+  }
+
+  return { actions, visibleReply, triedCaps };
+}
+
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
   const phone = message.senderPhone;
   const text = (message.text || "").trim();
@@ -2479,20 +2839,13 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   // Skip non-text messages in 1:1 (voice is OK — already transcribed upstream)
   if (!text && message.type !== "voice") return;
 
-  // --- Already in a group? Route to personal channel ---
-  const { data: mapping } = await supabase
-    .from("whatsapp_member_mapping")
-    .select("household_id")
-    .eq("phone_number", phone)
-    .limit(1)
-    .single();
-
-  // --- Get or create conversation ---
-  let { data: convo } = await supabase
-    .from("onboarding_conversations")
-    .select("*")
-    .eq("phone", phone)
-    .single();
+  // --- Check group membership + conversation state in parallel ---
+  const [mappingRes, convoRes] = await Promise.all([
+    supabase.from("whatsapp_member_mapping").select("household_id").eq("phone_number", phone).limit(1).single(),
+    supabase.from("onboarding_conversations").select("*").eq("phone", phone).single(),
+  ]);
+  const mapping = mappingRes.data;
+  let convo = convoRes.data;
 
   if (mapping) {
     // User is in a group — treat 1:1 as personal channel
@@ -2541,7 +2894,6 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       message_count: 1,
       referral_code: validReferralCode,
       context: { name: senderName, gender: detectGender(hebrewizeName(senderName)) },
-      demo_items: [],
       tried_capabilities: [],
     });
 
@@ -2592,30 +2944,10 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   // --- Active conversation: send to Sonnet ---
   const userName = convo.context?.name || hebrewizeName(senderName) || "";
 
-  // Read LIVE items from real tables when household exists. This filters out:
-  //   - past reminders (sent=true OR send_at < now)
-  //   - past events (scheduled_for < now)
-  //   - completed tasks (done=true)
-  //   - bought shopping (got=true)
-  // Falls back to demo_items only for users who don't yet have a household.
-  let existingItems: any[];
-  if (convo.household_id) {
-    const nowIso = new Date().toISOString();
-    const [tasksRes, shopRes, eventsRes, remindersRes] = await Promise.all([
-      supabase.from("tasks").select("title").eq("household_id", convo.household_id).eq("done", false).order("created_at", { ascending: true }).limit(10),
-      supabase.from("shopping_items").select("name").eq("household_id", convo.household_id).eq("got", false).order("created_at", { ascending: true }).limit(10),
-      supabase.from("events").select("title, scheduled_for").eq("household_id", convo.household_id).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(10),
-      supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", convo.household_id).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(10),
-    ]);
-    existingItems = [
-      ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
-      ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
-      ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: r.scheduled_for })),
-      ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: r.send_at })),
-    ];
-  } else {
-    existingItems = ((convo.demo_items || []) as any[]).filter((i: any) => i.type !== "_pending_nudge");
-  }
+  // Load live items (empty for pre-household users — they haven't executed real actions yet)
+  const existingItems: any[] = convo.household_id
+    ? await loadHouseholdItems(convo.household_id)
+    : [];
 
   const triedCaps: string[] = convo.tried_capabilities || [];
   // Auto-mark voice as tried if user sent a voice message
@@ -2644,16 +2976,6 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   // Check Q&A pattern match for topic hint
   const qaMatch = matchOnboardingQA(text);
 
-  // Fetch recent bot replies for anti-repetition
-  const { data: recentMsgs } = await supabase.from("whatsapp_messages")
-    .select("message_text")
-    .eq("group_id", message.groupId)
-    .eq("sender_phone", "972555175553")
-    .not("message_text", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(3);
-  const recentReplies = (recentMsgs || []).map((m: any) => m.message_text).filter(Boolean);
-
   // Check for ambiguous name (English spelling → multiple Hebrew options)
   const ambiguousOptions = isAmbiguousName(message.senderName || "");
   const nameAskedAlready = convo.context?.name_spelling_asked === true;
@@ -2681,8 +3003,7 @@ CONVERSATION CONTINUITY — CRITICAL:
 - Follow rule 4 for capability hints: ONLY when ${msgCount} is divisible by 3.` : `
 FIRST MESSAGE: This is the user's first reply after your welcome. Brief warmth is fine, but focus on what they said.`}
 ${ambiguousOptions && !nameAskedAlready ? `\nNAME SPELLING: The user's name "${userName}" could be spelled ${ambiguousOptions.join(" or ")} in Hebrew. In your FIRST reply, ask naturally which spelling they prefer. Example: "אגב, ${ambiguousOptions[0]} או ${ambiguousOptions[1]}? אני אוהבת לדייק 😊". After asking, include a name_correction action with their answer. This is a ONE-TIME question — do not ask again.` : ""}
-${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
-${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — vary your style and content):\n${recentReplies.map((r: string) => `- "${r.slice(0, 120)}"`).join("\n")}` : ""}`;
+${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}`;
 
   try {
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -2691,6 +3012,15 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
       await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
       return;
     }
+
+    // Build multi-turn conversation history (BEFORE logMessage so current msg isn't double-counted)
+    const historyTurns = await fetch1on1History(message.groupId, userName);
+    // Log incoming message AFTER history fetch to avoid it appearing twice in Sonnet context
+    await logMessage(message, "received_1on1", convo.household_id || "unknown");
+    // Build final Sonnet message array
+    const currentMsg = `${message.quotedText ? `[Quoted message being replied to: "${message.quotedText}"]\n` : ""}[${userName || "משתמש"}]: ${text}`;
+    const mergedMessages = prepareSonnetTurns([...historyTurns, { role: "user", content: currentMsg }]);
+    console.log(`[1:1] Conversation history: ${mergedMessages.length} turns for ${phone}`);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -2703,7 +3033,7 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
         model: "claude-sonnet-4-20250514",
         max_tokens: 512,
         system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
-        messages: [{ role: "user", content: `${message.quotedText ? `[Quoted message being replied to: "${message.quotedText}"]\n` : ""}[${userName || "משתמש"}]: ${text}` }],
+        messages: mergedMessages,
       }),
     });
 
@@ -2716,185 +3046,24 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
 
-    // Parse hidden metadata
-    const actionsMatch = raw.match(/<!--ACTIONS:(.*?)-->/s);
-    const triedMatch = raw.match(/<!--TRIED:(.*?)-->/s);
-    const visibleReply = raw
-      .replace(/<!--ACTIONS:.*?-->/s, "")
-      .replace(/<!--TRIED:.*?-->/s, "")
-      .trim();
-
-    // Parse actions
-    let actions: any[] = [];
-    if (actionsMatch) {
-      try { actions = JSON.parse(actionsMatch[1]); } catch {}
-    }
-
-    // Defense-in-depth: drop garbage actions even if Sonnet violates the prompt rules.
-    // TRIGGER_WORDS = command verbs that are NEVER valid content (only trigger words).
-    // Bare nouns like "מסיבה", "פגישה", "תור" are NOT here — they're valid content,
-    // just need additional info (date for events, time for reminders) which the
-    // type-specific checks below enforce separately.
-    const TRIGGER_WORDS = new Set([
-      "תזכירי לי", "תזכירי", "תזכורת", "תזכור", "תזכרי",
-      "תוסיפי", "תוסיף", "להוסיף", "תכניסי", "תכניס",
-      "תרשמי", "תרשום", "לרשום", "שמרי", "שמור", "לשמור",
-      "לעשות", "לבצע", "לטפל",
-      "remind me", "reminder", "add",
-    ]);
-    const isTriggerWordOnly = (text: string): boolean => {
-      const trimmed = (text || "").trim().toLowerCase();
-      if (trimmed.length < 3) return true;
-      return TRIGGER_WORDS.has(trimmed);
-    };
-    const droppedActions: any[] = [];
-    actions = actions.filter((action: any) => {
-      if (!action?.type) return false;
-      const text = action.text || action.title || "";
-      // Reject empty or trigger-word-only actions
-      if (!text || isTriggerWordOnly(text)) {
-        droppedActions.push({ reason: "trigger_word_only", action });
-        return false;
-      }
-      // Events MUST have a date (ISO or string in any of: date, scheduled_for)
-      if (action.type === "event" && !action.date && !action.scheduled_for) {
-        droppedActions.push({ reason: "event_no_date", action });
-        return false;
-      }
-      // Reminders MUST have a time (send_at or time field)
-      if (action.type === "reminder" && !action.send_at && !action.time) {
-        droppedActions.push({ reason: "reminder_no_time", action });
-        return false;
-      }
-      return true;
+    // Execute actions via shared function
+    const { actions, visibleReply, triedCaps: parsedTried } = await execute1on1Actions({
+      raw,
+      text,
+      phone,
+      householdId: convo.household_id || null,
+      userName: userName || senderName,
+      convoContext: convo.context,
+      logPrefix: "[1:1]",
+      resolveHousehold: () => ensureOnboardingHousehold(phone, convo as Record<string, unknown>, userName),
     });
-    if (droppedActions.length > 0) {
-      console.warn(`[1:1 Guardrail] Dropped ${droppedActions.length} bad actions for ${phone}:`, JSON.stringify(droppedActions));
-    }
 
-    // Parse tried capabilities
-    let newTried: string[] = triedCaps;
-    if (triedMatch) {
-      try { newTried = JSON.parse(triedMatch[1]); } catch {}
-    }
-
-    // Process actions → execute REAL DB operations.
-    // demo_items is now a vestigial cache (real tables are source of truth for
-    // briefings + Sonnet context). We keep updating it for backward compat; safe
-    // to remove in a future cleanup once we verify nothing else reads it.
-    const newItems = [...existingItems];
-    let hhId: string | null = null;
-
-    // Name correction is handled separately (no household needed)
-    for (const action of actions) {
-      if (action.type === "name_correction" && action.name) {
-        const newGender = detectGender(action.name);
-        const updatedContext = { ...(convo.context || {}), name: action.name, gender: newGender, name_spelling_asked: true };
-        await supabase.from("onboarding_conversations").update({
-          context: updatedContext,
-        }).eq("phone", phone);
-      }
-    }
+    const newTried = parsedTried.length > 0 ? parsedTried : triedCaps;
 
     // If we showed the ambiguous name prompt, mark it as asked even if user didn't answer yet
     if (ambiguousOptions && !nameAskedAlready) {
       const ctx = { ...(convo.context || {}), name_spelling_asked: true };
       await supabase.from("onboarding_conversations").update({ context: ctx }).eq("phone", phone);
-    }
-
-    // For all other actions, ensure household exists and execute for real
-    const realActions = actions.filter((a: any) => a.type && a.type !== "name_correction");
-    if (realActions.length > 0) {
-      hhId = await ensureOnboardingHousehold(phone, convo as Record<string, unknown>, userName);
-
-      // Map 1:1 Sonnet format → executeActions format
-      const mappedActions: any[] = [];
-      for (const action of realActions) {
-        switch (action.type) {
-          case "shopping":
-            if (action.items && Array.isArray(action.items)) {
-              mappedActions.push({
-                type: "add_shopping",
-                data: { items: action.items.map((item: string) => ({ name: item, qty: "1", category: "אחר" })) },
-              });
-              for (const item of action.items) {
-                newItems.push({ type: "shopping", text: item });
-              }
-            }
-            break;
-          case "task":
-            mappedActions.push({
-              type: "add_task",
-              data: { title: action.text || "", assigned_to: null },
-            });
-            newItems.push({ type: "task", text: action.text || "" });
-            break;
-          case "event":
-            mappedActions.push({
-              type: "add_event",
-              data: {
-                title: action.title || action.text || "",
-                assigned_to: null,
-                scheduled_for: action.date
-                  ? `${action.date}${action.time ? "T" + action.time + ":00+03:00" : "T18:00:00+03:00"}`
-                  : new Date().toISOString(),
-              },
-            });
-            newItems.push({ type: "event", text: action.title || action.text || "" });
-            break;
-          case "rotation":
-            if (action.members && Array.isArray(action.members)) {
-              mappedActions.push({
-                type: "add_task",
-                data: {
-                  rotation: {
-                    title: action.title || "",
-                    type: action.rotationType || "duty",
-                    members: action.members,
-                  },
-                },
-              });
-              newItems.push({ type: "rotation", text: action.title || "" });
-            }
-            break;
-          case "reminder": {
-            // Parse time → INSERT into reminder_queue directly
-            const sendAt = action.send_at
-              ? new Date(action.send_at).toISOString()
-              : parseReminderTime(action.time || "");
-            if (sendAt) {
-              const { error: remErr } = await supabase.from("reminder_queue").insert({
-                household_id: hhId,
-                group_id: phone + "@s.whatsapp.net",
-                message_text: action.text || "",
-                send_at: sendAt,
-                sent: false,
-                reminder_type: "user",
-                created_by_phone: phone,
-                created_by_name: userName,
-              });
-              if (remErr) console.error("[1:1 Reminder] Insert error:", remErr);
-              else console.log(`[1:1 Reminder] Created for ${sendAt}: "${action.text}"`);
-            } else {
-              console.warn(`[1:1 Reminder] Could not parse time from: ${JSON.stringify(action)}`);
-            }
-            newItems.push({ type: "reminder", text: action.text || "" });
-            break;
-          }
-          default:
-            newItems.push({ type: action.type, text: action.text || action.title || "" });
-        }
-      }
-
-      // Execute mapped actions (tasks, shopping, events, rotations) via the real executor
-      if (mappedActions.length > 0) {
-        try {
-          const { summary } = await executeActions(hhId, mappedActions, userName || senderName);
-          console.log(`[1:1] Executed ${summary.length} real actions for ${phone}:`, summary);
-        } catch (err) {
-          console.error("[1:1] executeActions error:", err);
-        }
-      }
     }
 
     // Determine if user asked "how does it work" → state = invited
@@ -2905,9 +3074,8 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
     await supabase.from("onboarding_conversations").update({
       state: newState,
       message_count: msgCount,
-      demo_items: newItems,
       tried_capabilities: newTried,
-      nudge_count: 0, // Reset nudge counter on any user message
+      nudge_count: 0,
       updated_at: new Date().toISOString(),
     }).eq("phone", phone);
 
@@ -2916,8 +3084,8 @@ ${recentReplies.length > 0 ? `\nYOUR RECENT REPLIES (do NOT repeat these — var
       await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
     }
 
-    // Group nudge check (one-time, after 2 days OR 5 actions)
-    const updatedConvo = { ...convo, demo_items: newItems, state: newState };
+    // Group nudge check (one-time, after 2 days OR 5 messages)
+    const updatedConvo = { ...convo, message_count: msgCount, state: newState };
     if (shouldSendGroupNudge(updatedConvo) && !isQuietHours()) {
       await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
       await supabase.from("onboarding_conversations").update({
@@ -2951,6 +3119,7 @@ async function handlePersonalChannelMessage(
 ): Promise<void> {
   const text = (message.text || "").trim();
   const phone = message.senderPhone;
+  const senderName = message.senderName || "";
 
   if (!text) return;
 
@@ -2958,6 +3127,37 @@ async function handlePersonalChannelMessage(
   if (!apiKey) return;
 
   try {
+    // Parallel: load items, conversation context, and chat history in one roundtrip
+    const [existingItems, convoRes, historyTurns] = await Promise.all([
+      loadHouseholdItems(householdId),
+      supabase.from("onboarding_conversations").select("*").eq("phone", phone).single(),
+      fetch1on1History(message.groupId, senderName), // senderName as fallback; refined after convo loads
+    ]);
+    // Log incoming message AFTER history fetch (prevents duplicate in Sonnet context)
+    await logMessage(message, "received_1on1_personal", householdId);
+
+    const convo = convoRes.data;
+    const userName = convo?.context?.name || hebrewizeName(senderName) || "";
+    const userGender = convo?.context?.gender || null;
+
+    const contextBlock = `
+PERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally — shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.
+
+CONVERSATION STATE:
+- User name: ${userName || "unknown"}
+- User gender: ${userGender || "unknown (use plural אתם)"}
+- Items collected so far: ${JSON.stringify(existingItems)}
+- Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+
+CONVERSATION CONTINUITY — CRITICAL:
+- This user is already onboarded and has you in their group. They know who you are.
+- Do NOT re-introduce yourself. Do NOT say "אני שלי" or explain your capabilities.
+- Do NOT open with "יאללה בואי נראה" or welcome-style intros.
+- Reply to what they just said, the way a friend would mid-conversation.`;
+    const currentMsg = `${message.quotedText ? `[Quoted message being replied to: "${message.quotedText}"]\n` : ""}[${userName || "משתמש"}]: ${text}`;
+    const mergedMessages = prepareSonnetTurns([...historyTurns, { role: "user", content: currentMsg }]);
+    console.log(`[1:1 personal] Conversation history: ${mergedMessages.length} turns for ${phone}`);
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -2968,14 +3168,8 @@ async function handlePersonalChannelMessage(
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 512,
-        system: ONBOARDING_1ON1_PROMPT + `\n\nPERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally, shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.
-
-CONVERSATION CONTINUITY — CRITICAL:
-- This user is already onboarded and has you in their group. They know who you are.
-- Do NOT re-introduce yourself. Do NOT say "אני שלי" or explain your capabilities.
-- Do NOT open with "יאללה בואי נראה" or welcome-style intros.
-- Reply to what they just said, the way a friend would mid-conversation.`,
-        messages: [{ role: "user", content: text }],
+        system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
+        messages: mergedMessages,
       }),
     });
 
@@ -2983,14 +3177,16 @@ CONVERSATION CONTINUITY — CRITICAL:
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
 
-    // Parse and send visible reply
-    const visibleReply = raw
-      .replace(/<!--ACTIONS:.*?-->/s, "")
-      .replace(/<!--TRIED:.*?-->/s, "")
-      .trim();
-
-    // TODO: Execute actions against the real household DB (not demo_items)
-    // This connects to the existing action executor in a future iteration
+    // Execute actions via shared function
+    const { actions, visibleReply } = await execute1on1Actions({
+      raw,
+      text,
+      phone,
+      householdId,
+      userName: userName || senderName,
+      convoContext: convo?.context,
+      logPrefix: "[1:1 personal]",
+    });
 
     if (visibleReply) {
       await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
@@ -3006,25 +3202,22 @@ CONVERSATION CONTINUITY — CRITICAL:
         .limit(1)
         .single();
 
-      if (!groupConfig) {
-        // No real group — check if we should nudge
-        const { data: convo } = await supabase
-          .from("onboarding_conversations")
-          .select("*")
-          .eq("phone", phone)
-          .single();
-
-        if (convo && shouldSendGroupNudge(convo) && !isQuietHours()) {
-          await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
-          await supabase.from("onboarding_conversations").update({
-            context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
-          }).eq("phone", phone);
-          console.log(`[1:1 personal] Group nudge sent to ${phone}`);
-        }
+      if (!groupConfig && convo && shouldSendGroupNudge(convo) && !isQuietHours()) {
+        await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
+        await supabase.from("onboarding_conversations").update({
+          context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
+        }).eq("phone", phone);
+        console.log(`[1:1 personal] Group nudge sent to ${phone}`);
       }
     } catch {}
 
-    console.log(`[1:1 personal] Reply for ${phone} (household: ${householdId})`);
+    // Log
+    await logMessage(
+      { messageId: `personal_reply_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: visibleReply, type: "text" },
+      actions.length > 0 ? "personal_actionable" : "personal_conversational",
+      householdId
+    );
+    console.log(`[1:1 personal] Reply for ${phone}: actions=${actions.length}`);
   } catch (err) {
     console.error("[1:1 personal] error:", err);
   }
@@ -4086,7 +4279,13 @@ Deno.serve(async (req: Request) => {
     }
 
     // 8c. Onboarding mode: escalate to Sonnet for quality (first 20 msgs, skip shopping which already works)
-    if (isOnboarding && classification.intent !== "add_shopping" && classification.intent !== "instruct_bot") {
+    // Also skip high-confidence reminders — the Haiku-entity fallback (step 13b) handles them reliably
+    // and the old Sonnet classifier has no template for third-person reminders anyway.
+    const skipOnboardingEscalation =
+      classification.intent === "add_shopping" ||
+      classification.intent === "instruct_bot" ||
+      (classification.intent === "add_reminder" && classification.confidence >= 0.85);
+    if (isOnboarding && !skipOnboardingEscalation) {
       console.log(`[Webhook] Onboarding escalation to Sonnet (msg #${config.group_message_count || 0})`);
       const sonnetMessages = [
         ...conversationMsgs.map((m) => ({
@@ -4417,8 +4616,33 @@ Deno.serve(async (req: Request) => {
     let { reply } = await generateReply(classification, message.senderName, replyCtx);
 
     // 13b. Handle reminder insertion (extract hidden REMINDER blocks from Sonnet reply)
-    if (classification.intent === "add_reminder" && reply) {
-      const allReminders = extractRemindersFromReply(reply);
+    // Fallback: if Sonnet produced no reply OR omitted the REMINDER block, use Haiku's entities directly.
+    // Haiku already parsed reminder_text + time_iso — no reason to lose the reminder just because Sonnet went silent.
+    if (classification.intent === "add_reminder") {
+      const allReminders: { reminder_text: string; send_at: string }[] = reply
+        ? extractRemindersFromReply(reply)
+        : [];
+
+      if (allReminders.length === 0) {
+        const e = classification.entities;
+        if (e?.reminder_text && e?.time_iso) {
+          allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+          console.log(`[Reminder] Sonnet produced no REMINDER block — falling back to Haiku entities`);
+          // If Sonnet also produced no visible reply, synthesize a minimal confirmation so the user knows it landed
+          if (!reply) {
+            const when = new Date(e.time_iso).toLocaleString("he-IL", {
+              timeZone: "Asia/Jerusalem",
+              weekday: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            reply = `אזכיר ${when} ✓`;
+          }
+        } else {
+          console.warn(`[Reminder] No REMINDER block from Sonnet and Haiku missing reminder_text/time_iso — cannot schedule`);
+        }
+      }
+
       for (const reminderData of allReminders) {
         if (reminderData.send_at) {
           const { error: remErr } = await supabase.from("reminder_queue").insert({
@@ -4436,7 +4660,7 @@ Deno.serve(async (req: Request) => {
         }
       }
       // Clean ALL hidden REMINDER blocks from the reply before sending to user
-      reply = cleanReminderFromReply(reply);
+      if (reply) reply = cleanReminderFromReply(reply);
     }
 
     // 13c. Handle memory capture (extract hidden MEMORY block from Sonnet reply)
