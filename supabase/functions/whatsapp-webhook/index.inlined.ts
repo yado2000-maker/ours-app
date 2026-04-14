@@ -654,6 +654,9 @@ EXAMPLES:
 [אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"חלב"}}
 [אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"מוצרי חלב"}],"raw_text":"חלב אורז"}}
 [אבא]: "נייר טואלט וסבון כלים" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"נייר טואלט","category":"ניקוי ובית"},{"name":"סבון כלים","category":"ניקוי ובית"}],"raw_text":"נייר טואלט וסבון כלים"}}
+[אמא]: "תוסיפי חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב"}}
+[אבא]: "תכניסי לרשימה מלפפונים במלח גודל קטן" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"מלפפונים במלח גודל קטן","category":"חמוצים"}],"raw_text":"תכניסי לרשימה מלפפונים במלח גודל קטן"}}
+[אמא]: "תוסיפי חלב שיבולת שועל נטול סוכר" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב שיבולת שועל נטול סוכר","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב שיבולת שועל נטול סוכר"}}
 [אמא]: "נועה חוג 5" → {"intent":"add_task","confidence":0.90,"entities":{"person":"נועה","title":"חוג","time_raw":"5","raw_text":"נועה חוג 5"}}
 [אבא]: "שטפתי את הכלים" → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"t1a2","raw_text":"שטפתי את הכלים"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}

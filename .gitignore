@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 VITE_ANTHROPIC_KEY
+.env
 
 # Claude Code local
 .claude/settings.local.json
