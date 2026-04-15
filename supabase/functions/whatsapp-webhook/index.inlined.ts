@@ -115,6 +115,13 @@ interface ClassificationOutput {
     reminder_text?: string;
     memory_content?: string;
     memory_about?: string; // member name
+    // Patch D (Shira 2026-04-15): quote-reply completion signals.
+    // items_from_quote: name list extracted from a bot shopping-add message when user
+    // replies with "זה כבר קנינו"/"יש לנו"/"רק X חסר". Resolved to IDs in executeActions.
+    // completion_scope: for "הושלם"/"המשימות הושלמו" replies — executor marks all open
+    // tasks done since the quoted text doesn't carry IDs.
+    items_from_quote?: string[];
+    completion_scope?: "all_open" | "all_in_quote";
     raw_text: string;
   };
 }
@@ -154,7 +161,9 @@ interface ReplyResult {
 // ─── AI Classifier Types (from ai-classifier.ts) ───
 
 interface ClassifiedAction {
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation";
+  // Patch D (Shira 2026-04-15): added complete_shopping_by_names + complete_tasks_all_open
+  // for quote-reply completions where the executor resolves names/scopes to IDs via DB lookup.
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open";
   data: Record<string, unknown>;
 }
 
@@ -501,15 +510,15 @@ function buildClassifierPrompt(ctx: ClassifierContext): string {
 INTENTS:
 - ignore: Social noise (greetings, reactions, emojis, jokes, chatter, forwarded messages, status updates). ~80% of messages.
 - add_shopping: Adding item(s) to shopping list. Bare nouns, "צריך X", "נגמר X", "אין X".
-- add_task: Creating a chore/to-do. "צריך ל...", "[person] [activity] [time]", maintenance requests. Works for personal tasks ("לשלם חשבון") and shared chores.
-- add_event: Scheduling a specific date/time event. Appointments, classes, dinners, meetings.
+- add_task: Creating a chore/to-do. "צריך ל...", "[person] [activity] [time]", maintenance requests. Works for personal tasks ("לשלם חשבון") and shared chores. Includes cleaning (ניקיון, לנקות, לסדר), laundry (כביסה, קיפול, גיהוץ), kitchen chores (כלים, לשטוף, לפנות), trash (זבל, להוציא זבל), errands (לשלם, לשלוח, להתקשר, לתאם, להזמין), maintenance (לתקן, להחליף, לבדוק), kids/school (חוזה, טופס, שיעורי בית, להחתים). Multi-chore bursts (newline/comma list of chores) → classify first chore at conf 0.75 + needs_conversation_review: true so Sonnet can expand into all actions.
+- add_event: Scheduling a specific date/time event. Appointments (רופא, רופא שיניים, וטרינר, ועדה), classes/activities (חוג, שיעור, אימון, חזרה, לימודים, הרצאה), meals out (ארוחה, ארוחת ערב, ארוחה משפחתית, ברביקיו), meetings (פגישה, ישיבה, שיחה), social (יום הולדת, חתונה, בר מצווה, ברית, מסיבה, אירוע), trips (טיול, נופש, טיסה, ביקור). Always has an implicit or explicit date/time. Multi-event bursts → classify first event + needs_conversation_review: true.
 - complete_task: Marking an existing task as done. Past tense of open task, "סיימתי", "בוצע".
 - complete_shopping: Confirming purchase of a list item. "קניתי", "יש", "לקחתי".
 - question: Asking about current state (tasks, schedule, list). "מה צריך?", "מה ברשימה?", "מה יש היום?".
 - claim_task: Self-assigning an existing open task. "אני אעשה", "אני לוקח/ת", "אני יכול".
 - info_request: Asking for information that is NOT a household task. Passwords, phone numbers, prices, codes.
-- correct_bot: Correcting something Sheli just did wrong. "התכוונתי ל...", "לא X, כן Y", "תתקני", "טעית", "זה פריט אחד".
-- add_reminder: Setting a reminder for a future time. "תזכירי לי ב-4", "תזכרו אותי מחר", "בעוד שעה תזכירי", "remind me at 5". Also "תזכירי ל[person]..." (third-person — still add_reminder). Must contain a time reference. For "לפני X" (before X), set time_iso to X minus ~1 hour buffer (NOT X itself). If the message references a time but NO day, and day could come from prior conversation, set needs_conversation_review: true so Sonnet can resolve from history.
+- correct_bot: User EXPLICITLY corrects Sheli's last action using clear correction language. MUST contain an explicit correction phrase from the whitelist below. Emoji-only reactions (🤦, 👎, 😤), quoted-reply with only emoji, bare "לא" alone, "אוף", sighs, and frustrated noises are NOT correct_bot — classify those as ignore.
+- add_reminder: Setting a reminder for a future time. "תזכירי לי ב-4", "תזכרו אותי מחר", "בעוד שעה תזכירי", "remind me at 5". Also "תזכירי ל[person]..." (third-person — still add_reminder). Reminder triggers include: תזכירי, תזכיר, תזכרו, תזכרי לי, אל תשכחי להזכיר, תריצי לי תזכורת, remind me, don't let me forget. Must contain a time reference (hour, relative "בעוד X", day name, "מחר", "בערב", "בבוקר", "אחרי X"). For "לפני X" (before X), set time_iso to X minus ~1 hour buffer (NOT X itself). If the message references a time but NO day, and day could come from prior conversation, set needs_conversation_review: true so Sonnet can resolve from history. Multi-reminder in one message ("תזכירי לי ב-4 להתקשר ובעוד שעה לאסוף את הילדים") → classify first reminder + needs_conversation_review: true so Sonnet creates both.
 - instruct_bot: Parent EXPLAINING a rule or management preference to Sheli. Teaching/explanatory tone — "ככה...", "אמרתי ש...", "את אמורה ל...", "צריך לנהל את זה ככה ש...". NOT a direct command — it's teaching how things should work. Frustration/repetition signals also indicate instruct_bot.
 - save_memory: User asks Sheli to remember something specific. "תזכרי ש...", "תרשמי לך ש...", "אל תשכחי ש...". Must be a personal/family fact, NOT a task or reminder.
 - recall_memory: User asks what Sheli remembers about someone or the family. "מה את זוכרת על...?", "מה ידוע לך על...?", "ספרי לי מה את יודעת על...".
@@ -529,6 +538,36 @@ ACTIVE ROTATIONS:
 ${rotationsStr}
 
 HEBREW PATTERNS:
+- GROCERY VOCABULARY = add_shopping, always. Any list of food (vegetables, fruits, meat, fish, dairy, bread, grains, oils, spices, snacks, beverages, condiments, sweets, baking supplies), household staples (toilet paper, dish soap, cleaning supplies), or pantry items IS a shopping list. This is true regardless of:
+  - Format: commas, newlines, numbered lines, bullet-free text — all valid shopping lists
+  - Count: a single word ("אננס", "חלב", "לחם") is just as valid as a 15-item list
+  - Quantities: "3 תפוזים", "2 ק״ג סולת", "חבילה של נקניקיות", "שק תפוחי אדמה" — numbers/quantities do NOT make it not-shopping; extract them into qty
+  - Ethnic/regional foods: ג'ריש, סולת, מרגז, קובה, מלאווח, ג'חנון, חומוס, טחינה, זעתר, לאפה — all valid food items
+  - Brand names: "פודינג וניל אוסם", "במבה אסם", "קוטג' תנובה" — valid single items
+  When you see a message that is primarily a list of recognizable foods/groceries/household items with no other clear intent → add_shopping. Lean toward shopping (high recall) unless the message is clearly social, a question, or a BRINGING/ALREADY-HAVE statement (see rule below).
+- TASK VOCABULARY = add_task. Chore/errand words signal tasks even without "צריך" / "תוסיפי" prefixes. Examples:
+  - Cleaning/tidying: ניקיון, לנקות, לסדר, לשטוף רצפה, לאבק, לשאוב, למרק, לארגן
+  - Laundry: כביסה, לכבס, לתלות כביסה, לקפל, קיפול, גיהוץ, לגהץ
+  - Kitchen: כלים, לשטוף כלים, לרוקן מדיח, לטעון מדיח, לפנות שולחן
+  - Trash: זבל, להוציא זבל, להחליף שקית
+  - Errands: לשלם חשבון, לשלוח חבילה, להתקשר ל-, לתאם, להזמין, לקבוע תור
+  - Maintenance: לתקן, להחליף נורה, לבדוק, להרכיב
+  - Kids/school: להחתים טופס, שיעורי בית, לקנות ציוד, חוזה גן, לאסוף מ-
+  - Format: a single chore ("לסדר ארון"), a newline list of chores, a comma list — all valid tasks.
+  - MULTI-CHORE BURST (newline list like "ניקיון סלון\nקיפול כביסה\nהוצאת זבל"): classify as add_task at confidence 0.75 with FIRST chore in entities + "needs_conversation_review": true. Sonnet will expand all chores into separate actions.
+- EVENT VOCABULARY = add_event. Scheduled appointments/activities/meetings. Signals: a time reference (day, date, hour) + one of:
+  - Appointments: רופא, רופא שיניים, רופאת נשים, וטרינר, ועדה, ראיון, תור ל-
+  - Classes/activities: חוג, שיעור (פסנתר, דרמה, קרטה...), אימון, חזרה, לימודים, הרצאה, סדנה, פגישת הורים
+  - Meals out: ארוחת ערב אצל, ארוחה משפחתית, ברביקיו, מנגל, פיקניק
+  - Meetings: פגישה, ישיבה, שיחה עם-, זום, call
+  - Social: יום הולדת, חתונה, בר מצווה, ברית, חינה, מסיבה, אירוע, מפגש
+  - Trips: טיול, נופש, טיסה, ביקור אצל-, סוף שבוע ב-
+  - Format: single event ("יום שלישי רופא שיניים 15:00"), newline list of events across the week, "השבוע: שלישי... חמישי..." — all valid.
+  - MULTI-EVENT BURST (e.g., "שלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת"): classify as add_event at confidence 0.75 with FIRST event in entities + "needs_conversation_review": true. Sonnet expands all events.
+- REMINDER VOCABULARY = add_reminder. ANY message starting with / containing תזכירי / תזכיר / תזכרו / תזכירי לי / remind me / don't forget + a TIME reference → add_reminder. The triggers are explicit — don't miss them. Distinguish from add_task: task = persistent chore; reminder = one-shot time-based nudge. If both trigger and time are present, it's a reminder.
+  - Time-only reminders ("תזכירי לי ב-4 להתקשר") = add_reminder, conf 0.95.
+  - Third-person reminders ("תזכירי לאסנת לעשות רשימה") = add_reminder (NOT add_task). reminder_text should include the target name ("אסנת — לעשות רשימה").
+  - Multi-reminder in one message ("תזכירי לי ב-4 להתקשר ובעוד שעה לאסוף את הילדים") → classify as add_reminder with FIRST reminder in entities + "needs_conversation_review": true. Sonnet creates both.
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
@@ -537,6 +576,10 @@ HEBREW PATTERNS:
 - "אני [verb]" matching an open task = claim_task
 - Past tense matching open task ("שטפתי כלים") = complete_task
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
+- QUOTE-REPLY TO BOT SHOPPING-ADD: When the quoted message is a bot shopping confirmation starting with "🛒 הוספתי..." or listing items bot just added, and the reply says "זה כבר קנינו", "כבר קנינו", "כבר קניתי", "יש לנו בבית", "יש כבר", "לקחתי", "זה יש" → complete_shopping with the items from the QUOTED message. Extract the item names from the quote into entities.items_from_quote (array of names). Do NOT emit add_shopping.
+- QUOTE-REPLY completion ("הושלם", "בוצע", "סיימתי", "טיפלתי") to a bot message listing TASKS = complete_task with all task_ids from the quoted text. Mark ALL tasks in the quote as done unless the reply excludes specific ones.
+- "המשימות הושלמו" / "כל המשימות הושלמו" (plural passive past) = complete_task with all currently open task_ids. Same for "הושלם" standalone reply to a task-list message from the bot.
+- "רק X חסר/נשאר" (only X is missing/left) in reply to a bot shopping-list message = complete_shopping for every item EXCEPT X in the quoted list. This is "we did everything except X" — Shira's 2026-04-15 pattern.
 - Greetings, emojis, reactions, "סבבה", "אמן", "בהצלחה" = ignore
 - "מה הסיסמא?", "שלח קוד" = info_request (NOT add_task)
 - BRINGING/ALREADY HAVE (= ignore, NOT shopping): "מביאה X", "מביא X", "הבאתי X", "לקחתי X", "יש לי X", "כבר קניתי X", "כבר יש X" = someone announcing they're BRINGING or ALREADY HAVE something. This is NOT a request to buy. Ignore it.
@@ -657,15 +700,44 @@ EXAMPLES:
 [אמא]: "תוסיפי חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב"}}
 [אבא]: "תכניסי לרשימה מלפפונים במלח גודל קטן" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"מלפפונים במלח גודל קטן","category":"חמוצים"}],"raw_text":"תכניסי לרשימה מלפפונים במלח גודל קטן"}}
 [אמא]: "תוסיפי חלב שיבולת שועל נטול סוכר" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב שיבולת שועל נטול סוכר","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב שיבולת שועל נטול סוכר"}}
+[אסנת]: "אננס" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"אננס","category":"פירות וירקות"}],"raw_text":"אננס"}}
+[אסנת]: "3 תפוזים" → {"intent":"add_shopping","confidence":0.92,"entities":{"items":[{"name":"תפוזים","qty":"3","category":"פירות וירקות"}],"raw_text":"3 תפוזים"}}
+[אסנת]: "שוקולד לעוגה" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"שוקולד לעוגה","category":"אפייה"}],"raw_text":"שוקולד לעוגה"}}
+[אסנת]: "עגבניה\nמלפפון\nכוסברה 3\nפטרוזיליה 4\nשמיר 2\nשרי\nסלרי 2\nסלק ירוק 2\nסלק אדום מוכן ורגיל\nגזר\nתפוחי אדמה 2 שקים\nבצל הרבה" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"עגבניה","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"כוסברה","qty":"3","category":"פירות וירקות"},{"name":"פטרוזיליה","qty":"4","category":"פירות וירקות"},{"name":"שמיר","qty":"2","category":"פירות וירקות"},{"name":"שרי","category":"פירות וירקות"},{"name":"סלרי","qty":"2","category":"פירות וירקות"},{"name":"סלק ירוק","qty":"2","category":"פירות וירקות"},{"name":"סלק אדום מוכן ורגיל","category":"פירות וירקות"},{"name":"גזר","category":"פירות וירקות"},{"name":"תפוחי אדמה 2 שקים","category":"פירות וירקות"},{"name":"בצל הרבה","category":"פירות וירקות"}],"raw_text":"עגבניה\nמלפפון\nכוסברה 3\nפטרוזיליה 4\nשמיר 2\nשרי\nסלרי 2\nסלק ירוק 2\nסלק אדום מוכן ורגיל\nגזר\nתפוחי אדמה 2 שקים\nבצל הרבה"}}
+[אסנת]: "זיתים מגולענים רק אם מחיר טוב\nקמח" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"זיתים מגולענים (רק אם מחיר טוב)","category":"שימורים ומזון יבש"},{"name":"קמח","category":"אפייה"}],"raw_text":"זיתים מגולענים רק אם מחיר טוב\nקמח"}}
+[אסנת]: "ג'ריש 2 ק\"ג\n2 סולת" → {"intent":"add_shopping","confidence":0.92,"entities":{"items":[{"name":"ג'ריש","qty":"2 ק\"ג","category":"מזווה"},{"name":"סולת","qty":"2","category":"מזווה"}],"raw_text":"ג'ריש 2 ק\"ג\n2 סולת"}}
+[אסנת]: "חומוס\nחבילה של נקניקיות\nמרגז 1" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חומוס","category":"שימורים ומזון יבש"},{"name":"נקניקיות","qty":"חבילה","category":"בשר"},{"name":"מרגז","qty":"1","category":"בשר"}],"raw_text":"חומוס\nחבילה של נקניקיות\nמרגז 1"}}
+[אסנת]: "קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"קורנפלור","category":"אפייה"},{"name":"פודינג וניל 1 ק\"ג אוסם (אם יש)","category":"אפייה"}],"raw_text":"קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם"}}
 [אמא]: "נועה חוג 5" → {"intent":"add_task","confidence":0.90,"entities":{"person":"נועה","title":"חוג","time_raw":"5","raw_text":"נועה חוג 5"}}
+[אבא]: "לסדר את הארון בסלון" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לסדר את הארון בסלון","raw_text":"לסדר את הארון בסלון"}}
+[אמא]: "להחליף נורה בחדר של נועה" → {"intent":"add_task","confidence":0.88,"entities":{"title":"להחליף נורה בחדר של נועה","raw_text":"להחליף נורה בחדר של נועה"}}
+[אמא]: "ניקיון סלון\nקיפול כביסה\nהוצאת זבל" → {"intent":"add_task","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"ניקיון סלון","raw_text":"ניקיון סלון\nקיפול כביסה\nהוצאת זבל"}}
+[אבא]: "צריך לקנות מתנה ליום הולדת, לתאם עם המורה, ולשלם חשבון חשמל" → {"intent":"add_task","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"לקנות מתנה ליום הולדת","raw_text":"צריך לקנות מתנה ליום הולדת, לתאם עם המורה, ולשלם חשבון חשמל"}}
 [אבא]: "שטפתי את הכלים" → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"t1a2","raw_text":"שטפתי את הכלים"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}
 [נועה]: "אני אסדר את הארון" → {"intent":"claim_task","confidence":0.90,"entities":{"person":"נועה","task_id":"t5c6","raw_text":"אני אסדר את הארון"}}
 [אמא]: "יום שלישי ארוחת ערב אצל סבתא" → {"intent":"add_event","confidence":0.92,"entities":{"title":"ארוחת ערב אצל סבתא","time_raw":"יום שלישי","raw_text":"יום שלישי ארוחת ערב אצל סבתא"}}
+[אמא]: "רופא שיניים לנועה יום שלישי ב-15:00" → {"intent":"add_event","confidence":0.92,"entities":{"title":"רופא שיניים לנועה","time_raw":"יום שלישי ב-15:00","person":"נועה","raw_text":"רופא שיניים לנועה יום שלישי ב-15:00"}}
+[אבא]: "חוג גיטרה של יובל יום חמישי 17:00" → {"intent":"add_event","confidence":0.92,"entities":{"title":"חוג גיטרה","time_raw":"יום חמישי 17:00","person":"יובל","raw_text":"חוג גיטרה של יובל יום חמישי 17:00"}}
+[אמא]: "השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת אצל סבתא" → {"intent":"add_event","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"רופא שיניים","time_raw":"שלישי 15","raw_text":"השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת אצל סבתא"}}
+[אבא]: "תזכירי לי ב-4 להתקשר לרופא ובעוד שעה לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.80,"needs_conversation_review":true,"entities":{"reminder_text":"להתקשר לרופא","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 להתקשר לרופא ובעוד שעה לאסוף את הילדים"}}
 [יונתן]: "מה הסיסמא של הוויי פיי?" → {"intent":"info_request","confidence":0.95,"entities":{"raw_text":"מה הסיסמא של הוויי פיי?"}}
 [אמא]: "קניתי חלב וביצים" → {"intent":"complete_shopping","confidence":0.95,"entities":{"item_id":"s1a2","raw_text":"קניתי חלב וביצים"}}
+[שירה]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור, בירה וצלופן לרשימה\"]\nזה כבר קנינו היום" → {"intent":"complete_shopping","confidence":0.92,"addressed_to_bot":true,"entities":{"items_from_quote":["קורנפלור","בירה","צלופן"],"raw_text":"זה כבר קנינו היום"}}
+[אמא]: "[הודעה מצוטטת: \"🛒 הוספתי חלב וביצים לרשימה\"]\nיש לנו בבית" → {"intent":"complete_shopping","confidence":0.90,"addressed_to_bot":true,"entities":{"items_from_quote":["חלב","ביצים"],"raw_text":"יש לנו בבית"}}
+[שירה]: "[הודעה מצוטטת: \"המשימות: הזמנת גז, הכנת רוטב טרייקי\"]\nהושלם" → {"intent":"complete_task","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"הושלם","completion_scope":"all_in_quote"}}
+[שירה]: "המשימות הושלמו" → {"intent":"complete_task","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"המשימות הושלמו","completion_scope":"all_open"}}
+[שירה]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור, בירה, צלופן, מלח לימון לרשימה\"]\nרק המלח לימון חסר" → {"intent":"complete_shopping","confidence":0.88,"addressed_to_bot":true,"entities":{"items_from_quote":["קורנפלור","בירה","צלופן"],"raw_text":"רק המלח לימון חסר"}}
 [אמא]: "התכוונתי לשמן זית, לא לשמן וזית" → {"intent":"correct_bot","confidence":0.95,"entities":{"correction_text":"שמן זית","raw_text":"התכוונתי לשמן זית, לא לשמן וזית"}}
 [אבא]: "שלי טעית, זה דבר אחד" → {"intent":"correct_bot","confidence":0.90,"entities":{"correction_text":"","raw_text":"שלי טעית, זה דבר אחד"}}
+[אמא]: "לא נכון, אמרתי גבינה לבנה ולא צהובה" → {"intent":"correct_bot","confidence":0.92,"entities":{"correction_text":"גבינה לבנה","raw_text":"לא נכון, אמרתי גבינה לבנה ולא צהובה"}}
+[אבא]: "I meant olive oil, not sunflower" → {"intent":"correct_bot","confidence":0.92,"entities":{"correction_text":"olive oil","raw_text":"I meant olive oil, not sunflower"}}
+[אמא]: "לא שמן, קנולה" → {"intent":"correct_bot","confidence":0.88,"entities":{"correction_text":"קנולה","raw_text":"לא שמן, קנולה"}}
+[אסנת]: "🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️"}}
+[אבא]: "👎" → {"intent":"ignore","confidence":0.92,"entities":{"raw_text":"👎"}}
+[אמא]: "אוף" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"אוף"}}
+[אבא]: "לא" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"לא"}}
+[אסנת]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור ופודינג וניל לרשימה\"]\n🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️"}}
 [אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"מוצרי חלב"},{"name":"קפה טחון","category":"שתייה"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"לחם ומאפים"},{"name":"חומוס","category":"שימורים ומזון יבש"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
 [אמא]: "תזכירי לי ב-4 לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לאסוף את הילדים","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 לאסוף את הילדים"}}
 [אבא]: "בעוד שעה תזכירי לקחת את הכביסה" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לקחת את הכביסה","time_raw":"בעוד שעה","raw_text":"בעוד שעה תזכירי לקחת את הכביסה"}}
@@ -721,12 +793,12 @@ RULES:
 - Always include raw_text in entities and addressed_to_bot (true/false).
 - For complete_task/complete_shopping/claim_task: match against open tasks/shopping IDs above.
 - For add_event: include time_raw (Hebrew expression) and time_iso (ISO 8601 with +03:00) if resolvable.
-- For add_shopping: extract items into the items array. ALWAYS include category per item. Keep compound product names as ONE item (e.g., "חלב אורז" is ONE item, not two).
+- For add_shopping: extract items into the items array. ALWAYS include category per item. Keep compound product names as ONE item (e.g., "חלב אורז" is ONE item, not two). CONDITIONAL ITEMS: if an item has an inline condition or usage note ("רק אם מחיר טוב", "אם יש", "אם אפשר", "לעוגה", "לסלט"), keep it as ONE item and embed the note in the name field in parentheses: "זיתים מגולענים רק אם מחיר טוב" → {name: "זיתים מגולענים (רק אם מחיר טוב)"}. "אם יש פודינג וניל אוסם" → {name: "פודינג וניל אוסם (אם יש)"}. Quantities ("3 תפוזים", "2 ק״ג סולת", "חבילה של נקניקיות") go in qty, NOT in name.
 - For add_task with ROTATION (turns/duty for multiple people): include "rotation" object with title, type ("order"|"duty"), members array (preserve order), optional frequency, and optional start_person (who should go first, if specified). Do NOT use title/person fields when rotation is present.
 - For add_task with OVERRIDE (changing who's next in an existing rotation): include "override" object with title and person. Only use when an ACTIVE ROTATION matches the activity. Do NOT use rotation entity for overrides.
 - Confidence: 0.95+ for clear cases, 0.70-0.90 for moderate, 0.50-0.69 for ambiguous.
 - When unsure between action and ignore, prefer ignore (false silence > false action).
-- For correct_bot: extract what the user MEANT in correction_text. This is about fixing Sheli's last action.
+- For correct_bot: ONLY classify as correct_bot when the message contains an EXPLICIT correction phrase. Allowed Hebrew triggers: "התכוונתי ל...", "לא X אלא Y", "לא X, כן Y", "לא X, Y", "טעית", "את טועה", "לא נכון", "אמרתי X, לא Y", "אמרתי אחרת", "אמרתי לך אחרת", "זה דבר אחד", "זה פריט אחד", "תתקני", "לא ככה". Allowed English triggers: "I meant X", "I said X, not Y", "you're wrong", "that's wrong", "not X, Y", "I told you X, not Y", "I told you differently". If the message is only emoji, only a reaction (🤦, 👎, 😤, 🙄), only "לא" / "אוף" / sighs, or only a quoted-reply with emoji and no explicit correction phrase → classify as ignore, NOT correct_bot. NEVER fabricate or paraphrase correction_text — the value you put in correction_text MUST appear VERBATIM as a substring of raw_text. If the user says "you're wrong" without specifying the right value, leave correction_text as empty string "".
 - If conversation context makes your classification uncertain, include "needs_conversation_review": true in your response.
 
 `;
@@ -865,7 +937,12 @@ Keep responses SHORT — 1-2 lines max.`;
       }
       break;
     case "add_event":
-      actionSummary = `An event was scheduled: "${e.title || e.raw_text}"${e.time_raw ? ` at ${e.time_raw}` : ""}.`;
+      actionSummary = `An event was logged on the calendar: "${e.title || e.raw_text}"${e.time_raw ? ` at ${e.time_raw}` : ""}.
+IMPORTANT: Adding an event does NOT create a reminder. Sheli will NOT notify anyone at the event's time.
+Reply vocabulary — use ONLY these (vary naturally, never same phrasing twice):
+  "הוספתי ליומן 📅", "נרשם ביומן ✓", "שמרתי ביומן", "רשום ✓".
+FORBIDDEN words for add_event replies: "הזכרתי" (false promise of past notification) and "אזכיר" (false promise of future notification).
+If the user wants a reminder at the event's time, they must ask explicitly ("תזכירי לי לפני..."). Do NOT volunteer reminder language.`;
       break;
     case "complete_task":
       actionSummary = `A task was marked as done${e.task_id ? ` (id: ${e.task_id})` : ""}.`;
@@ -1189,6 +1266,66 @@ function cleanReminderFromReply(reply: string): string {
     .trim();
 }
 
+/**
+ * Silent-drop reminder rescue.
+ *
+ * The "direct_address_reply" code paths (onboarding Sonnet-fallback, ignore+direct,
+ * low-conf+direct, medium-conf Sonnet+direct) call generateReply() and then strip
+ * <!--REMINDER:-->  blocks before sending. Without this rescue, Sonnet's REMINDER
+ * block is destroyed and no reminder_queue row is ever created — the user sees a
+ * friendly ack and thinks Sheli scheduled it, but she didn't.
+ *
+ * This helper mirrors the save-then-strip pattern already used in the high-confidence
+ * actionable path (~line 4820):
+ *   1. Extract REMINDER blocks from the Sonnet reply
+ *   2. Haiku-entity fallback — only fires when classification.intent === "add_reminder"
+ *      (Haiku won't populate reminder_text/time_iso otherwise)
+ *   3. Insert each into reminder_queue
+ *   4. Return the cleaned reply (REMINDER + MEMORY blocks stripped)
+ *
+ * Idempotent: safe to call on already-stripped replies (regex finds nothing).
+ * Does NOT touch MEMORY capture (handled separately by the 4820 path; out of scope here).
+ */
+async function rescueRemindersAndStrip(
+  reply: string,
+  classification: ClassificationOutput,
+  message: IncomingMessage,
+  householdId: string,
+): Promise<string> {
+  if (!reply) return reply;
+
+  const allReminders = extractRemindersFromReply(reply);
+
+  // Haiku-entity fallback mirrors the logic in the main actionable path (line 4830).
+  // Only safe when Haiku itself labelled the intent add_reminder — otherwise the entities
+  // field won't carry reminder_text/time_iso and this block is a no-op.
+  if (allReminders.length === 0 && classification.intent === "add_reminder") {
+    const e = classification.entities;
+    if (e?.reminder_text && e?.time_iso) {
+      allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+      console.log(`[ReminderRescue] Haiku entities fallback (no Sonnet REMINDER block): "${e.reminder_text}" @ ${e.time_iso}`);
+    }
+  }
+
+  for (const reminderData of allReminders) {
+    if (!reminderData.send_at) continue;
+    const { error } = await supabase.from("reminder_queue").insert({
+      household_id: householdId,
+      group_id: message.groupId,
+      message_text: reminderData.reminder_text,
+      send_at: reminderData.send_at,
+      sent: false,
+      reminder_type: "user",
+      created_by_phone: message.senderPhone,
+      created_by_name: message.senderName,
+    });
+    if (error) console.error("[ReminderRescue] Insert error:", error);
+    else console.log(`[ReminderRescue] Saved from direct_address path: "${reminderData.reminder_text}" @ ${reminderData.send_at}`);
+  }
+
+  return cleanReminderFromReply(stripMemoryBlocks(reply));
+}
+
 function extractPendingAction(reply: string): { action_type: string; action_data: Record<string, unknown> } | null {
   const match = reply.match(/<!--PENDING_ACTION:(.*?)-->/);
   if (!match) return null;
@@ -1326,36 +1463,77 @@ Keep responses SHORT — 1-2 lines max. This is WhatsApp, not email.`;
   const hebrewPatterns = isHe ? `
 HEBREW FAMILY CHAT PATTERNS — critical for correct classification:
 
-1. IMPLICIT SHOPPING: A bare noun or short phrase = "add to shopping list."
-   "חלב" → add milk. "3 חלב" → add 3 milks. "עוד חלב" → add more milk.
-   CRITICAL: A comma-separated list of food/household items is ALWAYS add_shopping, even without "צריך" or any verb. "גזר, מלפפון, בצל, שום, תפוחים" = shopping list, NOT social chatter.
+1. IMPLICIT SHOPPING — GROCERY VOCABULARY IS ALWAYS add_shopping:
+   Any list or single mention of food (vegetables, fruits, meat, fish, dairy, bread, grains, oils, spices, snacks, beverages, condiments, sweets, baking supplies), household staples (toilet paper, dish soap, cleaning), or pantry items IS a shopping list, regardless of format:
+   - Single word: "אננס" → add pineapple. "חלב" → add milk. "לחם" → add bread.
+   - With quantity: "3 תפוזים" → {name:"תפוזים", qty:"3"}. "2 ק״ג סולת" → {name:"סולת", qty:"2 ק\"ג"}. "חבילה של נקניקיות" → {name:"נקניקיות", qty:"חבילה"}.
+   - Comma list: "גזר, מלפפון, בצל, שום, תפוחים" → 5 shopping items.
+   - Newline list (VERY COMMON in grocery lists): multiple lines each with one item → one add_shopping with all items. "עגבניה\nמלפפון\nכוסברה 3" → 3 items.
+   - BURST ACROSS MESSAGES: if the user sent several short messages in quick succession, each containing food words, MERGE them all into one add_shopping action. This is the #1 failure mode — do not drop any.
+   - Ethnic/regional foods: ג'ריש, סולת, מרגז, קובה, מלאווח, ג'חנון, חומוס, טחינה, זעתר, לאפה — all valid food items.
+   - Brand names: "פודינג וניל אוסם", "במבה אסם", "קוטג' תנובה" — valid single items.
+   - CONDITIONAL / USAGE NOTE: if an item has an inline condition ("רק אם מחיר טוב", "אם יש", "אם אפשר") or usage note ("לעוגה", "לסלט"), keep it as ONE item and embed the note in the name in parentheses. "זיתים מגולענים רק אם מחיר טוב" → {name:"זיתים מגולענים (רק אם מחיר טוב)"}. "שוקולד לעוגה" → {name:"שוקולד לעוגה"}. "אם יש פודינג וניל אוסם" → {name:"פודינג וניל אוסם (אם יש)"}.
+   - BRINGING / ALREADY HAVE (= NOT shopping): "מביאה X", "הבאתי X", "יש לי X", "לקחתי X", "כבר קניתי X" = someone announcing they're bringing or already have it. Skip.
+   - Quantities ALWAYS go in qty, never in name. Conditions/usage notes ALWAYS go in name (in parentheses), never in qty.
 
-2. IMPLICIT TASKS: "[person] [activity] [time]" = task assignment.
-   "נועה חוג 5" → "Pick up Noa from activity at 5pm"
+2. IMPLICIT TASKS — CHORE/ERRAND VOCABULARY IS ALWAYS add_task:
+   A task is a persistent chore/to-do (no specific time needed, unlike events/reminders). Recognize these signals:
+   - Cleaning/tidying: ניקיון, לנקות, לסדר, לשטוף רצפה, לאבק, לשאוב, למרק, לארגן
+   - Laundry: כביסה, לכבס, לתלות, לקפל, קיפול, גיהוץ, לגהץ
+   - Kitchen: כלים, לשטוף כלים, לרוקן מדיח, לטעון מדיח, לפנות שולחן
+   - Trash: זבל, להוציא זבל, להחליף שקית
+   - Errands: לשלם חשבון, לשלוח חבילה, להתקשר, לתאם, להזמין, לקבוע תור
+   - Maintenance: לתקן, להחליף נורה, לבדוק, להרכיב
+   - Kids/school: להחתים טופס, שיעורי בית, לקנות ציוד, לאסוף מ-
+   - Person-at-time shorthand: "[person] [activity] [time]" → "נועה חוג 5" = "Pick up Noa from her class at 5pm"
+   - MULTI-CHORE BURST: newline or comma lists of chores → create ONE add_task action PER chore. "ניקיון סלון\nקיפול כביסה\nהוצאת זבל" → 3 separate add_task actions. Do NOT collapse into one, do NOT drop any.
+   - BURST ACROSS MESSAGES: if the user sent several short task-sounding messages in quick succession (one chore per message), create an add_task for EACH. Like shopping bursts — this is the second-most-common failure mode.
 
-3. QUESTION ABOUT STATUS: "מי אוסף?", "מה יש ברשימה?", "מה המטלות?" → respond=true with ANSWER from household context. Do NOT create a new task — just ANSWER the question.
+3. IMPLICIT EVENTS — APPOINTMENT/ACTIVITY VOCABULARY IS ALWAYS add_event:
+   An event has a specific date/time (hour, day name, or date). Recognize these signals:
+   - Appointments: רופא, רופא שיניים, רופאת נשים, וטרינר, ועדה, ראיון, תור ל-
+   - Classes/activities: חוג, שיעור (פסנתר, דרמה, קרטה, גיטרה...), אימון, חזרה, לימודים, הרצאה, סדנה
+   - Meals out: ארוחת ערב אצל, ארוחה משפחתית, ברביקיו, מנגל
+   - Meetings: פגישה, ישיבה, שיחה עם-, זום, call, פגישת הורים
+   - Social: יום הולדת, חתונה, בר מצווה, ברית, חינה, מסיבה, אירוע, מפגש
+   - Trips: טיול, נופש, טיסה, ביקור אצל-, סוף שבוע ב-
+   - Format: single event ("יום שלישי רופא שיניים 15:00"), newline list of events across the week.
+   - MULTI-EVENT BURST: "השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת" → create ONE add_event action PER event with its own scheduled_for timestamp. Do NOT collapse, do NOT drop any.
+   - BURST ACROSS MESSAGES: if the user scheduled several events across several short messages, create an add_event for EACH.
+   - If a date/time is missing but strongly implied by conversation context, use that. If genuinely unknown, skip the action and ask in the reply.
 
-4. CONFIRMATION = TASK CLAIM: "אני" or "אני לוקח/ת" after a task → assign to speaker.
+4. IMPLICIT REMINDERS — REMINDER VOCABULARY + TIME IS ALWAYS add_reminder:
+   A reminder is a one-shot time-based nudge (unlike a persistent task). Explicit triggers: תזכירי, תזכיר, תזכרו, תזכירי לי, don't forget, remind me + a TIME reference (hour, "בעוד שעה", "מחר", "בערב", day name).
+   - "תזכירי לי ב-4 להתקשר" = add_reminder.
+   - Third-person: "תזכירי לאסנת לעשות רשימה" = add_reminder with reminder_text="אסנת — לעשות רשימה" (NOT add_task).
+   - "לפני X" (before X) = fire with ~1 hour buffer before X (send_at = X - 60min).
+   - MULTI-REMINDER in one message: "תזכירי לי ב-4 להתקשר לרופא ובעוד שעה לאסוף את הילדים" → create TWO add_reminder actions with separate send_at timestamps. Do NOT drop either.
+   - BURST ACROSS MESSAGES: multiple short reminder messages in succession → one add_reminder per message.
+   - Task vs Reminder distinction: explicit trigger word (תזכירי/remind) + time = reminder. No explicit trigger, just a chore = task. When both could apply, reminder wins.
 
-5. HEBREW TIME: "ב5" = 17:00. "בצהריים" = ~12:00-14:00. "אחרי הגן" = ~16:00. "לפני שבת" = Friday before sunset.
+5. QUESTION ABOUT STATUS: "מי אוסף?", "מה יש ברשימה?", "מה המטלות?" → respond=true with ANSWER from household context. Do NOT create a new task — just ANSWER the question.
 
-6. SKIP THESE — not actionable: greetings ("בוקר טוב"), goodnight ("לילה טוב"), reactions ("😂","👍"), photos without text, forwarded messages, memes, social chatter, "אמן", "בהצלחה".
+6. CONFIRMATION = TASK CLAIM: "אני" or "אני לוקח/ת" after a task → assign to speaker.
 
-7. MIXED HEBREW-ENGLISH: "יש meeting ב-3" → Event at 15:00. "צריך milk" → Shopping: milk.
+7. HEBREW TIME: "ב5" = 17:00. "בצהריים" = ~12:00-14:00. "אחרי הגן" = ~16:00. "לפני שבת" = Friday before sunset.
 
-8. TURNS/ROTATION:
-   CREATING a rotation: "תורות מקלחת: דניאל, נועה, יובל" = create rotation via add_task with rotation entity.
-   Rotation entity: {"rotation": {"title": "activity", "type": "order"|"duty", "members": ["name1", "name2", ...]}}
-   "תורנות כלים" = duty rotation (chore). "סדר מקלחות" = order rotation (sequence).
+8. SKIP THESE — not actionable: greetings ("בוקר טוב"), goodnight ("לילה טוב"), reactions ("😂","👍"), photos without text, forwarded messages, memes, social chatter, "אמן", "בהצלחה".
 
-   ASKING about a rotation (= QUESTION, NOT an action! Just answer from context):
-   "תור מי" / "תורמי" = "whose turn" (two words merged: תור + מי). VERY COMMON in speech/voice.
-   "של מי התור היום", "מי בתור", "מי תורן/תורנית", "מי בתורות היום", "מי בתורנות היום"
-   "התורנות של מי היום", "מי שוטף כלים היום", "נכון שזה תורו/תורה ולא תורי?"
-   "תגידי לו שזה תורו" / "שלי תגידי מי בתור" = asking Sheli to confirm whose turn it is.
-   ALL of these are QUESTIONS — respond=true, answer from UPCOMING EVENTS/TASKS rotation data, actions=[].
+9. MIXED HEBREW-ENGLISH: "יש meeting ב-3" → Event at 15:00. "צריך milk" → Shopping: milk.
 
-9. ABBREVIATIONS: "סבבה" = OK/confirmation. "בנט"/"בט" = meanwhile. "תיכף" = soon. "אחלה" = great.
+10. TURNS/ROTATION:
+    CREATING a rotation: "תורות מקלחת: דניאל, נועה, יובל" = create rotation via add_task with rotation entity.
+    Rotation entity: {"rotation": {"title": "activity", "type": "order"|"duty", "members": ["name1", "name2", ...]}}
+    "תורנות כלים" = duty rotation (chore). "סדר מקלחות" = order rotation (sequence).
+
+    ASKING about a rotation (= QUESTION, NOT an action! Just answer from context):
+    "תור מי" / "תורמי" = "whose turn" (two words merged: תור + מי). VERY COMMON in speech/voice.
+    "של מי התור היום", "מי בתור", "מי תורן/תורנית", "מי בתורות היום", "מי בתורנות היום"
+    "התורנות של מי היום", "מי שוטף כלים היום", "נכון שזה תורו/תורה ולא תורי?"
+    "תגידי לו שזה תורו" / "שלי תגידי מי בתור" = asking Sheli to confirm whose turn it is.
+    ALL of these are QUESTIONS — respond=true, answer from UPCOMING EVENTS/TASKS rotation data, actions=[].
+
+11. ABBREVIATIONS: "סבבה" = OK/confirmation. "בנט"/"בט" = meanwhile. "תיכף" = soon. "אחלה" = great.
 
 HEBREW DAY NAMES:
 יום ראשון = Sunday, יום שני = Monday, יום שלישי = Tuesday, יום רביעי = Wednesday, יום חמישי = Thursday, יום שישי = Friday, שבת = Saturday
@@ -1378,14 +1556,26 @@ UPCOMING EVENTS:
 ${eventsStr}
 ${hebrewPatterns}
 
-YOUR JOB: Read the WhatsApp messages below. Decide if any are ACTIONABLE (contain a task, shopping item, event, or task completion). If so, extract the actions and write a SHORT confirmation reply.
+YOUR JOB — YOU ARE THE SMART ESCALATION:
+You're being called because the fast classifier (Haiku) was UNSURE. Haiku already filters the obvious social noise on its own; anything that reached YOU is a genuine judgment call — a single food word ("אננס"), a newline-separated list, an ethnic ingredient, a conditional item, a brand name, or a message that needs CONVERSATION CONTEXT to understand correctly.
+
+You have TWO superpowers Haiku doesn't:
+1. CONVERSATION CONTEXT — the messages below are in chronological order, including recent history before the message that escalated. Each message is tagged with the sender and relative age, e.g. `[Shira, 6d ago]: text` or `[Shira, 3m ago]: text`. If a message has `↳ replying to: "..."` it means the user used WhatsApp's reply feature — their comment pertains specifically to the quoted message.
+
+   If someone is building a shopping list across several messages in a short burst (one item per line, scattered across 2-5 messages, all within minutes of each other), CATCH ALL THE ITEMS as a single add_shopping action. Don't drop a single-word message like "אננס" just because it's short — read what came before/after it.
+
+   CRITICAL time-gap rule: if an earlier message is >2 hours older than the current (newest) message, it was a SEPARATE conversation that was already handled. Do NOT re-emit actions for older messages — only act on the current burst. Example: Shira sends event voices Thursday 18:31, then days later sends "זה כבר קנינו היום" at 21:10. The Thursday voices should be treated as already-handled context only, never as new event inputs.
+
+   CRITICAL quote rule: when the NEWEST message has `↳ replying to:`, base your actions on the quoted content, not on unrelated older messages in history. If the reply says "זה כבר קנינו" / "יש לנו" / "כבר קניתי" and the quote lists shopping items, emit complete_shopping for those specific items, not add_shopping.
+2. CONFIDENT COMMITMENT — a silent drop is worse than a small mistake. Recent churn was caused by Sheli silently ignoring 10 shopping messages in a row while the user was building a grocery list; the family felt abandoned and removed Sheli from the group. Default to TAKING THE ACTION when the evidence says so, and confirm in the reply.
+
+Decide if any messages are ACTIONABLE (shopping, task, event, completion, or question about household state). If so, extract actions and write a SHORT reply acknowledging them. If the current message is clearly addressed to Sheli (by name "שלי", or a direct question to the bot), reply even if there's no action to take — don't leave the user hanging.
 
 CRITICAL RULES:
-- ONLY create actions for things the user EXPLICITLY said in their message. NEVER invent actions from existing household data.
+- ONLY create actions for things the user EXPLICITLY said. NEVER invent actions from existing household data.
 - If the user asks a QUESTION (whose turn? what's on the list? what tasks are there?) → respond=true with an ANSWER, actions=[]. Use household context to ANSWER, not to CREATE actions.
 - The household context (tasks, shopping, events) is provided so you can ANSWER questions and AVOID duplicates — NOT so you can proactively report on or modify existing items.
-
-If messages are purely social (greetings, jokes, photos, reactions, family chat) — set respond=false and take no actions. MOST messages will be social — don't over-classify.
+- Genuinely social messages (bare greetings "בוקר טוב", photos-only, forwarded memes, reactions "😂"/"👍", family jokes with no actionable content) → respond=false, actions=[]. But when in doubt between "social" and "the user meant something actionable" — LEAN TOWARD ACTIONABLE. False silence on a real request loses users; a small confirm on ambiguous content does not.
 
 Respond ONLY as this JSON — no other text:
 {
@@ -1394,7 +1584,7 @@ Respond ONLY as this JSON — no other text:
   "actions": [
     {"type": "add_task", "data": {"title": "...", "assigned_to": "name or null"}},
     {"type": "add_shopping", "data": {"items": [{"name": "...", "qty": "1", "category": "..."}]}},
-    {"type": "add_event", "data": {"title": "...", "assigned_to": "name or null", "scheduled_for": "ISO 8601"}},
+    {"type": "add_event", "data": {"title": "...", "assigned_to": "name or null", "scheduled_for": "ISO 8601 WITH Israel timezone offset, e.g. 2026-04-12T15:30:00+03:00 — NEVER emit naive strings like 2026-04-12T15:30:00 (Postgres would parse as UTC and the event lands 3h late)"}},
     {"type": "complete_task", "data": {"id": "task_id"}},
     {"type": "complete_shopping", "data": {"id": "item_id"}}
   ]
@@ -1407,7 +1597,7 @@ Generate 4-char alphanumeric IDs for new items.`.trim();
 
 async function classifyMessages(
   householdId: string,
-  messages: Array<{ sender: string; text: string; timestamp: number }>
+  messages: Array<{ sender: string; text: string; timestamp: number; quotedText?: string }>
 ): Promise<ClassificationResult> {
   const ctx = await buildHouseholdContext(householdId);
   if (!ctx) {
@@ -1416,9 +1606,27 @@ async function classifyMessages(
 
   const systemPrompt = buildSonnetClassifierPrompt(ctx);
 
-  // Format messages for Claude
+  // Patch A (Bug #3): format messages with relative timestamps + quoted-reply markers.
+  // Why: Sonnet used to see just `[sender]: text` with no time context, so a 6-day-old
+  // message in the conversation window looked indistinguishable from a current one →
+  // Sonnet happily re-emitted actions for already-processed messages (Shira 2026-04-15
+  // session, 3 ghost events inserted). Adding age labels lets Sonnet see gaps and skip
+  // stale messages. Adding `↳ replying to` lets Sonnet focus on the quoted anchor when
+  // the user uses WhatsApp reply — matching what Haiku already sees.
+  const nowMs = Date.now();
+  const fmtAge = (ms: number) => {
+    const mins = Math.max(0, Math.round((nowMs - ms) / 60_000));
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  };
   const formattedMsgs = messages
-    .map((m) => `[${m.sender}]: ${m.text}`)
+    .map((m) => {
+      const age = fmtAge(m.timestamp);
+      const quote = m.quotedText ? `\n  ↳ replying to: "${m.quotedText}"` : "";
+      return `[${m.sender}, ${age}]: ${m.text}${quote}`;
+    })
     .join("\n");
 
   try {
@@ -1754,15 +1962,26 @@ async function executeActions(
           if (eventMatch) {
             summary.push(`Event-exists: "${eventMatch.title}"`);
           } else {
+            // Patch B (Bug #2): defensive timezone normalization.
+            // Sonnet has been observed emitting naive ISO strings like "2026-04-12T15:30:00"
+            // with no timezone offset. Postgres timestamp-with-tz parses naive strings as UTC,
+            // which stores Israeli times 3h late (15:30 IST → stored as UTC 15:30 → 18:30 IST on read).
+            // If no offset/Z suffix present, force Israel offset (+03:00 standard / +02:00 winter
+            // is close enough — DST in Israel is narrower than the bug's impact; prefer consistency).
+            const hasOffset = /[+-]\d{2}:?\d{2}$|Z$/.test(scheduled_for);
+            const normalizedScheduledFor = hasOffset ? scheduled_for : `${scheduled_for}+03:00`;
+            if (!hasOffset) {
+              console.warn(`[Webhook] add_event: scheduled_for missing timezone ("${scheduled_for}") — normalizing to +03:00`);
+            }
             const { error } = await supabase.from("events").insert({
               id: uid4(),
               household_id: householdId,
               title,
               assigned_to: assigned_to || null,
-              scheduled_for: scheduled_for,
+              scheduled_for: normalizedScheduledFor,
             });
             if (error) throw error;
-            summary.push(`Event: "${title}" @ ${scheduled_for}`);
+            summary.push(`Event: "${title}" @ ${normalizedScheduledFor}`);
           }
           break;
         }
@@ -1788,6 +2007,73 @@ async function executeActions(
             .eq("household_id", householdId);
           if (error) throw error;
           summary.push(`Got shopping item: ${id}`);
+          break;
+        }
+
+        case "complete_shopping_by_names": {
+          // Patch D: user replied to a bot shopping-add ("זה כבר קנינו היום", "יש לנו בבית",
+          // or "רק X חסר"). Look up each name in the open shopping list and mark as got.
+          // Uses ilike-contains for robustness — "חלב" matches both "חלב" and "חלב 2 ליטר"
+          // but would also match "חלב אורז"; prefer exact match when available.
+          const { names } = action.data as { names: string[] };
+          if (!Array.isArray(names) || names.length === 0) {
+            summary.push("complete_shopping_by_names: empty names array — skipped");
+            break;
+          }
+          const { data: openItems } = await supabase
+            .from("shopping_items")
+            .select("id, name")
+            .eq("household_id", householdId)
+            .eq("got", false);
+          const open = openItems || [];
+          const matchedIds: string[] = [];
+          for (const name of names) {
+            const trimmed = String(name).trim();
+            if (!trimmed) continue;
+            // Prefer exact match, fall back to contains
+            const exact = open.find((it: { id: string; name: string }) => it.name === trimmed);
+            const contains = open.find((it: { id: string; name: string }) => it.name.includes(trimmed) || trimmed.includes(it.name));
+            const hit = exact || contains;
+            if (hit && !matchedIds.includes(hit.id)) matchedIds.push(hit.id);
+          }
+          if (matchedIds.length === 0) {
+            summary.push(`complete_shopping_by_names: no open items matched [${names.join(", ")}]`);
+            break;
+          }
+          const { error } = await supabase
+            .from("shopping_items")
+            .update({ got: true, got_by: senderName || null, got_at: new Date().toISOString() })
+            .in("id", matchedIds)
+            .eq("household_id", householdId);
+          if (error) throw error;
+          summary.push(`Got ${matchedIds.length} shopping items: ${matchedIds.join(",")}`);
+          break;
+        }
+
+        case "complete_tasks_all_open": {
+          // Patch D: user replied to a bot task-list message with "הושלם" / "המשימות הושלמו".
+          // We don't have task_ids in the quoted text — mark ALL currently open tasks as done.
+          // This is the right call for "המשימות הושלמו" (all tasks done) but could over-mark
+          // if a bot message listed only some tasks; the blast radius is small since we'd
+          // at most mark OPEN tasks that weren't in the quoted list. If that becomes a problem,
+          // we can narrow to tasks whose title appears in quotedText.
+          const { data: openTasks } = await supabase
+            .from("tasks")
+            .select("id")
+            .eq("household_id", householdId)
+            .eq("done", false);
+          const ids = (openTasks || []).map((t: { id: string }) => t.id);
+          if (ids.length === 0) {
+            summary.push("complete_tasks_all_open: no open tasks to mark");
+            break;
+          }
+          const { error } = await supabase
+            .from("tasks")
+            .update({ done: true, completed_by: senderName || null, completed_at: new Date().toISOString() })
+            .in("id", ids)
+            .eq("household_id", householdId);
+          if (error) throw error;
+          summary.push(`Completed ${ids.length} tasks: ${ids.join(",")}`);
           break;
         }
 
@@ -4382,7 +4668,8 @@ Deno.serve(async (req: Request) => {
           text: m.message_text,
           timestamp: new Date(m.created_at).getTime(),
         })),
-        { sender: message.senderName, text: message.text, timestamp: message.timestamp },
+        // Patch A: pass quotedText through so Sonnet sees the reply anchor (parallel to Haiku path at ~4449).
+        { sender: message.senderName, text: message.text, timestamp: message.timestamp, quotedText: message.quotedText },
       ];
       const sonnetResult = await classifyMessages(householdId, sonnetMessages);
 
@@ -4390,8 +4677,9 @@ Deno.serve(async (req: Request) => {
         if (directAddress) {
           const replyCtx = await buildReplyCtx(householdId, "group");
           let { reply } = await generateReply(classification, message.senderName, replyCtx);
-          // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
-          if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
+          // Rescue: save any REMINDER blocks from Sonnet + Haiku-entity fallback BEFORE stripping.
+          // Previously we only stripped — silently dropping reminders when this path fired.
+          if (reply) reply = await rescueRemindersAndStrip(reply, classification, message, householdId);
           if (reply) {
             await provider.sendMessage({ groupId: message.groupId, text: reply });
             await maybeMarkDashboardMentioned(message.groupId, reply);
@@ -4456,11 +4744,35 @@ Deno.serve(async (req: Request) => {
 
         // Direct address overrides ignore — generate a personality reply
         // Use original text (with שלי) so Sonnet sees the full context
-        const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
+        //
+        // Haiku-misclassification rescue: live DB shows messages like "תזכירי לי ב-4 לאסוף
+        // ילדים" hitting this path with intent=ignore conf=0.75 entities=null. Sonnet's reply
+        // prompt gates REMINDER emission on intent=add_reminder (~line 1092), so without an
+        // intent override Sonnet never emits a REMINDER block and the rescue helper has
+        // nothing to save. When Layer 1 detected a reminder-imperative first word AND the
+        // message contains a time reference, we pass intent=add_reminder to generateReply so
+        // Sonnet knows to emit a REMINDER block. Does NOT mutate the outer classification —
+        // logged classification still says ignore so we can audit Haiku misfires later.
+        const REMINDER_IMPERATIVES = new Set(["תזכירי", "תזכרי", "תגידי", "תכתבי", "תשלחי", "תעדכני"]);
+        const TIME_HINT = /ב-?\d|בשעה|מחר|מחרתיים|בעוד|בערב|בבוקר|בצהריים|בלילה|לפני\s+(?:ה?שעה|הצהריים|שבת|\d)|יום\s+(?:ראשון|שני|שלישי|רביעי|חמישי|שישי)|שבת|עוד\s+\d/;
+        const looksLikeMisclassifiedReminder =
+          imperativeFirstWord &&
+          REMINDER_IMPERATIVES.has(firstWordOnly) &&
+          TIME_HINT.test(message.text);
+        const directClassification: ClassificationOutput = looksLikeMisclassifiedReminder
+          ? {
+              ...classification,
+              intent: "add_reminder",
+              entities: { ...classification.entities, raw_text: message.text },
+            }
+          : { ...classification, entities: { ...classification.entities, raw_text: message.text } };
+        if (looksLikeMisclassifiedReminder) {
+          console.log(`[Webhook] Rescue: ignore+"${firstWordOnly}"+time → passing add_reminder to generateReply`);
+        }
         const replyCtx = await buildReplyCtx(householdId, "group");
         let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
-        // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
-        if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
+        // Rescue: save any REMINDER blocks (Sonnet-emitted or Haiku-entity fallback) BEFORE stripping
+        if (reply) reply = await rescueRemindersAndStrip(reply, directClassification, message, householdId);
         if (reply) {
           await provider.sendMessage({ groupId: message.groupId, text: reply });
         }
@@ -4510,8 +4822,10 @@ Deno.serve(async (req: Request) => {
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
         const replyCtx = await buildReplyCtx(householdId, "group");
         let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
-        // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
-        if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
+        // Rescue: save any REMINDER blocks from Sonnet + Haiku-entity fallback BEFORE stripping.
+        // Low-confidence add_reminder intents pass intent=add_reminder down to generateReply,
+        // so Sonnet DOES emit REMINDER blocks for these cases — previously silently stripped.
+        if (reply) reply = await rescueRemindersAndStrip(reply, directClassification, message, householdId);
         if (reply) {
           await provider.sendMessage({ groupId: message.groupId, text: reply });
         }
@@ -4535,18 +4849,22 @@ Deno.serve(async (req: Request) => {
           text: m.message_text,
           timestamp: new Date(m.created_at).getTime(),
         })),
-        { sender: message.senderName, text: message.text, timestamp: message.timestamp },
+        // Patch A: pass quotedText through so Sonnet sees the reply anchor (parallel to Haiku path at ~4449).
+        { sender: message.senderName, text: message.text, timestamp: message.timestamp, quotedText: message.quotedText },
       ];
       const sonnetResult = await classifyMessages(householdId, sonnetMessages);
 
       if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
         if (directAddress) {
-          // Sonnet says social, but user addressed Sheli — still reply
+          // Sonnet says social, but user addressed Sheli — still reply.
+          // Note: classifyMessages (Sonnet classifier) has no add_reminder in its action schema
+          // (line ~1495), so a reminder request that escalates here will produce actions=[] and
+          // fall through. directClassification preserves the original Haiku intent — if it was
+          // add_reminder, generateReply will emit a REMINDER block that the rescue below saves.
           const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
           const replyCtx = await buildReplyCtx(householdId, "group");
           let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
-          // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
-          if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
+          if (reply) reply = await rescueRemindersAndStrip(reply, directClassification, message, householdId);
           if (reply) {
             await provider.sendMessage({ groupId: message.groupId, text: reply });
           }
@@ -4608,8 +4926,10 @@ Deno.serve(async (req: Request) => {
 
       // Extract hidden PENDING_ACTION block from Sonnet reply
       const pendingAction = extractPendingAction(reply);
-      // Defense-in-depth: also strip REMINDER/MEMORY blocks if Sonnet emits them off-prompt
-      const cleanReply = cleanReminderFromReply(stripMemoryBlocks(cleanPendingAction(reply)));
+      // Rescue any off-prompt REMINDER blocks before stripping, then remove PENDING_ACTION wrapper.
+      // Order matters: extractPendingAction runs on raw reply (above) so rescue-strip order is safe.
+      const afterReminderRescue = await rescueRemindersAndStrip(reply, classification, message, householdId);
+      const cleanReply = cleanPendingAction(afterReminderRescue);
 
       if (pendingAction && pendingAction.action_type) {
         // Store pending confirmation
@@ -4641,8 +4961,10 @@ Deno.serve(async (req: Request) => {
     if (!isActionable && classification.intent !== "ignore") {
       const replyCtx = await buildReplyCtx(householdId, "group");
       let { reply } = await generateReply(classification, message.senderName, replyCtx);
-      // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
-      if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
+      // Rescue off-prompt REMINDER blocks before stripping. Questions/info_requests should
+      // normally not trigger REMINDER emission, but the rescue is cheap and keeps this path
+      // symmetric with the other direct-address code paths.
+      if (reply) reply = await rescueRemindersAndStrip(reply, classification, message, householdId);
       if (reply) {
         await provider.sendMessage({ groupId: message.groupId, text: reply });
         await maybeMarkDashboardMentioned(message.groupId, reply);
@@ -5700,13 +6022,24 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
     }
 
     case "complete_task":
-      if (e.task_id) {
+      // Patch D: Haiku now emits completion_scope for reply-to-bot-task-list patterns
+      // ("הושלם" quoting a task-list → all_in_quote; "המשימות הושלמו" standalone → all_open).
+      // executeActions resolves this against the current open-tasks list since we don't
+      // have task_ids from quoted text alone.
+      if (e.completion_scope === "all_open" || e.completion_scope === "all_in_quote") {
+        actions.push({ type: "complete_tasks_all_open", data: {} });
+      } else if (e.task_id) {
         actions.push({ type: "complete_task", data: { id: e.task_id } });
       }
       break;
 
     case "complete_shopping":
-      if (e.item_id) {
+      // Patch D: Haiku now emits items_from_quote when user replies to a bot shopping-add
+      // message ("זה כבר קנינו" / "יש לנו" / "רק X חסר"). We look up each name in the
+      // open shopping list and mark as got. Preserves the single-id path for direct completions.
+      if (Array.isArray(e.items_from_quote) && e.items_from_quote.length > 0) {
+        actions.push({ type: "complete_shopping_by_names", data: { names: e.items_from_quote } });
+      } else if (e.item_id) {
         actions.push({ type: "complete_shopping", data: { id: e.item_id } });
       }
       break;
@@ -5850,18 +6183,27 @@ async function handleCorrection(
   const undone = await undoLastAction(householdId, lastAction.classification_data);
   console.log(`[Correction] Undone:`, undone);
 
-  // 3. If correction_text provided, redo with the corrected version
+  // 3. If correction_text provided AND user literally typed it, redo with the corrected version.
+  // Substring gate: the correction_text must appear VERBATIM in the user's actual message text.
+  // Prevents Haiku from fabricating/paraphrasing a correction when the user only sent emoji or a bare reaction.
+  // Without this guard, an emoji-only "correction" will cause undo + a bogus redo based on hallucinated text.
   const correctionText = classification.entities.correction_text;
   let redone: string[] = [];
   if (correctionText) {
-    // Re-classify the correction text to get proper entities
-    const ctx = await buildClassifierCtx(householdId);
-    const reclassified = await classifyIntent(correctionText, message.senderName, ctx);
+    const userText = (message.text || "").toLowerCase();
+    const correctionLower = correctionText.toLowerCase();
+    if (!userText.includes(correctionLower)) {
+      console.log(`[Correction] Rejecting fabricated correction_text (not substring of user message). correction="${correctionText}" text="${message.text}"`);
+    } else {
+      // Re-classify the correction text to get proper entities
+      const ctx = await buildClassifierCtx(householdId);
+      const reclassified = await classifyIntent(correctionText, message.senderName, ctx);
 
-    if (reclassified.intent !== "ignore" && reclassified.intent !== "correct_bot") {
-      const actions = haikuEntitiesToActions(reclassified);
-      const result = await executeActions(householdId, actions, message.senderName);
-      redone = result.summary;
+      if (reclassified.intent !== "ignore" && reclassified.intent !== "correct_bot") {
+        const actions = haikuEntitiesToActions(reclassified);
+        const result = await executeActions(householdId, actions, message.senderName);
+        redone = result.summary;
+      }
     }
   }
 
@@ -5898,8 +6240,8 @@ async function handleCorrection(
 
   const reply = replyLines.join("\n");
 
-  // 6. Auto-derive patterns from this correction
-  await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification);
+  // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
+  await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
 
   await provider.sendMessage({ groupId: message.groupId, text: reply });
   await logMessage(message, "correction_applied", householdId, classification);
@@ -5910,6 +6252,7 @@ async function derivePatternFromCorrection(
   correctionType: string,
   originalData: ClassificationOutput | null,
   correctedData: ClassificationOutput | null,
+  userText?: string,
 ) {
   if (!originalData) return;
 
@@ -5917,7 +6260,17 @@ async function derivePatternFromCorrection(
     // Compound name fix: user corrected a split (e.g., "שמן" + "זית" → "שמן זית")
     if (correctionType === "mention_correction" && correctedData?.entities?.correction_text) {
       const correctedText = correctedData.entities.correction_text;
-      if (correctedText.includes(" ")) {
+
+      // Reject patterns that look like Haiku hallucinations or meta-language, not actual compound product names.
+      // Three guards:
+      //   1. Substring gate — correctedText must appear verbatim in user's typed message (if provided).
+      //   2. Length gate — compound names are short (olive oil, white cheese); >25 chars is almost always an explanation.
+      //   3. Meta-language gate — tokens like "הוא/זה/פריט/אחד/שניים/not/item" indicate Haiku paraphrased a rule, not quoted a name.
+      const isFabricated = userText ? !userText.toLowerCase().includes(correctedText.toLowerCase()) : false;
+      const tooLong = correctedText.length > 25;
+      const hasMetaTokens = /(\bהוא\b|\bזה\b|\bפריט\b|\bאחד\b|\bשניים\b|\bצריך\b|\bnot\b|\bitem\b|\bone\b|\btwo\b)/i.test(correctedText);
+
+      if (correctedText.includes(" ") && !isFabricated && !tooLong && !hasMetaTokens) {
         await supabase.from("household_patterns").upsert({
           household_id: householdId,
           pattern_type: "compound_name",
@@ -5928,6 +6281,8 @@ async function derivePatternFromCorrection(
           last_seen: new Date().toISOString(),
         }, { onConflict: "household_id,pattern_type,pattern_key" });
         console.log(`[Patterns] Learned compound name: "${correctedText}" for ${householdId}`);
+      } else if (correctedText.includes(" ")) {
+        console.log(`[Patterns] Rejected pattern "${correctedText}" (fabricated=${isFabricated}, tooLong=${tooLong}, hasMetaTokens=${hasMetaTokens})`);
       }
     }
 
