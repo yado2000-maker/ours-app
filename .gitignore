@@ -47,3 +47,7 @@ tests/classifier-results.json
 .env.*
 !.env.local.example
 supabase/.temp/
+
+# Obsidian vault (Yaron's scratchpad — bug reports, ideas, session notes)
+SHELI/
+.obsidian/
