@@ -2196,7 +2196,7 @@ ${cta} נסו לכתוב:
 
 // ─── Group Nudge (one-time, after 2 days OR 5 actions) ───
 
-const GROUP_NUDGE_MESSAGE = "אגב, אם גרים איתך עוד מישהו, אפשר להוסיף אותי לקבוצת הווטסאפ ואני אתאם לכולם 🏠";
+const GROUP_NUDGE_MESSAGE = "אגב, אפשר לצרף אותי לקבוצת הווטסאפ ואוכל לתאם ולעזור לכל בני הבית 🏠";
 const GROUP_NUDGE_MIN_DAYS = 2;
 const GROUP_NUDGE_MIN_ACTIONS = 5;
 
@@ -4389,7 +4389,9 @@ Deno.serve(async (req: Request) => {
       if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
         if (directAddress) {
           const replyCtx = await buildReplyCtx(householdId, "group");
-          const { reply } = await generateReply(classification, message.senderName, replyCtx);
+          let { reply } = await generateReply(classification, message.senderName, replyCtx);
+          // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
+          if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
           if (reply) {
             await provider.sendMessage({ groupId: message.groupId, text: reply });
             await maybeMarkDashboardMentioned(message.groupId, reply);
@@ -4456,7 +4458,9 @@ Deno.serve(async (req: Request) => {
         // Use original text (with שלי) so Sonnet sees the full context
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
         const replyCtx = await buildReplyCtx(householdId, "group");
-        const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
+        let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
+        // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
+        if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
         if (reply) {
           await provider.sendMessage({ groupId: message.groupId, text: reply });
         }
@@ -4505,7 +4509,9 @@ Deno.serve(async (req: Request) => {
 
         const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
         const replyCtx = await buildReplyCtx(householdId, "group");
-        const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
+        let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
+        // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
+        if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
         if (reply) {
           await provider.sendMessage({ groupId: message.groupId, text: reply });
         }
@@ -4538,7 +4544,9 @@ Deno.serve(async (req: Request) => {
           // Sonnet says social, but user addressed Sheli — still reply
           const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
           const replyCtx = await buildReplyCtx(householdId, "group");
-          const { reply } = await generateReply(directClassification, message.senderName, replyCtx);
+          let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
+          // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
+          if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
           if (reply) {
             await provider.sendMessage({ groupId: message.groupId, text: reply });
           }
@@ -4600,7 +4608,8 @@ Deno.serve(async (req: Request) => {
 
       // Extract hidden PENDING_ACTION block from Sonnet reply
       const pendingAction = extractPendingAction(reply);
-      const cleanReply = cleanPendingAction(reply);
+      // Defense-in-depth: also strip REMINDER/MEMORY blocks if Sonnet emits them off-prompt
+      const cleanReply = cleanReminderFromReply(stripMemoryBlocks(cleanPendingAction(reply)));
 
       if (pendingAction && pendingAction.action_type) {
         // Store pending confirmation
@@ -4631,7 +4640,9 @@ Deno.serve(async (req: Request) => {
     // Non-actionable intents (question, info_request) — generate reply only, no DB writes
     if (!isActionable && classification.intent !== "ignore") {
       const replyCtx = await buildReplyCtx(householdId, "group");
-      const { reply } = await generateReply(classification, message.senderName, replyCtx);
+      let { reply } = await generateReply(classification, message.senderName, replyCtx);
+      // Defense-in-depth: strip any REMINDER/MEMORY blocks Sonnet may emit off-prompt
+      if (reply) reply = cleanReminderFromReply(stripMemoryBlocks(reply));
       if (reply) {
         await provider.sendMessage({ groupId: message.groupId, text: reply });
         await maybeMarkDashboardMentioned(message.groupId, reply);
@@ -4704,53 +4715,55 @@ Deno.serve(async (req: Request) => {
     const replyCtx = await buildReplyCtx(householdId, "group");
     let { reply } = await generateReply(classification, message.senderName, replyCtx);
 
-    // 13b. Handle reminder insertion (extract hidden REMINDER blocks from Sonnet reply)
-    // Fallback: if Sonnet produced no reply OR omitted the REMINDER block, use Haiku's entities directly.
-    // Haiku already parsed reminder_text + time_iso — no reason to lose the reminder just because Sonnet went silent.
-    if (classification.intent === "add_reminder") {
-      const allReminders: { reminder_text: string; send_at: string }[] = reply
-        ? extractRemindersFromReply(reply)
-        : [];
+    // 13b. Handle reminder insertion — always process REMINDER blocks regardless of intent.
+    // Sonnet can emit <!--REMINDER:-->  blocks for any intent (e.g. rotation assignment
+    // "מחר נעמי" → Sonnet helpfully schedules a tomorrow reminder). Previously we only
+    // processed+cleaned reminders when intent==add_reminder, which leaked raw JSON to users
+    // for other intents. Memory handling already follows this "always process" pattern.
+    const allReminders: { reminder_text: string; send_at: string }[] = reply
+      ? extractRemindersFromReply(reply)
+      : [];
 
-      if (allReminders.length === 0) {
-        const e = classification.entities;
-        if (e?.reminder_text && e?.time_iso) {
-          allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
-          console.log(`[Reminder] Sonnet produced no REMINDER block — falling back to Haiku entities`);
-          // If Sonnet also produced no visible reply, synthesize a minimal confirmation so the user knows it landed
-          if (!reply) {
-            const when = new Date(e.time_iso).toLocaleString("he-IL", {
-              timeZone: "Asia/Jerusalem",
-              weekday: "short",
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-            reply = `אזכיר ${when} ✓`;
-          }
-        } else {
-          console.warn(`[Reminder] No REMINDER block from Sonnet and Haiku missing reminder_text/time_iso — cannot schedule`);
-        }
-      }
-
-      for (const reminderData of allReminders) {
-        if (reminderData.send_at) {
-          const { error: remErr } = await supabase.from("reminder_queue").insert({
-            household_id: householdId,
-            group_id: message.groupId,
-            message_text: reminderData.reminder_text,
-            send_at: reminderData.send_at,
-            sent: false,
-            reminder_type: "user",
-            created_by_phone: message.senderPhone,
-            created_by_name: message.senderName,
+    // Haiku-entities fallback: only runs for add_reminder intent, since that's the only
+    // classification that guarantees reminder_text + time_iso in entities.
+    if (allReminders.length === 0 && classification.intent === "add_reminder") {
+      const e = classification.entities;
+      if (e?.reminder_text && e?.time_iso) {
+        allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+        console.log(`[Reminder] Sonnet produced no REMINDER block — falling back to Haiku entities`);
+        // If Sonnet also produced no visible reply, synthesize a minimal confirmation so the user knows it landed
+        if (!reply) {
+          const when = new Date(e.time_iso).toLocaleString("he-IL", {
+            timeZone: "Asia/Jerusalem",
+            weekday: "short",
+            hour: "2-digit",
+            minute: "2-digit",
           });
-          if (remErr) console.error("[Reminder] Insert error:", remErr);
-          else console.log(`[Reminder] Created for ${reminderData.send_at}: "${reminderData.reminder_text}"`);
+          reply = `אזכיר ${when} ✓`;
         }
+      } else {
+        console.warn(`[Reminder] No REMINDER block from Sonnet and Haiku missing reminder_text/time_iso — cannot schedule`);
       }
-      // Clean ALL hidden REMINDER blocks from the reply before sending to user
-      if (reply) reply = cleanReminderFromReply(reply);
     }
+
+    for (const reminderData of allReminders) {
+      if (reminderData.send_at) {
+        const { error: remErr } = await supabase.from("reminder_queue").insert({
+          household_id: householdId,
+          group_id: message.groupId,
+          message_text: reminderData.reminder_text,
+          send_at: reminderData.send_at,
+          sent: false,
+          reminder_type: "user",
+          created_by_phone: message.senderPhone,
+          created_by_name: message.senderName,
+        });
+        if (remErr) console.error("[Reminder] Insert error:", remErr);
+        else console.log(`[Reminder] Created for ${reminderData.send_at}: "${reminderData.reminder_text}" (intent=${classification.intent})`);
+      }
+    }
+    // ALWAYS clean hidden REMINDER blocks from reply — defense in depth, never leak JSON to user.
+    if (reply) reply = cleanReminderFromReply(reply);
 
     // 13c. Handle memory capture (extract hidden MEMORY block from Sonnet reply)
     if (reply) {
