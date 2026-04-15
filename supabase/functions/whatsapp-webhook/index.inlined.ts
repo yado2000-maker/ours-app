@@ -2899,6 +2899,43 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   const mapping = mappingRes.data;
   let convo = convoRes.data;
 
+  // ─── Preferred name override (2026-04-15) ───
+  // If the user explicitly asks to be called differently, store it in
+  // context.preferred_name. The morning nudge reads preferred_name first
+  // (see public.fire_onboarding_nudge) and trusts the user's own spelling
+  // instead of running it through hebrewize_name.
+  //
+  // Patterns supported (explicit imperatives only — "אני X" / "i'm X"
+  // excluded because they match too many non-name utterances):
+  //   "תקראי לי X" / "תקרא לי X" / "קראי לי X" / "קרא לי X"
+  //   "קוראים לי X"
+  //   "השם שלי X" / "השם שלי הוא X"
+  //   "call me X" / "my name is X"
+  // Name capture: 1 or 2 tokens of letters (+ ' and -), 2–40 chars total.
+  if (convo) {
+    const RENAME_RE = /^\s*(?:תקרא[יי]?\s+ל[יי]|קרא[יי]?\s+ל[יי]|קוראים\s+לי|השם\s+שלי(?:\s+הוא)?|call\s+me|my\s+name\s+is)\s+([\p{L}][\p{L}'\-]{0,20}(?:\s+[\p{L}][\p{L}'\-]{0,20})?)\s*$/iu;
+    const renameMatch = text.match(RENAME_RE);
+    if (renameMatch) {
+      const newName = renameMatch[1].trim();
+      if (newName.length >= 2 && newName.length <= 40 && /^[\p{L}\s'\-]+$/u.test(newName)) {
+        const newContext = { ...(convo.context || {}), preferred_name: newName };
+        await supabase.from("onboarding_conversations").update({
+          context: newContext,
+          updated_at: new Date().toISOString(),
+        }).eq("phone", phone);
+        const reply = `אשמח לקרוא לך ${newName} מעכשיו 😊`;
+        await prov.sendMessage({ groupId: message.groupId, text: reply });
+        await logMessage(
+          { messageId: `rename_${phone}_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: reply, type: "text" },
+          "preferred_name_set",
+          convo.household_id || "unknown"
+        );
+        console.log(`[1:1] Set preferred_name="${newName}" for ${phone}`);
+        return;
+      }
+    }
+  }
+
   if (mapping) {
     // User is in a group — treat 1:1 as personal channel
     if (convo) {
