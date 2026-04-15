@@ -6,7 +6,13 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
   const got  = shopping.filter(s => s.got);
   const grouped = {};
   need.forEach(s => { const c = s.category || t.cats[8]; if (!grouped[c]) grouped[c] = []; grouped[c].push(s); });
-  const usedCats = t.cats.filter(c => grouped[c]?.length > 0);
+  // Render canonical categories first (in their defined order), then any non-canonical category
+  // names appended at the end — so if the bot writes a category the app doesn't know yet (e.g.
+  // "בשר" instead of "בשר ודגים"), items still render instead of being silently hidden. This
+  // prevented Adi Kaye from seeing 6 of her 11 items on 2026-04-15 before we caught it.
+  const knownCats = t.cats.filter(c => grouped[c]?.length > 0);
+  const unknownCats = Object.keys(grouped).filter(c => !t.cats.includes(c));
+  const usedCats = [...knownCats, ...unknownCats];
 
   return (
     <div className="list-view">

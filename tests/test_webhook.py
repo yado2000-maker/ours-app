@@ -306,6 +306,19 @@ def add_test_item(table, data):
     """Add a test item to the DB for setup."""
     sb_post(table, {"household_id": TEST_HOUSEHOLD_ID, **data})
 
+def clear_reminder_queue():
+    """Drop all reminder_queue rows for the test household.
+
+    Used as per-test `setup` for reminder cases so each test's db_check isn't
+    polluted by earlier tests that share TEST_HOUSEHOLD_ID. Without this,
+    check_db_item would return True for leftover rows from previous cases that
+    happen to share a keyword (e.g. 'רופא' appears in multiple reminder texts).
+    """
+    try:
+        sb_delete("reminder_queue", {"household_id": f"eq.{TEST_HOUSEHOLD_ID}"})
+    except Exception:
+        pass
+
 # ─── Test Cases ───
 
 def build_test_cases():
@@ -425,68 +438,94 @@ def build_test_cases():
     ))
 
     # ── Category 3: Reminders (11 tests) ──
+    # NOTE: db_check on reminder_queue guards against the silent-drop bug — where
+    # direct_address_reply paths used to strip Sonnet's REMINDER block without saving
+    # it. Each test clears reminder_queue first (setup) so the db_check's ilike match
+    # isn't polluted by overlapping keywords from previous reminder tests.
     cases.append(TestCase(
         "basic_reminder_at_4", "Reminders",
         "תזכירי לי ב-4 לאסוף ילדים",
         expected_intent="add_reminder",
-        notes="Basic reminder, should be 16:00 IST",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "ילדים"},
+        notes="Basic reminder, should be 16:00 IST; verifies reminder_queue row exists",
     ))
     cases.append(TestCase(
         "reminder_tomorrow_10", "Reminders",
         "תזכירי לי מחר ב-10 להביא חלב",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "להביא חלב"},
     ))
     cases.append(TestCase(
         "third_person_reminder", "Reminders",
         "תזכירי לאמא להביא חלב מחר ב-10",
         expected_intent="add_reminder",
-        notes="Third-person — remind Mom, not sender (bug #16)",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "אמא"},
+        notes="Third-person — remind Mom, not sender (bug #16); reminder_text must include 'אמא'",
     ))
     cases.append(TestCase(
         "before_buffer_reminder", "Reminders",
         "תזכירי לי לפני השעה 16 לעשות קניות",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "קניות"},
         notes="'before 16' should set time to ~15:00, not 16:00",
     ))
     cases.append(TestCase(
         "relative_time_reminder", "Reminders",
         "בעוד שעה תזכירי לקחת כביסה",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "כביסה"},
         notes="Relative time — now + 1 hour",
     ))
     cases.append(TestCase(
         "bare_reminder_no_time", "Reminders",
         "תזכירי לי",
-        notes="No time specified — should ASK, not create reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "תזכירי", "should_exist": False},
+        notes="No time specified — should ASK, not create reminder; reminder_queue must stay empty",
     ))
     cases.append(TestCase(
         "alt_phrasing_tagidi", "Reminders",
         "תגידי לי בשעה 10 להתקשר לרופא",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "רופא"},
         notes="Alternate phrasing: tagidi li",
     ))
     cases.append(TestCase(
         "alt_phrasing_tikhtevi", "Reminders",
         "תכתבי לי בשעה 5 לקנות מתנה",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "מתנה"},
         notes="Alternate phrasing: tikhtevi li",
     ))
     cases.append(TestCase(
         "alt_phrasing_tishlekhi", "Reminders",
         "תשלחי לי הודעה ב-10 להזכיר לי לצלצל",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "לצלצל"},
         notes="Alternate phrasing: tishlekhi li hoda'a",
     ))
     cases.append(TestCase(
         "noun_form_reminder", "Reminders",
         "תזכורת להתקשר לרופא ב-3",
         expected_intent="add_reminder",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "רופא"},
         notes="Noun form, no imperative verb",
     ))
     cases.append(TestCase(
         "bare_tizkoret_no_details", "Reminders",
         "תזכורת",
-        notes="Bare noun, no details — should ASK",
+        setup=clear_reminder_queue,
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "תזכורת", "should_exist": False},
+        notes="Bare noun, no details — should ASK; reminder_queue must stay empty",
     ))
 
     # ── Category 4: Events (3 tests) ──
