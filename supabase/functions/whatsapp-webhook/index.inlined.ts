@@ -1615,7 +1615,7 @@ async function classifyMessages(
   // the user uses WhatsApp reply — matching what Haiku already sees.
   const nowMs = Date.now();
   const fmtAge = (ms: number) => {
-    const mins = Math.max(0, Math.round((nowMs - ms) / 60_000));
+    const mins = Math.max(0, Math.round((nowMs - ms) / 60000));
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.round(mins / 60);
     if (hrs < 24) return `${hrs}h ago`;
