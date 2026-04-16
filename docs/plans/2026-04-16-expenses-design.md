@@ -327,9 +327,19 @@ Hebrew speakers use many forms to report expenses. The classifier must recognize
 "הגיע חשבון חשמל של 1300" -> ignore (bill arrived, not paid)
 "קיבלנו חשבון מים" -> ignore (received bill)
 
-// ── NEGATIVE: grocery = shopping ──
-"קניתי חלב ב-12" -> add_shopping (grocery item)
+// ── NEGATIVE: grocery / social "קניתי" = NOT expense ──
+"קניתי חלב ב-12" -> add_shopping (grocery with price = shopping mark-as-got)
 "תקני לי חלב ב-12 שקל" -> add_shopping
+"קניתי ג'חנונים" -> ignore (social announcement — Sheli must NOT interfere)
+"קניתי חלב" -> ignore (reporting a purchase, not requesting action)
+"קניתי ארוחה" -> ignore (social sharing)
+"קניתי נעליים ב-400" -> ignore (personal shopping, not household expense tracking)
+// ONLY "קניתי [big item] ב-[amount]" = add_expense:
+// Big items: מזגן, ארון, מכונת כביסה, מקרר, ספה, טיסות, רכב, שואב אבק
+// "קניתי מזגן ב-3000" -> add_expense (appliance = household expense)
+// "קניתי טיסות ב-4500" -> add_expense (travel = household expense)
+// Rule: "קניתי" + amount + NON-GROCERY BIG ITEM = add_expense.
+// "קניתי" + grocery/food/personal = ignore (or add_shopping if matches shopping context).
 
 // ── TENSE DISAMBIGUATION (the hardest one) ──
 "עלה 1300 חשמל" -> add_expense (PAST = already paid)
