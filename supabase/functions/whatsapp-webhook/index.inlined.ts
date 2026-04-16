@@ -88,7 +88,9 @@ interface ClassificationOutput {
     | "instruct_bot"
     | "save_memory"
     | "recall_memory"
-    | "delete_memory";
+    | "delete_memory"
+    | "add_expense"
+    | "query_expense";
   confidence: number; // 0.0 - 1.0
   addressed_to_bot?: boolean; // true when user is talking TO Sheli (not possessive "my/mine")
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
@@ -122,6 +124,21 @@ interface ClassificationOutput {
     // tasks done since the quoted text doesn't carry IDs.
     items_from_quote?: string[];
     completion_scope?: "all_open" | "all_in_quote";
+    // Expenses (v0)
+    amount_text?: string;
+    amount_minor?: number;
+    expense_currency?: string;
+    expense_description?: string;
+    expense_category?: string;
+    expense_attribution?: "speaker" | "named" | "joint" | "household";
+    expense_paid_by_name?: string;
+    expense_occurred_at_hint?: string;
+    expense_visibility_hint?: "household" | "private";
+    expense_query_type?: "summary" | "category_in_period";
+    expense_query_category?: string;
+    expense_query_period?: "this_month" | "last_month";
+    expense_query_period_start?: string;
+    expense_query_period_end?: string;
     raw_text: string;
   };
 }
@@ -163,7 +180,7 @@ interface ReplyResult {
 interface ClassifiedAction {
   // Patch D (Shira 2026-04-15): added complete_shopping_by_names + complete_tasks_all_open
   // for quote-reply completions where the executor resolves names/scopes to IDs via DB lookup.
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open";
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense";
   data: Record<string, unknown>;
 }
 
@@ -523,6 +540,24 @@ INTENTS:
 - save_memory: User asks Sheli to remember something specific. "תזכרי ש...", "תרשמי לך ש...", "אל תשכחי ש...". Must be a personal/family fact, NOT a task or reminder.
 - recall_memory: User asks what Sheli remembers about someone or the family. "מה את זוכרת על...?", "מה ידוע לך על...?", "ספרי לי מה את יודעת על...".
 - delete_memory: User asks Sheli to forget something. "תשכחי את זה", "תמחקי את הזיכרון", "אל תזכרי את זה יותר".
+- add_expense: Logging a household payment/cost that ALREADY HAPPENED. Hebrew triggers include many forms:
+  PAYMENT VERBS (past tense): "שילמתי/שילמנו/שולם/שילם/שילמה" (paid), "העברתי" (transferred), "הוצאתי/הוציא" (spent), "כיסיתי" (covered), "סגרתי" (closed/settled).
+  COST VERBS (past tense): "עלה/עלתה לי/לנו X" (cost me/us X — PAST), "יצא לנו X" (came out to X), "ירד לי X" (was charged X).
+  SLANG: "שרפתי X על Y" (burned X on Y), "הלכו X על Y" (X went on Y), "טסו X שקל" (X flew away), "נפל חשבון של X" (bill of X dropped), "חטפתי חשבון של X" (got hit with bill).
+  FORMAL: "ביצעתי תשלום", "העברתי תשלום" (made/transferred payment).
+  FINES/FEES: "דוח חניה X", "קנס של X", "דוח מהירות X" (parking/speeding ticket), "אגרה" (fee), "עמלה" (commission).
+  COST-NOUN + NUMBER: "עלות התיקון 800", "עלות הביטוח 3200" (the cost of X was Y). But "עלויות" alone without a specific number = general complaint, ignore.
+  BIG PURCHASES: "קניתי [non-grocery] ב-X" (bought [appliance/furniture/flights] for X).
+  NOTE on "דוח": Hebrew homograph. "דוח חניה 250" = parking fine (expense). "כתבתי דוח" = wrote a report (ignore). Need fine-context OR amount to classify as expense.
+  Must include an amount (number or Hebrew word). Category inferred from description.
+  Attribution: speaker (שילמתי/עלה לי), named (אבא שילם), joint (שילמנו/עלה לנו/יצא לנו), household (שולם/נפל חשבון, passive voice).
+  Multi-currency: default ILS. Explicit: "יורו"/"euro"/euro-sign = EUR, "דולר"/"$" = USD, "פאונד"/"pound-sign" = GBP.
+  KEY TENSE RULE: PAST = expense (שילמתי, עלה). PRESENT/general = ignore (עולה, המחיר). FUTURE = task (לשלם, צריך לשלם).
+  NOT expense: "שילמתי עליו" (treating someone socially). "המשכנתא עולה X" (present tense = price statement). "לשלם חשמל" (future = task). "חלב ב-12 שקל" without "קניתי" (grocery = add_shopping). "הגיע חשבון של X" (bill arrived, not yet paid = ignore).
+  CRITICAL "קניתי" RULES:
+    RULE 1: "קניתי X ב-[amount]" = ALWAYS add_expense. Any item with a price is an expense report.
+    RULE 2: "קניתי X" (no amount) = complete_shopping if X matches shopping list item, else ignore.
+- query_expense: Asking about household spending. Triggers: "כמה שילמנו", "כמה הוצאנו", "כמה עלה לנו", "תסכמי הוצאות", "סיכום הוצאות", "מה ההוצאות". Has a period (this_month/last_month) and optional category.
 
 MEMBERS: ${ctx.members.join(", ")}
 TODAY: ${ctx.today} (${ctx.dayOfWeek})
@@ -787,6 +822,44 @@ EXAMPLES:
 [אמא]: "שלי תזכרי שיובל אוהב פיצה עם אננס" → {"intent":"save_memory","confidence":0.95,"entities":{"memory_content":"יובל אוהב פיצה עם אננס","memory_about":"יובל","raw_text":"שלי תזכרי שיובל אוהב פיצה עם אננס"}}
 [אבא]: "שלי מה את זוכרת על נועה?" → {"intent":"recall_memory","confidence":0.90,"entities":{"memory_about":"נועה","raw_text":"שלי מה את זוכרת על נועה?"}}
 [אמא]: "שלי תשכחי את מה שאמרתי קודם" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"שלי תשכחי את מה שאמרתי קודם"}}
+[אמא]: "שילמתי 1300 חשמל" → {"intent":"add_expense","confidence":0.95,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"שילמתי 1300 חשמל"}}
+[אבא]: "אבא שילם 500 סופר" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"סופר","expense_category":"מזון","expense_attribution":"named","expense_paid_by_name":"אבא","raw_text":"אבא שילם 500 סופר"}}
+[אמא]: "שילמנו 2400 ארנונה" → {"intent":"add_expense","confidence":0.94,"entities":{"amount_text":"2400","amount_minor":240000,"expense_currency":"ILS","expense_description":"ארנונה","expense_category":"ארנונה","expense_attribution":"joint","raw_text":"שילמנו 2400 ארנונה"}}
+[אבא]: "שולם 180 ביטוח" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"180","amount_minor":18000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"household","raw_text":"שולם 180 ביטוח"}}
+[אמא]: "שילמתי לו 500 לעבודה שעשה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"עבודה","expense_attribution":"speaker","raw_text":"שילמתי לו 500 לעבודה שעשה"}}
+[אבא]: "החשמל עלה 1300" → {"intent":"add_expense","confidence":0.92,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"household","raw_text":"החשמל עלה 1300"}}
+[אמא]: "עלה לי 300 השמאי" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"300","amount_minor":30000,"expense_currency":"ILS","expense_description":"שמאי","expense_category":"שמאי","expense_attribution":"speaker","raw_text":"עלה לי 300 השמאי"}}
+[אבא]: "הגן עלה לנו 4200 החודש" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"4200","amount_minor":420000,"expense_currency":"ILS","expense_description":"גן","expense_category":"גן","expense_attribution":"joint","raw_text":"הגן עלה לנו 4200 החודש"}}
+[אמא]: "העברתי 5000 שכירות" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"5000","amount_minor":500000,"expense_currency":"ILS","expense_description":"שכירות","expense_category":"שכירות","expense_attribution":"speaker","raw_text":"העברתי 5000 שכירות"}}
+[אבא]: "ירד לי מהחשבון 1200 ביטוח" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"1200","amount_minor":120000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"speaker","raw_text":"ירד לי מהחשבון 1200 ביטוח"}}
+[אמא]: "שרפתי 500 על דלק" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"דלק","expense_category":"דלק","expense_attribution":"speaker","raw_text":"שרפתי 500 על דלק"}}
+[אבא]: "יצא לנו 600 הקניות" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"600","amount_minor":60000,"expense_currency":"ILS","expense_description":"קניות","expense_category":"סופר","expense_attribution":"joint","raw_text":"יצא לנו 600 הקניות"}}
+[אמא]: "הוצאתי 200 על פיצה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"פיצה","expense_category":"אוכל","expense_attribution":"speaker","raw_text":"הוצאתי 200 על פיצה"}}
+[אבא]: "נפל חשבון של 1300 חשמל" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"household","raw_text":"נפל חשבון של 1300 חשמל"}}
+[אמא]: "סגרתי את החשמל, 1300" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"סגרתי את החשמל, 1300"}}
+[אבא]: "קניתי מזגן ב-3000" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"3000","amount_minor":300000,"expense_currency":"ILS","expense_description":"מזגן","expense_category":"בית","expense_attribution":"speaker","raw_text":"קניתי מזגן ב-3000"}}
+[אמא]: "קניתי נעליים ב-400" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"400","amount_minor":40000,"expense_currency":"ILS","expense_description":"נעליים","expense_category":"ביגוד","expense_attribution":"speaker","raw_text":"קניתי נעליים ב-400"}}
+[אבא]: "קניתי חלב ב-12" → {"intent":"add_expense","confidence":0.82,"entities":{"amount_text":"12","amount_minor":1200,"expense_currency":"ILS","expense_description":"חלב","expense_category":"סופר","expense_attribution":"speaker","raw_text":"קניתי חלב ב-12"}}
+[אמא]: "תרמתי 200 לבית הספר" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"תרומה לבית הספר","expense_category":"חינוך","expense_attribution":"speaker","raw_text":"תרמתי 200 לבית הספר"}}
+[אבא]: "שילמתי 150 יורו דלק" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"150","amount_minor":15000,"expense_currency":"EUR","expense_description":"דלק","expense_category":"דלק","expense_attribution":"speaker","raw_text":"שילמתי 150 יורו דלק"}}
+[אמא]: "עלה לנו 80 דולר הארוחה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"80","amount_minor":8000,"expense_currency":"USD","expense_description":"ארוחה","expense_category":"אוכל","expense_attribution":"joint","raw_text":"עלה לנו 80 דולר הארוחה"}}
+[אבא]: "דוח חניה 250 שח" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"250","amount_minor":25000,"expense_currency":"ILS","expense_description":"דוח חניה","expense_category":"קנס","expense_attribution":"speaker","raw_text":"דוח חניה 250 שח"}}
+[אמא]: "קנס של 750" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"750","amount_minor":75000,"expense_currency":"ILS","expense_description":"קנס","expense_category":"קנס","expense_attribution":"household","raw_text":"קנס של 750"}}
+[אבא]: "עלות התיקון 800" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"800","amount_minor":80000,"expense_currency":"ILS","expense_description":"תיקון","expense_category":"תחזוקה","expense_attribution":"household","raw_text":"עלות התיקון 800"}}
+[אמא]: "כמה שילמנו החודש?" → {"intent":"query_expense","confidence":0.92,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"this_month","raw_text":"כמה שילמנו החודש?"}}
+[אבא]: "כמה שילמנו חשמל החודש?" → {"intent":"query_expense","confidence":0.93,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"חשמל","expense_query_period":"this_month","raw_text":"כמה שילמנו חשמל החודש?"}}
+[אמא]: "תסכמי לנו את ההוצאות בחודש שעבר" → {"intent":"query_expense","confidence":0.94,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"last_month","raw_text":"תסכמי לנו את ההוצאות בחודש שעבר"}}
+[אבא]: "כמה הוצאנו על אוכל החודש?" → {"intent":"query_expense","confidence":0.91,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"אוכל","expense_query_period":"this_month","raw_text":"כמה הוצאנו על אוכל החודש?"}}
+[אמא]: "שילמתי עליו 50 בבית קפה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"שילמתי עליו 50 בבית קפה"}}
+[אבא]: "המשכנתא עולה 4000 בחודש" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"המשכנתא עולה 4000 בחודש"}}
+[אמא]: "זה עולה 50 שקל" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"זה עולה 50 שקל"}}
+[אבא]: "לשלם חשמל" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לשלם חשמל","raw_text":"לשלם חשמל"}}
+[אמא]: "צריך לשלם ארנונה" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לשלם ארנונה","raw_text":"צריך לשלם ארנונה"}}
+[אבא]: "הגיע חשבון חשמל של 1300" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"הגיע חשבון חשמל של 1300"}}
+[אמא]: "כתבתי דוח" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"כתבתי דוח"}}
+[אבא]: "עלויות גבוהות" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"עלויות גבוהות"}}
+[אמא]: "עלה 1300 חשמל" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_attribution":"household","raw_text":"עלה 1300 חשמל"}}
+[אבא]: "עולה 1300 חשמל" → {"intent":"ignore","confidence":0.82,"entities":{"raw_text":"עולה 1300 חשמל"}}
 
 CRITICAL — "שלי" DISAMBIGUATION:
 "שלי" is BOTH the bot's name AND Hebrew for "my/mine".
@@ -1010,6 +1083,12 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
     case "delete_memory":
       actionSummary = `${sender} wants Sheli to forget something. Confirm you'll forget it, keep it light.`;
       break;
+    case "add_expense":
+      actionSummary = "An expense was just logged: " + (e.expense_currency || "ILS") + " " + (e.amount_text || "?") + ' for "' + (e.expense_description || "?") + '". Attribution: ' + (e.expense_attribution || "speaker") + (e.expense_paid_by_name ? ", paid by " + e.expense_paid_by_name : "") + ".";
+      break;
+    case "query_expense":
+      actionSummary = "User is asking about expenses. " + ((classification as any).__queryResult || "No expense data available yet.");
+      break;
     default:
       actionSummary = `Message from ${sender}: "${e.raw_text}".`;
   }
@@ -1133,6 +1212,22 @@ ${isHe ? `- פרטיות: "אני לא שומרת תמונות או וידאו. 
 - Who sees data: "Only your household members. Each home is completely isolated."
 - Stopping: "Just remove me from the group. All data is auto-deleted, no commitment."`}
 Paraphrase naturally — never repeat the exact same wording twice.
+
+EXPENSE LOGGING (add_expense):
+When an expense was just logged, confirm in one SHORT line. Include: amount with currency symbol, description, who paid.
+Format: "רשמתי — [amount] [currency] [description], מי שילם: [name] ✓"
+For attribution=joint: say "שילמתם ביחד" instead of "מי שילם:".
+For attribution=household (passive voice, no specific payer): omit "מי שילם:" entirely.
+For amounts >1000: add a money emoji.
+NEVER fabricate or change the amount. Use exactly what was logged.
+
+EXPENSE QUERY (query_expense):
+The expense query data is provided in the ACTION JUST TAKEN section. Format it naturally in Hebrew.
+- Summary: "ב[period]: סה״כ [N] ₪ על פני [K] הוצאות. הכי גדולות: [cat1] ([X]), [cat2] ([Y])."
+- Category: "[Category] ב[period]: [N] ₪ ([K] תשלומים)."
+- Multi-currency: show each currency on its own line. NEVER sum across currencies.
+- Zero state: "עדיין לא רשמנו הוצאות ב[period]. ספרו לי כשמשלמים — 'שילמתי X על Y'."
+CRITICAL: NEVER fabricate totals. If query returned 0 or an error, say so honestly.
 
 REMINDERS: When intent is add_reminder:
 - Parse the time expression into an ISO 8601 timestamp in Israel timezone (Asia/Jerusalem, currently UTC+3).
@@ -1838,6 +1933,187 @@ async function fetchRecentConversation(
     }));
 }
 
+// ─── Expense Amount Parser ───
+
+const CURRENCY_MAP: Record<string, string> = {
+  "₪": "ILS", "שקל": "ILS", "שקלים": "ILS", "ש״ח": "ILS", "שח": "ILS", "nis": "ILS", "ils": "ILS",
+  "$": "USD", "דולר": "USD", "דולרים": "USD", "usd": "USD", "dollars": "USD", "dollar": "USD",
+  "€": "EUR", "יורו": "EUR", "אירו": "EUR", "eur": "EUR", "euro": "EUR", "euros": "EUR",
+  "£": "GBP", "פאונד": "GBP", "לירה": "GBP", "gbp": "GBP", "pound": "GBP", "pounds": "GBP",
+};
+
+const MINOR_UNIT: Record<string, number> = {
+  ILS: 100, USD: 100, EUR: 100, GBP: 100, JPY: 1,
+};
+
+const HEB_NUMBERS: Record<string, number> = {
+  "אלף": 1000, "אלפיים": 2000, "מאה": 100, "מאתיים": 200,
+  "שלוש מאות": 300, "ארבע מאות": 400, "חמש מאות": 500,
+  "שש מאות": 600, "שבע מאות": 700, "שמונה מאות": 800, "תשע מאות": 900,
+};
+
+function parseAmountToMinor(
+  amountText: string | undefined,
+  haikuMinor: number | undefined,
+  currency: string
+): { amount_minor: number; currency: string } | null {
+  const unit = MINOR_UNIT[currency] || 100;
+
+  // Try Haiku's parsed value first
+  if (haikuMinor && haikuMinor > 0) {
+    return { amount_minor: haikuMinor, currency };
+  }
+
+  if (!amountText) return null;
+
+  // Clean: remove currency symbols, commas, whitespace
+  let cleaned = amountText.trim()
+    .replace(/[₪$€£]/g, "")
+    .replace(/,/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Try direct numeric parse
+  const num = parseFloat(cleaned);
+  if (!isNaN(num) && num > 0) {
+    return { amount_minor: Math.round(num * unit), currency };
+  }
+
+  // Try "1.3K" / "1.3k" style
+  const kMatch = cleaned.match(/^([\d.]+)\s*[kK]$/);
+  if (kMatch) {
+    const val = parseFloat(kMatch[1]) * 1000;
+    if (!isNaN(val) && val > 0) return { amount_minor: Math.round(val * unit), currency };
+  }
+
+  // Try Hebrew word numbers (basic: "אלף ושלוש מאות" = 1300)
+  let total = 0;
+  const parts = cleaned.replace(/ו/g, " ").split(/\s+/).filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const twoWord = i + 1 < parts.length ? parts[i] + " " + parts[i + 1] : "";
+    if (HEB_NUMBERS[twoWord]) {
+      total += HEB_NUMBERS[twoWord];
+      i++; // skip next word
+    } else if (HEB_NUMBERS[parts[i]]) {
+      total += HEB_NUMBERS[parts[i]];
+    }
+  }
+  if (total > 0) return { amount_minor: Math.round(total * unit), currency };
+
+  return null;
+}
+
+function resolveExpenseAttribution(
+  attribution: string | undefined,
+  paidByName: string | undefined,
+  senderName: string | undefined
+): { paid_by: string | null; attribution: string } {
+  switch (attribution) {
+    case "named":
+      return { paid_by: paidByName || senderName || null, attribution: "named" };
+    case "joint":
+      return { paid_by: null, attribution: "joint" };
+    case "household":
+      return { paid_by: null, attribution: "household" };
+    case "speaker":
+    default:
+      return { paid_by: senderName || null, attribution: "speaker" };
+  }
+}
+
+// ─── Expense Query Executor ───
+
+function getExpensePeriodRange(period: string): { start: string; end: string } {
+  const now = new Date();
+  const israelOffset = 3 * 60 * 60 * 1000; // +03:00
+  const israelNow = new Date(now.getTime() + israelOffset);
+
+  if (period === "last_month") {
+    const y = israelNow.getMonth() === 0 ? israelNow.getFullYear() - 1 : israelNow.getFullYear();
+    const m = israelNow.getMonth() === 0 ? 11 : israelNow.getMonth() - 1;
+    const start = new Date(y, m, 1);
+    const end = new Date(y, m + 1, 0, 23, 59, 59);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  // Default: this_month
+  const start = new Date(israelNow.getFullYear(), israelNow.getMonth(), 1);
+  const end = new Date(israelNow.getFullYear(), israelNow.getMonth() + 1, 0, 23, 59, 59);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+async function executeQueryExpense(
+  householdId: string,
+  entities: Record<string, any>,
+  isDirectMessage: boolean
+): Promise<string> {
+  const period = entities.expense_query_period || "this_month";
+  const { start, end } = entities.expense_query_period_start && entities.expense_query_period_end
+    ? { start: entities.expense_query_period_start, end: entities.expense_query_period_end }
+    : getExpensePeriodRange(period);
+
+  let query = supabase
+    .from("expenses")
+    .select("amount_minor, currency, category, paid_by, occurred_at, visibility")
+    .eq("household_id", householdId)
+    .eq("deleted", false)
+    .gte("occurred_at", start)
+    .lte("occurred_at", end);
+
+  // In group context, only show household-visible expenses
+  if (!isDirectMessage) {
+    query = query.eq("visibility", "household");
+  }
+
+  if (entities.expense_query_type === "category_in_period" && entities.expense_query_category) {
+    query = query.ilike("category", "%" + entities.expense_query_category + "%");
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("[QueryExpense] Error:", error);
+    return "EXPENSE_QUERY_ERROR";
+  }
+
+  const rows = data || [];
+  if (rows.length === 0) {
+    const periodLabel = period === "last_month" ? "last_month" : "this_month";
+    return "EXPENSE_QUERY_RESULT: 0 expenses in " + periodLabel + ". No data.";
+  }
+
+  // Group by currency
+  const byCurrency: Record<string, { total: number; count: number; byCategory: Record<string, number> }> = {};
+  for (const row of rows) {
+    const cur = row.currency || "ILS";
+    if (!byCurrency[cur]) byCurrency[cur] = { total: 0, count: 0, byCategory: {} };
+    byCurrency[cur].total += row.amount_minor;
+    byCurrency[cur].count++;
+    const cat = row.category || "אחר";
+    byCurrency[cur].byCategory[cat] = (byCurrency[cur].byCategory[cat] || 0) + row.amount_minor;
+  }
+
+  const unitFn = (cur: string) => (MINOR_UNIT[cur] || 100);
+  const sym = (cur: string) => cur === "ILS" ? "₪" : cur === "EUR" ? "€" : cur === "USD" ? "$" : cur === "GBP" ? "£" : cur;
+
+  let result = "EXPENSE_QUERY_RESULT:\n";
+  const periodLabel = period === "last_month" ? "last_month" : "this_month";
+
+  for (const [cur, cData] of Object.entries(byCurrency)) {
+    const totalDisplay = (cData.total / unitFn(cur)).toLocaleString("he-IL");
+    result += periodLabel + ": " + sym(cur) + totalDisplay + " (" + cData.count + " expenses)\n";
+
+    // Top 3 categories
+    const sorted = Object.entries(cData.byCategory)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3);
+    if (sorted.length > 0 && entities.expense_query_type !== "category_in_period") {
+      const catStr = sorted.map(([cat, amt]) => cat + " (" + sym(cur) + (amt / unitFn(cur)).toLocaleString("he-IL") + ")").join(", ");
+      result += "Top categories: " + catStr + "\n";
+    }
+  }
+
+  return result;
+}
+
 async function executeActions(
   householdId: string,
   actions: ClassifiedAction[],
@@ -2174,6 +2450,51 @@ async function executeActions(
           // Reminders are inserted directly from the Sonnet reply (step 13b), not here
           summary.push(`Reminder: "${(action.data as any).reminder_text || ""}"`);
           break;
+
+        case "add_expense": {
+          const {
+            amount_text, amount_minor: haikuAmount,
+            expense_currency, expense_description, expense_category,
+            expense_attribution, expense_paid_by_name,
+            expense_occurred_at_hint, expense_visibility_hint
+          } = action.data as Record<string, any>;
+
+          const currency = (expense_currency || "ILS").toUpperCase();
+          const parsed = parseAmountToMinor(amount_text, haikuAmount, currency);
+
+          if (!parsed || parsed.amount_minor < 50 || parsed.amount_minor > 100000000) {
+            // Suspicious amount — log but skip insert
+            console.warn("[Expense] Suspicious amount: text=" + amount_text + " minor=" + haikuAmount + " currency=" + currency);
+            summary.push("Expense-skipped: suspicious amount");
+            break;
+          }
+
+          const { paid_by, attribution } = resolveExpenseAttribution(
+            expense_attribution, expense_paid_by_name, senderName
+          );
+
+          const expenseId = uid4();
+          const { error } = await supabase.from("expenses").insert({
+            id: expenseId,
+            household_id: householdId,
+            amount_minor: parsed.amount_minor,
+            currency: parsed.currency,
+            description: expense_description || "הוצאה",
+            category: expense_category || expense_description || "אחר",
+            paid_by,
+            attribution,
+            occurred_at: expense_occurred_at_hint || new Date().toISOString(),
+            visibility: expense_visibility_hint || "household",
+            source: "whatsapp",
+            logged_by_phone: senderName || null,
+          });
+          if (error) throw error;
+
+          const displayAmount = (parsed.amount_minor / (MINOR_UNIT[parsed.currency] || 100)).toLocaleString("he-IL");
+          const currencySymbol = parsed.currency === "ILS" ? "₪" : parsed.currency === "EUR" ? "€" : parsed.currency === "USD" ? "$" : parsed.currency === "GBP" ? "£" : parsed.currency;
+          summary.push("Expense: " + currencySymbol + displayAmount + " " + (expense_description || "הוצאה") + (paid_by ? " (" + paid_by + ")" : ""));
+          break;
+        }
 
         case "create_rotation": {
           const { title, rotation_type, members, frequency, start_person } = action.data as {
@@ -2518,13 +2839,14 @@ const GROUP_NUDGE_MIN_ACTIONS = 5;
 // Reusable for nudge threshold + future paywall.
 async function countHouseholdActions(householdId: string | null): Promise<number> {
   if (!householdId) return 0;
-  const [t, s, e, r] = await Promise.all([
+  const [t, s, e, r, exp] = await Promise.all([
     supabase.from("tasks").select("id", { count: "exact", head: true }).eq("household_id", householdId),
     supabase.from("shopping_items").select("id", { count: "exact", head: true }).eq("household_id", householdId),
     supabase.from("events").select("id", { count: "exact", head: true }).eq("household_id", householdId),
     supabase.from("reminder_queue").select("id", { count: "exact", head: true }).eq("household_id", householdId),
+    supabase.from("expenses").select("id", { count: "exact", head: true }).eq("household_id", householdId).eq("deleted", false),
   ]);
-  return (t.count || 0) + (s.count || 0) + (e.count || 0) + (r.count || 0);
+  return (t.count || 0) + (s.count || 0) + (e.count || 0) + (r.count || 0) + (exp.count || 0);
 }
 
 async function shouldSendGroupNudge(convo: Record<string, any>): Promise<boolean> {
@@ -4651,7 +4973,7 @@ Deno.serve(async (req: Request) => {
     // 8. Route based on intent + confidence
     const CONFIDENCE_HIGH = 0.70;
     const CONFIDENCE_LOW = 0.50;
-    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request" && classification.intent !== "question" && classification.intent !== "recall_memory" && classification.intent !== "correct_bot" && classification.intent !== "instruct_bot";
+    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request" && classification.intent !== "question" && classification.intent !== "recall_memory" && classification.intent !== "correct_bot" && classification.intent !== "instruct_bot" && classification.intent !== "query_expense";
 
     // 8a. Shopping batch: collect rapid-fire shopping items into one reply
     if (classification.intent === "add_shopping" && classification.confidence >= CONFIDENCE_HIGH) {
@@ -4990,8 +5312,14 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    // Non-actionable intents (question, info_request) — generate reply only, no DB writes
+    // Non-actionable intents (question, info_request, query_expense) — generate reply only, no DB writes
     if (!isActionable && classification.intent !== "ignore") {
+      // For query_expense, fetch aggregated data and inject into classification for Sonnet
+      if (classification.intent === "query_expense") {
+        const isDirectMsg = !message.groupId?.includes("@g.us");
+        const queryResult = await executeQueryExpense(householdId, classification.entities, isDirectMsg);
+        (classification as any).__queryResult = queryResult;
+      }
       const replyCtx = await buildReplyCtx(householdId, "group");
       let { reply } = await generateReply(classification, message.senderName, replyCtx);
       // Rescue off-prompt REMINDER blocks before stripping. Questions/info_requests should
@@ -6109,6 +6437,25 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
     case "delete_memory":
       actions.push({ type: "delete_memory", data: {} });
       break;
+
+    case "add_expense": {
+      actions.push({
+        type: "add_expense",
+        data: {
+          amount_text: e.amount_text,
+          amount_minor: e.amount_minor,
+          expense_currency: e.expense_currency,
+          expense_description: e.expense_description,
+          expense_category: e.expense_category,
+          expense_attribution: e.expense_attribution,
+          expense_paid_by_name: e.expense_paid_by_name,
+          expense_occurred_at_hint: e.expense_occurred_at_hint,
+          expense_visibility_hint: e.expense_visibility_hint,
+        },
+      });
+      break;
+    }
+    // query_expense is reply-only, no actions needed (handled in main routing)
   }
 
   return actions;
@@ -6196,6 +6543,26 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
       if (found) {
         await supabase.from("events").delete().eq("id", found.id);
         undone.push(`"${found.title}"`);
+      }
+      break;
+    }
+    case "add_expense": {
+      const desc = lastAction.entities.expense_description || lastAction.entities.raw_text;
+      const { data: found } = await supabase
+        .from("expenses")
+        .select("id, description, amount_minor, currency")
+        .eq("household_id", householdId)
+        .eq("deleted", false)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+      if (found) {
+        await supabase.from("expenses")
+          .update({ deleted: true, deleted_at: new Date().toISOString() })
+          .eq("id", found.id);
+        const sym = found.currency === "ILS" ? "₪" : found.currency === "EUR" ? "€" : found.currency === "USD" ? "$" : found.currency;
+        const displayAmt = (found.amount_minor / (MINOR_UNIT[found.currency] || 100)).toLocaleString("he-IL");
+        undone.push(sym + displayAmt + " " + found.description);
       }
       break;
     }
