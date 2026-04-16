@@ -258,7 +258,10 @@ In the INTENTS section (after the `add_reminder` definition around line 567), ad
   COST VERBS (past tense): "עלה/עלתה לי/לנו X" (cost me/us X — PAST), "יצא לנו X" (came out to X), "ירד לי X" (was charged X).
   SLANG: "שרפתי X על Y" (burned X on Y), "הלכו X על Y" (X went on Y), "טסו X שקל" (X flew away), "נפל חשבון של X" (bill of X dropped), "חטפתי חשבון של X" (got hit with bill).
   FORMAL: "ביצעתי תשלום", "העברתי תשלום" (made/transferred payment).
+  FINES/FEES: "דוח חניה X", "קנס של X", "דוח מהירות X" (parking/speeding ticket), "אגרה" (fee), "עמלה" (commission).
+  COST-NOUN + NUMBER: "עלות התיקון 800", "עלות הביטוח 3200" (the cost of X was Y — completed expense). But "עלויות" alone without a specific number = general complaint, ignore.
   BIG PURCHASES: "קניתי [non-grocery] ב-X" (bought [appliance/furniture/flights] for X).
+  NOTE on "דוח": Hebrew homograph. "דוח חניה 250" = parking fine (expense). "כתבתי דוח" = wrote a report (ignore). Need fine-context OR amount to classify as expense.
   Must include an amount (number or Hebrew word). Category inferred from description.
   Attribution: speaker (שילמתי/עלה לי), named (אבא שילם), joint (שילמנו/עלה לנו/יצא לנו), household (שולם/נפל חשבון, passive voice).
   Multi-currency: default ILS. Explicit: "יורו"/"euro"/"€" → EUR, "דולר"/"$" → USD, "פאונד"/"£" → GBP.
@@ -305,6 +308,16 @@ Find the examples section (around line 720+) and add:
 [User]: "שילמתי 150 יורו דלק" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"150","amount_minor":15000,"expense_currency":"EUR","expense_description":"דלק","expense_category":"דלק","expense_attribution":"speaker","raw_text":"שילמתי 150 יורו דלק"}}
 [User]: "עלה לנו 80 דולר הארוחה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"80","amount_minor":8000,"expense_currency":"USD","expense_description":"ארוחה","expense_category":"אוכל","expense_attribution":"joint","raw_text":"עלה לנו 80 דולר הארוחה"}}
 
+// ── EXPENSE: Fines, penalties, fees, cost-noun with number ──
+[User]: "דוח חניה 250 שח" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"250","amount_minor":25000,"expense_currency":"ILS","expense_description":"דוח חניה","expense_category":"קנס","expense_attribution":"speaker","raw_text":"דוח חניה 250 שח"}}
+[User]: "קיבלתי דוח של 500" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"דוח","expense_category":"קנס","expense_attribution":"speaker","raw_text":"קיבלתי דוח של 500"}}
+[User]: "קנס של 750" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"750","amount_minor":75000,"expense_currency":"ILS","expense_description":"קנס","expense_category":"קנס","expense_attribution":"household","raw_text":"קנס של 750"}}
+[User]: "דוח מהירות 1000 שקל" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"1000","amount_minor":100000,"expense_currency":"ILS","expense_description":"דוח מהירות","expense_category":"קנס","expense_attribution":"speaker","raw_text":"דוח מהירות 1000 שקל"}}
+[User]: "עלות התיקון 800" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"800","amount_minor":80000,"expense_currency":"ILS","expense_description":"תיקון","expense_category":"תחזוקה","expense_attribution":"household","raw_text":"עלות התיקון 800"}}
+[User]: "עלות הביטוח 3200 השנה" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"3200","amount_minor":320000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"household","raw_text":"עלות הביטוח 3200 השנה"}}
+[User]: "אגרה של 200 על רישיון" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"אגרת רישיון","expense_category":"אגרה","expense_attribution":"speaker","raw_text":"אגרה של 200 על רישיון"}}
+[User]: "עמלת ברוקר 3000" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"3000","amount_minor":300000,"expense_currency":"ILS","expense_description":"עמלת ברוקר","expense_category":"עמלה","expense_attribution":"household","raw_text":"עמלת ברוקר 3000"}}
+
 // ── EXPENSE QUERIES ──
 [User]: "כמה שילמנו החודש?" → {"intent":"query_expense","confidence":0.92,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"this_month","raw_text":"כמה שילמנו החודש?"}}
 [User]: "כמה שילמנו חשמל החודש?" → {"intent":"query_expense","confidence":0.93,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"חשמל","expense_query_period":"this_month","raw_text":"כמה שילמנו חשמל החודש?"}}
@@ -338,10 +351,16 @@ In the negative examples / disambiguation section:
 // ── NOT expense: grocery purchase = shopping ──
 [User]: "קניתי חלב ב-12" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"חלב","qty":"1"}],"raw_text":"קניתי חלב ב-12"}}
 
+// ── NOT expense: דוח/עלות without amount or fine-context ──
+[User]: "כתבתי דוח" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"כתבתי דוח"}}  // wrote a report (the OTHER meaning of דוח)
+[User]: "עלויות גבוהות" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"עלויות גבוהות"}}  // general complaint, no specific amount
+
 // ── TENSE DISAMBIGUATION (the hardest one) ──
-// PAST "עלה" = expense. PRESENT "עולה" = statement.
+// PAST "עלה" = expense. PRESENT "עולה" = statement. NOUN "עלות" + number = expense.
 [User]: "עלה 1300 חשמל" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_attribution":"household","raw_text":"עלה 1300 חשמל"}}
 [User]: "עולה 1300 חשמל" → {"intent":"ignore","confidence":0.82,"entities":{"raw_text":"עולה 1300 חשמל"}}
+[User]: "עלות התיקון 800" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"800","amount_minor":80000,"expense_currency":"ILS","expense_description":"תיקון","expense_attribution":"household","raw_text":"עלות התיקון 800"}}
+[User]: "עלויות גבוהות" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"עלויות גבוהות"}}
 ```
 
 **Step 4: Run esbuild parse check**

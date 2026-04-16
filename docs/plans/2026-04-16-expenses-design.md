@@ -290,6 +290,19 @@ Hebrew speakers use many forms to report expenses. The classifier must recognize
 "שילמתי 150 יורו דלק" -> add_expense, currency=EUR
 "עלה לנו 80 דולר הארוחה" -> add_expense, currency=USD
 
+// ── Fines, penalties, fees, and cost-noun (עלות + number = expense) ──
+"דוח חניה 250 שח" -> add_expense, category=קנס (parking ticket)
+"קיבלתי דוח של 500" -> add_expense (got a fine of 500)
+"קנס של 750" -> add_expense (fine of 750)
+"דוח מהירות 1000 שקל" -> add_expense (speeding ticket)
+"עלות התיקון 800" -> add_expense (repair cost = completed expense)
+"עלות הביטוח 3200 השנה" -> add_expense (insurance cost this year)
+"אגרה של 200 על רישיון" -> add_expense (fee for license)
+"עמלת ברוקר 3000" -> add_expense (broker commission)
+// NEGATIVE: "דוח" without amount or fine-context = NOT expense
+"כתבתי דוח" -> ignore (wrote a report — the other meaning of דוח)
+"עלויות גבוהות" -> ignore (general complaint about costs, no specific amount)
+
 // ── Queries ──
 "כמה שילמנו החודש?" -> query_expense, type=summary, period=this_month
 "תסכמי לנו את ההוצאות בחודש שעבר" -> query_expense, type=summary, period=last_month
