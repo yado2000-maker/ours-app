@@ -665,6 +665,42 @@ export function LearningFeatureIcon({ size = 28 }) {
   );
 }
 
+/** Coin with shekel — expense tracking feature highlight */
+export function ExpenseFeatureIcon({ size = 28 }) {
+  const accent = 'var(--accent, #C4714A)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Coin circle */}
+      <circle cx="14" cy="14" r="10" stroke="currentColor" strokeWidth="1.5" />
+      {/* Shekel symbol ₪ simplified as two vertical lines with connecting strokes */}
+      <path
+        d="M10 9V17.5C10 18.88 11.12 20 12.5 20M18 19V10.5C18 9.12 16.88 8 15.5 8"
+        stroke={accent}
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Three people — family group feature highlight */
+export function FamilyGroupIcon({ size = 28 }) {
+  const accent = 'var(--accent, #C4714A)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Center person */}
+      <circle cx="14" cy="9" r="3" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M9 22C9 18.69 11.24 16 14 16C16.76 16 19 18.69 19 22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      {/* Left person (smaller) */}
+      <circle cx="6.5" cy="11" r="2.2" stroke={accent} strokeWidth="1.3" opacity="0.7" />
+      <path d="M3 22C3 19.5 4.57 17.5 6.5 17.5" stroke={accent} strokeWidth="1.3" strokeLinecap="round" opacity="0.7" />
+      {/* Right person (smaller) */}
+      <circle cx="21.5" cy="11" r="2.2" stroke={accent} strokeWidth="1.3" opacity="0.7" />
+      <path d="M25 22C25 19.5 23.43 17.5 21.5 17.5" stroke={accent} strokeWidth="1.3" strokeLinecap="round" opacity="0.7" />
+    </svg>
+  );
+}
+
 // -----------------------------------------------------------------------------
 // UTILITY — Additional commonly needed icons
 // -----------------------------------------------------------------------------
