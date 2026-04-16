@@ -134,7 +134,7 @@ async function handleSubscriptionDeleted(subscription: Record<string, unknown>) 
 
   await sendWhatsAppMessage(
     sub.household_id,
-    "המנוי שלכם הסתיים. תמיד אפשר לחזור! 💛\n30 פעולות חינם בחודש ממשיכות לעבוד."
+    "המנוי שלכם הסתיים. תמיד אפשר לחזור! 💛\n40 פעולות חינם בחודש ממשיכות לעבוד."
   );
 }
 

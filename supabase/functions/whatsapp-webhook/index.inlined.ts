@@ -608,30 +608,39 @@ HEBREW PATTERNS:
   Signals: "ככה" (like this), "אמרתי ש" (I said that), "את אמורה ל" (you're supposed to), "צריך לנהל ככה ש" (manage like this), past tense explanations, frustrated repetitions after Sheli didn't understand
   "ככה יום אביב יום גילעד" = instruct_bot. "תורות מקלחת: אביב, גילעד" = add_task (direct command).
 
-SHOPPING CATEGORIES (ALWAYS assign one). Use these examples as guidance:
-- פירות וירקות: מלפפון, עגבניה, בצל, בצל לבן, בצל סגול, שום, לימון, תפוח, בננה, אבוקדו, פטרוזיליה, כוסברה, נענע, חסה, גזר, פלפל, פלפל חריף, תפוח אדמה, בטטה, קולרבי, צנונית, ברוקולי, כרובית, חציל, קישוא, דלעת, תירס, אפונה, שעועית, פירות יבשים, תמרים, ענבים, תות, אפרסק, שזיף, אגס, מנגו, רימון
-- מוצרי חלב: חלב, ביצים, גבינה צהובה, גבינה לבנה, קוטג', שמנת, יוגורט, לבן (dairy), חמאה, שוקו, מעדן, גבינת שמנת, טופו, חלב סויה, חלב אורז, חלב שקדים
-- בשר ודגים: עוף, בקר, טחון, שניצל, נקניקיות, נקניק, סלמון, טונה, דגים, שוקיים, כנפיים, סטייק, קבב, המבורגר
-- מאפים: לחם, לחם לבן, לחם מלא, לחם שיפון, פיתות, לחמניות, חלה, באגט, טורטיה, עוגיות, עוגה, קרואסון
-- מזווה: אורז, פסטה, שמן זית, שמן קנולה, שמן, חומוס, טחינה, רסק עגבניות, קטשופ, חרדל, מלח, פלפל שחור, סוכר, קמח, קמח לבן, קמח מלא, תבלינים, שימורים, חמאת בוטנים, דבש, ריבה, קורנפלקס, גרנולה, אגוזים, סודה לשתיה
-- מוצרים קפואים: שלגונים, ארטיק, פיצה קפואה, ירקות קפואים, בורקס
-- משקאות: מים, סודה, מיץ, בירה, יין, קולה, ספרייט, 7אפ, אייס טי, קפה, תה
-- ניקוי ובית: סבון כלים, אבקת כביסה, מרכך, אקונומיקה, נייר טואלט, מגבונים, שקיות זבל, נייר סופג, ספוגים, סבון ידיים
-- טיפוח: שמפו, מרכך שיער, סבון גוף, דאודורנט, קרם לחות, קרם שיזוף, משחת שיניים, מברשת שיניים, תחבושות
-- אחר: סוללות, נרות, מצתים, מזון לחיות — use ONLY when no other category fits
+SHOPPING CATEGORIES (ALWAYS assign one). Categories MUST match this exact list — do NOT invent categories.
+- פירות וירקות: מלפפון, עגבניה, בצל, בצל לבן, בצל סגול, שום, לימון, תפוח, בננה, אבוקדו, פטרוזיליה, כוסברה, נענע, חסה, גזר, פלפל, פלפל חריף, תפוח אדמה, בטטה, קולרבי, צנונית, ברוקולי, כרובית, חציל, קישוא, דלעת, תירס, אפונה, שעועית, פירות יבשים, תמרים, ענבים, תות, אפרסק, שזיף, אגס, מנגו, רימון, אננס, אשכולית, קלמנטינה, נקטרינה, פטריות, כרוב, כרוב סגול, סלק, לפת, שומר, חסה רומית, רוקט, תרד, בצלצל ירוק, שמיר, בזיליקום, רוזמרין, ג'ינג'ר, כורכום, ליים
+- חלב וביצים: חלב, ביצים, גבינה צהובה, גבינה לבנה, קוטג', שמנת, שמנת מתוקה, שמנת חמוצה, יוגורט, לבן (dairy), חמאה, שוקו, מעדן, פודינג, גבינת שמנת, מסקרפונה, ריקוטה, מוצרלה, פרמז'ן, גבינת עיזים, בולגרית, לאבנה, טופו, חלב סויה, חלב אורז, חלב שקדים, חלב שיבולת שועל, חלב קוקוס, שמנת קוקוס
+- בשר ודגים: עוף, בקר, טחון, בשר טחון, שניצל, נקניקיות, נקניק, סלמון, טונה, דגים, שוקיים, כנפיים, סטייק, קבב, המבורגר, כבש, הודו, בייקון, פסטרמה, סושי, נתחי חזה, פילה, קציצות, אנטריקוט, צלעות
+- מאפים: לחם, לחם לבן, לחם מלא, לחם שיפון, לחם אחיד, פיתות, לחמניות, חלה, באגט, טורטיה, עוגיות, עוגה, קרואסון, מאפינס, לחמניות המבורגר, לחם פרוס, מלאווח, ג'חנון, לאפה, פוקצ'ה
+- מזווה: אורז, פסטה, שמן זית, שמן קנולה, שמן, חומוס, טחינה, רסק עגבניות, קטשופ, חרדל, מלח, פלפל שחור, סוכר, סוכר חום, סוכר דמררה, קמח, קמח לבן, קמח מלא, קמח לא תופח, תבלינים, שימורים, חמאת בוטנים, דבש, ריבה, קורנפלקס, גרנולה, אגוזים, פקאנים, שקדים, אגוזי מלך, חומץ, חומץ בלסמי, רוטב סויה, רוטב צ'ילי, פפריקה, כמון, כורכום, קינמון, זעתר, סומק, שומשום, אבקת אפיה, סודה לשתייה (baking soda), וניל, תמצית וניל, שוקולד מריר, שוקולד לבן, קקאו, קוסקוס, בורגול, קטניות, עדשים, חומוס יבש, פירורי לחם, סולת, ג'ריש, קוואקר, שיבולת שועל, מייפל, סילאן, עגבניות מיובשות, זיתים, חמוצים, מלפפון חמוץ, טונה בשימורים, תירס בשימורים, רוטב פסטו
+- מוצרים קפואים: שלגונים, ארטיק, גלידה, פיצה קפואה, ירקות קפואים, בורקס, מאפים קפואים, בצק עלים, שניצל קפוא
+- משקאות: מים, מים מינרליים, סודה (sparkling water), מיץ, מיץ תפוזים, בירה, יין, קולה, ספרייט, 7אפ, אייס טי, קפה, תה, קפסולות קפה, קפה טורקי, נס קפה, תה ירוק, לימונדה, משקה אנרגיה
+- ניקוי ובית: סבון כלים, אבקת כביסה, נוזל כביסה, מרכך כביסה, אקונומיקה, נייר טואלט, מגבונים, שקיות זבל, נייר סופג, ספוגים, סבון ידיים, מטליות, אלומיניום, ניילון נצמד, שקיות פריזר, מטהר אוויר, נרות, מצתים, סוללות, קיסמי אוזניים, קיסמי שיניים, קיסמים
+- מוצרים מחנות הטבע: קמח כוסמין, קמח שקדים, שמרי בירה, ספירולינה, אצות, טחינה גולמית, דבש גולמי, חלבון, גרעיני צ'יה, גרעיני פשתן, שמן קוקוס, גי, חמאת שקדים
+- טיפוח: שמפו, מרכך שיער, סבון גוף, דאודורנט, קרם לחות, קרם שיזוף, משחת שיניים, מברשת שיניים, תחבושות, סכיני גילוח, קרם ידיים, קרם פנים, תחליב גוף
+- אחר: מזון לכלבים, מזון לחתולים, חול לחתולים — use ONLY when no other category fits
+
+CATEGORY DISAMBIGUATION — common mistakes:
+- "סודה לשתייה" = baking soda → מזווה (NOT משקאות!)
+- "סודה" alone in a baking context (with קמח/סוכר/שוקולד) → מזווה
+- "סודה" alone in a drinks context (with בירה/מיץ/יין) → משקאות (sparkling water)
+- "קיסמי אוזניים" = cotton swabs → ניקוי ובית (NOT טיפוח)
+- "נרות", "מצתים", "סוללות" → ניקוי ובית (household supplies)
+- NOT valid categories: "בשר", "חמוצים", "מוצרי חלב", "ירקות" — use the exact names above
 
 CRITICAL — Hebrew "לבן" disambiguation:
-- "לבן" alone = dairy product (מוצרי חלב)
+- "לבן" alone = dairy product (חלב וביצים)
 - "בצל לבן" = white onion → פירות וירקות (NOT dairy!)
 - "קמח לבן" = white flour → מזווה (NOT dairy!)
 - "לחם לבן" = white bread → מאפים (NOT dairy!)
-- "גבינה לבנה" = white cheese → מוצרי חלב (dairy, correct)
+- "גבינה לבנה" = white cheese → חלב וביצים (dairy, correct)
 - Rule: when "לבן/לבנה" follows a non-dairy noun, it means "white" (color), NOT the dairy product.
 
 ${ctx.familyPatterns ? `FAMILY PATTERNS (learned for this household):\n${ctx.familyPatterns}\n` : ""}COMPOUND PRODUCT NAMES — keep as ONE item, do NOT split:
-- "חלב אורז" = rice milk (ONE item in מוצרי חלב)
-- "חלב שקדים" = almond milk (ONE item in מוצרי חלב)
-- "חלב סויה" = soy milk (ONE item in מוצרי חלב)
+- "חלב אורז" = rice milk (ONE item in חלב וביצים)
+- "חלב שקדים" = almond milk (ONE item in חלב וביצים)
+- "חלב סויה" = soy milk (ONE item in חלב וביצים)
 - "שמן זית" = olive oil (ONE item in מזווה)
 - "חמאת בוטנים" = peanut butter (ONE item in מזווה)
 - "נייר טואלט" = toilet paper (ONE item in ניקוי ובית)
@@ -645,7 +654,7 @@ Strip the preposition (מ/מה/ב) from the store name.
 
 Known Israeli stores and their category behavior:
 - 🛒 General supermarkets (use standard product categories, NOT store name): שופרסל, פוליצר, רמי לוי, יוחננוף, חצי חינם, קשת טעמים, טיב טעם, מגה, ויקטורי, אושר עד, שוק
-  → "משופרסל חלב ולחם" → category: מוצרי חלב / מאפים (standard categories, not "שופרסל")
+  → "משופרסל חלב ולחם" → category: חלב וביצים / מאפים (standard categories, not "שופרסל")
   → Supermarket names are just WHERE to buy, not a meaningful grouping
 - 💊 Pharmacy/drugstore (category: "סופר פארם" or store name): סופר פארם, בי, פארם גרופ, Super-Pharm
   → "מסופר פארם, שמפו וסבון" → category: "סופר פארם" for both
@@ -654,7 +663,7 @@ Known Israeli stores and their category behavior:
 - 🏪 Other specific stores (category: store name): מכולת, מחסני חשמל, איקאה, ACE, הום סנטר, etc.
   → "מאיקאה, מדף ומנורה" → category: "איקאה" for both
 
-Items without a store context: use standard categories (פירות וירקות, מוצרי חלב, etc.)
+Items without a store context: use standard categories (פירות וירקות, חלב וביצים, etc.)
 
 SHOPPING ITEM CLEANUP — strip these from item names:
 - Greetings: "היי שלי", "שלום", "בוקר טוב" → NOT items, ignore them
@@ -694,29 +703,38 @@ ISRAEL WEEK: Sunday (ראשון) is the FIRST work day, NOT weekend. Weekend in 
 
 EXAMPLES:
 [אמא]: "בוקר טוב!" → {"intent":"ignore","confidence":0.99,"entities":{"raw_text":"בוקר טוב!"}}
-[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"חלב"}}
-[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"מוצרי חלב"}],"raw_text":"חלב אורז"}}
+[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"חלב וביצים"}],"raw_text":"חלב"}}
+[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"חלב וביצים"}],"raw_text":"חלב אורז"}}
 [אבא]: "נייר טואלט וסבון כלים" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"נייר טואלט","category":"ניקוי ובית"},{"name":"סבון כלים","category":"ניקוי ובית"}],"raw_text":"נייר טואלט וסבון כלים"}}
-[אמא]: "תוסיפי חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב"}}
-[אבא]: "תכניסי לרשימה מלפפונים במלח גודל קטן" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"מלפפונים במלח גודל קטן","category":"חמוצים"}],"raw_text":"תכניסי לרשימה מלפפונים במלח גודל קטן"}}
-[אמא]: "תוסיפי חלב שיבולת שועל נטול סוכר" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב שיבולת שועל נטול סוכר","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב שיבולת שועל נטול סוכר"}}
+[אמא]: "תוסיפי חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"חלב וביצים"}],"raw_text":"תוסיפי חלב"}}
+[אבא]: "תכניסי לרשימה מלפפונים במלח גודל קטן" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"מלפפונים במלח גודל קטן","category":"מזווה"}],"raw_text":"תכניסי לרשימה מלפפונים במלח גודל קטן"}}
+[אמא]: "תוסיפי חלב שיבולת שועל נטול סוכר" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב שיבולת שועל נטול סוכר","category":"חלב וביצים"}],"raw_text":"תוסיפי חלב שיבולת שועל נטול סוכר"}}
 [אסנת]: "אננס" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"אננס","category":"פירות וירקות"}],"raw_text":"אננס"}}
+[אמא]: "קוטג תנובה" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"קוטג תנובה","category":"מוצרי חלב"}],"raw_text":"קוטג תנובה"}}
+[אבא]: "חלב תנובה 3%" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"חלב תנובה 3%","category":"מוצרי חלב"}],"raw_text":"חלב תנובה 3%"}}
 [אסנת]: "3 תפוזים" → {"intent":"add_shopping","confidence":0.92,"entities":{"items":[{"name":"תפוזים","qty":"3","category":"פירות וירקות"}],"raw_text":"3 תפוזים"}}
-[אסנת]: "שוקולד לעוגה" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"שוקולד לעוגה","category":"אפייה"}],"raw_text":"שוקולד לעוגה"}}
+[אסנת]: "שוקולד לעוגה" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"שוקולד לעוגה","category":"מזווה"}],"raw_text":"שוקולד לעוגה"}}
 [אסנת]: "עגבניה\nמלפפון\nכוסברה 3\nפטרוזיליה 4\nשמיר 2\nשרי\nסלרי 2\nסלק ירוק 2\nסלק אדום מוכן ורגיל\nגזר\nתפוחי אדמה 2 שקים\nבצל הרבה" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"עגבניה","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"כוסברה","qty":"3","category":"פירות וירקות"},{"name":"פטרוזיליה","qty":"4","category":"פירות וירקות"},{"name":"שמיר","qty":"2","category":"פירות וירקות"},{"name":"שרי","category":"פירות וירקות"},{"name":"סלרי","qty":"2","category":"פירות וירקות"},{"name":"סלק ירוק","qty":"2","category":"פירות וירקות"},{"name":"סלק אדום מוכן ורגיל","category":"פירות וירקות"},{"name":"גזר","category":"פירות וירקות"},{"name":"תפוחי אדמה 2 שקים","category":"פירות וירקות"},{"name":"בצל הרבה","category":"פירות וירקות"}],"raw_text":"עגבניה\nמלפפון\nכוסברה 3\nפטרוזיליה 4\nשמיר 2\nשרי\nסלרי 2\nסלק ירוק 2\nסלק אדום מוכן ורגיל\nגזר\nתפוחי אדמה 2 שקים\nבצל הרבה"}}
-[אסנת]: "זיתים מגולענים רק אם מחיר טוב\nקמח" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"זיתים מגולענים (רק אם מחיר טוב)","category":"שימורים ומזון יבש"},{"name":"קמח","category":"אפייה"}],"raw_text":"זיתים מגולענים רק אם מחיר טוב\nקמח"}}
+[אסנת]: "זיתים מגולענים רק אם מחיר טוב\nקמח" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"זיתים מגולענים (רק אם מחיר טוב)","category":"מזווה"},{"name":"קמח","category":"מזווה"}],"raw_text":"זיתים מגולענים רק אם מחיר טוב\nקמח"}}
 [אסנת]: "ג'ריש 2 ק\"ג\n2 סולת" → {"intent":"add_shopping","confidence":0.92,"entities":{"items":[{"name":"ג'ריש","qty":"2 ק\"ג","category":"מזווה"},{"name":"סולת","qty":"2","category":"מזווה"}],"raw_text":"ג'ריש 2 ק\"ג\n2 סולת"}}
-[אסנת]: "חומוס\nחבילה של נקניקיות\nמרגז 1" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חומוס","category":"שימורים ומזון יבש"},{"name":"נקניקיות","qty":"חבילה","category":"בשר"},{"name":"מרגז","qty":"1","category":"בשר"}],"raw_text":"חומוס\nחבילה של נקניקיות\nמרגז 1"}}
-[אסנת]: "קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"קורנפלור","category":"אפייה"},{"name":"פודינג וניל 1 ק\"ג אוסם (אם יש)","category":"אפייה"}],"raw_text":"קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם"}}
+[אסנת]: "חומוס\nחבילה של נקניקיות\nמרגז 1" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חומוס","category":"מזווה"},{"name":"נקניקיות","qty":"חבילה","category":"בשר ודגים"},{"name":"מרגז","qty":"1","category":"בשר ודגים"}],"raw_text":"חומוס\nחבילה של נקניקיות\nמרגז 1"}}
+[אסנת]: "קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"קורנפלור","category":"מזווה"},{"name":"פודינג וניל 1 ק\"ג אוסם (אם יש)","category":"חלב וביצים"}],"raw_text":"קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם"}}
 [אמא]: "נועה חוג 5" → {"intent":"add_task","confidence":0.90,"entities":{"person":"נועה","title":"חוג","time_raw":"5","raw_text":"נועה חוג 5"}}
 [אבא]: "לסדר את הארון בסלון" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לסדר את הארון בסלון","raw_text":"לסדר את הארון בסלון"}}
 [אמא]: "להחליף נורה בחדר של נועה" → {"intent":"add_task","confidence":0.88,"entities":{"title":"להחליף נורה בחדר של נועה","raw_text":"להחליף נורה בחדר של נועה"}}
 [אמא]: "ניקיון סלון\nקיפול כביסה\nהוצאת זבל" → {"intent":"add_task","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"ניקיון סלון","raw_text":"ניקיון סלון\nקיפול כביסה\nהוצאת זבל"}}
 [אבא]: "צריך לקנות מתנה ליום הולדת, לתאם עם המורה, ולשלם חשבון חשמל" → {"intent":"add_task","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"לקנות מתנה ליום הולדת","raw_text":"צריך לקנות מתנה ליום הולדת, לתאם עם המורה, ולשלם חשבון חשמל"}}
 [אבא]: "שטפתי את הכלים" → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"t1a2","raw_text":"שטפתי את הכלים"}}
+[אמא]: "שטפתי כלים" → {"intent":"complete_task","confidence":0.90,"entities":{"raw_text":"שטפתי כלים"}}
+[אבא]: "לפרוק מדיח" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לפרוק מדיח","raw_text":"לפרוק מדיח"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}
+[אבא]: "תור מי?" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"תור מי?"}}
 [נועה]: "אני אסדר את הארון" → {"intent":"claim_task","confidence":0.90,"entities":{"person":"נועה","task_id":"t5c6","raw_text":"אני אסדר את הארון"}}
+[אבא]: "אני אעשה את הכלים" → {"intent":"claim_task","confidence":0.88,"entities":{"raw_text":"אני אעשה את הכלים"}}
 [אמא]: "יום שלישי ארוחת ערב אצל סבתא" → {"intent":"add_event","confidence":0.92,"entities":{"title":"ארוחת ערב אצל סבתא","time_raw":"יום שלישי","raw_text":"יום שלישי ארוחת ערב אצל סבתא"}}
+[אבא]: "יש לנו ארוחת ערב מחר ב-19" → {"intent":"add_event","confidence":0.90,"entities":{"title":"ארוחת ערב","time_raw":"מחר ב-19","raw_text":"יש לנו ארוחת ערב מחר ב-19"}}
+[אמא]: "מחר בערב סבא וסבתא" → {"intent":"add_event","confidence":0.85,"entities":{"title":"סבא וסבתא","time_raw":"מחר בערב","raw_text":"מחר בערב סבא וסבתא"}}
+[אבא]: "יש לנו רופא ביום רביעי" → {"intent":"add_event","confidence":0.88,"entities":{"title":"רופא","time_raw":"יום רביעי","raw_text":"יש לנו רופא ביום רביעי"}}
 [אמא]: "רופא שיניים לנועה יום שלישי ב-15:00" → {"intent":"add_event","confidence":0.92,"entities":{"title":"רופא שיניים לנועה","time_raw":"יום שלישי ב-15:00","person":"נועה","raw_text":"רופא שיניים לנועה יום שלישי ב-15:00"}}
 [אבא]: "חוג גיטרה של יובל יום חמישי 17:00" → {"intent":"add_event","confidence":0.92,"entities":{"title":"חוג גיטרה","time_raw":"יום חמישי 17:00","person":"יובל","raw_text":"חוג גיטרה של יובל יום חמישי 17:00"}}
 [אמא]: "השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת אצל סבתא" → {"intent":"add_event","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"רופא שיניים","time_raw":"שלישי 15","raw_text":"השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת אצל סבתא"}}
@@ -738,8 +756,9 @@ EXAMPLES:
 [אמא]: "אוף" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"אוף"}}
 [אבא]: "לא" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"לא"}}
 [אסנת]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור ופודינג וניל לרשימה\"]\n🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️"}}
-[אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"מוצרי חלב"},{"name":"קפה טחון","category":"שתייה"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"לחם ומאפים"},{"name":"חומוס","category":"שימורים ומזון יבש"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
+[אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"חלב וביצים"},{"name":"קפה טחון","category":"משקאות"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"מאפים"},{"name":"חומוס","category":"מזווה"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
 [אמא]: "תזכירי לי ב-4 לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לאסוף את הילדים","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 לאסוף את הילדים"}}
+[אבא]: "תזכירי אותי לשלם ארנונה" → {"intent":"add_reminder","confidence":0.88,"addressed_to_bot":true,"entities":{"reminder_text":"לשלם ארנונה","raw_text":"תזכירי אותי לשלם ארנונה"}}
 [אבא]: "בעוד שעה תזכירי לקחת את הכביסה" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לקחת את הכביסה","time_raw":"בעוד שעה","raw_text":"בעוד שעה תזכירי לקחת את הכביסה"}}
 [אבא]: "תזכירי לאמא להביא חלב מחר ב-10" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"אמא — להביא חלב","time_raw":"מחר ב-10","raw_text":"תזכירי לאמא להביא חלב מחר ב-10"}}
 [אמא]: "תזכירי לי לפני השעה 16 לעשות קניות" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"לעשות קניות","time_raw":"לפני השעה 16","raw_text":"תזכירי לי לפני השעה 16 לעשות קניות"}}
@@ -748,6 +767,9 @@ EXAMPLES:
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
 [אבא]: "מי בתור למקלחת?" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"מי בתור למקלחת?"}}
+[אמא]: "מי בתור" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מי בתור"}}
+[אבא]: "מה נשאר ברשימה" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה נשאר ברשימה"}}
+[אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן"}}
 [אמא]: "תורמי לשטוף כלים היום?" → {"intent":"question","confidence":0.92,"entities":{"raw_text":"תורמי לשטוף כלים היום?"}}
 [אבא]: "של מי התור היום לכלים" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"של מי התור היום לכלים"}}
 [ילד]: "נכון שזה תורה ולא תורי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"נכון שזה תורה ולא תורי?"}}
@@ -1590,7 +1612,7 @@ Respond ONLY as this JSON — no other text:
   ]
 }
 
-${isHe ? 'Shopping categories (Hebrew): פירות וירקות (כל ירק ופרי), מוצרי חלב (כולל טופו, גבינות, יוגורט), בשר ודגים, מאפים (לחם, פיתות, עוגות), מזווה (אורז, פסטה, שמן, חומוס, טחינה, תבלינים), מוצרים קפואים, משקאות, ניקוי ובית (סבון, נייר טואלט, שקיות זבל), טיפוח (שמפו, קרם, משחת שיניים), אחר (רק אם שום קטגוריה אחרת לא מתאימה)' : 'Shopping categories: Produce, Dairy (incl. tofu, yogurt), Meat & Fish, Bakery, Pantry (rice, pasta, oil, spices), Frozen, Drinks, Household (cleaning, paper), Personal Care, Other (only if nothing else fits)'}
+${isHe ? 'Shopping categories (Hebrew): פירות וירקות (כל ירק ופרי), חלב וביצים (כולל טופו, גבינות, יוגורט, חלב צמחי), בשר ודגים, מאפים (לחם, פיתות, עוגות), מזווה (אורז, פסטה, שמן, חומוס, טחינה, תבלינים, אפייה, שימורים), מוצרים קפואים, משקאות, ניקוי ובית (סבון, נייר טואלט, שקיות זבל, סוללות, נרות), מוצרים מחנות הטבע, טיפוח (שמפו, קרם, משחת שיניים), אחר (רק אם שום קטגוריה אחרת לא מתאימה)' : 'Shopping categories: Produce, Dairy & Eggs (incl. tofu, yogurt, plant milk), Meat & Fish, Bakery, Pantry (rice, pasta, oil, spices, baking, canned), Frozen, Drinks, Household (cleaning, paper, batteries, candles), Health Food, Personal Care, Other (only if nothing else fits)'}
 
 Generate 4-char alphanumeric IDs for new items.`.trim();
 }
@@ -1674,7 +1696,7 @@ async function classifyMessages(
 // ACTION EXECUTOR (from action-executor.ts)
 // ============================================================================
 
-const uid4 = () => Math.random().toString(36).slice(2, 6);
+const uid4 = () => Math.random().toString(36).slice(2, 10);
 
 // ─── Normalization & Dedup Helpers ───
 
@@ -1896,6 +1918,7 @@ async function executeActions(
             .eq("got", false);
 
           for (const item of items || []) {
+            if (!item.name) continue; // Guard against Haiku emitting null/undefined name
             const parsed = extractProduct(item.name);
 
             const match = (existingItems || []).find((existing: any) => {
@@ -1920,7 +1943,12 @@ async function executeActions(
                   .update(updates)
                   .eq("id", match.id);
                 if (updateError) throw updateError;
-                summary.push(`Shopping-updated: "${match.name}" → qty ${updates.qty || existingQty}`);
+                if (updates.qty) {
+                  summary.push(`Shopping-updated: "${match.name}" → qty ${updates.qty}`);
+                } else {
+                  // Name-only refinement (e.g. "חלב" → "חלב רגיל") — treat as exists
+                  summary.push(`Shopping-exists: "${updates.name || match.name}"`);
+                }
               } else {
                 summary.push(`Shopping-exists: "${match.name}"`);
               }
@@ -2203,7 +2231,7 @@ async function executeActions(
 
           const { data: rotations } = await supabase
             .from("rotations")
-            .select("id, members, type")
+            .select("id, title, members, type")
             .eq("household_id", householdId)
             .eq("active", true);
 
@@ -2526,7 +2554,7 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/כמה.*עול|מחיר|עלות|תשלום|חינם|בחינם|פרימיום|premium|price|cost|free/i],
     topic: "pricing",
-    keyFacts: "30 actions/month free. Premium 9.90 ILS/month unlimited. No credit card needed for free tier. Try it first by adding to group.",
+    keyFacts: "40 actions/month free. Premium 9.90 ILS/month unlimited. No credit card needed for free tier. Try it first by adding to group.",
   },
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],
@@ -2628,7 +2656,7 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Never repeat same phrasing. Every reply sounds fresh and different.
 
 CAPABILITIES YOU CAN DEMONSTRATE:
-- Shopping lists: user says items → you categorize with emoji headers (🥛 מוצרי חלב, 🍞 לחם ומאפים, 🥬 ירקות ופירות, 🧴 ניקיון, 🥫 מזווה, 🍺 משקאות, 🥩 בשר ודגים, 🌶️ תבלינים וחריפים, 🥒 חמוצים, 🧊 קפואים, 🍿 חטיפים, 🛒 כללי). ONLY use these categories — never invent new ones. When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
+- Shopping lists: user says items → you categorize with emoji headers (🥬 פירות וירקות, 🥛 חלב וביצים, 🥩 בשר ודגים, 🍞 מאפים, 🥫 מזווה, 🧊 מוצרים קפואים, 🍺 משקאות, 🧴 ניקוי ובית, 🌿 מוצרים מחנות הטבע, 🧴 טיפוח, 🛒 אחר). ONLY use these categories — never invent new ones. When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
 - Tasks: user says chore → you say "רשמתי! ✅" with task text
 - Rotations/turns: after the FIRST task about chores, offer ONCE: "אם יש ילדים בבית — אני מעולה בתורות 😉". Do NOT offer rotations again if "rotation" already appears in TRIED. One offer is enough.
   - If user engages: ask what rotation + who participates → create it
@@ -2639,16 +2667,16 @@ CAPABILITIES YOU CAN DEMONSTRATE:
 FORMATTING (WhatsApp RTL):
 - NEVER use bullet characters (•, ☐, -, *) for lists — they stretch left in Hebrew RTL and look broken.
 - For shopping lists: emoji category header on its own line, then items below it one per line WITHOUT any prefix. Example:
-  🥛 מוצרי חלב
+  🥛 חלב וביצים
   חלב
   ביצים
-  🍞 לחם
+  🍞 מאפים
   לחם
 - For other lists: use emoji at start of each line, or plain text lines under a header. NO bullets.
 
 RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
-2. If user sends a question → answer warmly. If about pricing: free 30 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only your household sees it.
+2. If user sends a question → answer warmly. If about pricing: free 40 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only your household sees it.
 3. GROUP MENTIONS: The system handles group suggestions separately. Do NOT bring up groups yourself. Only mention groups if the user explicitly asks about groups, shared lists, or mentions roommates/partner/family. If the user mentions living with others, you may say something like "אפשר להוסיף אותי לקבוצה ואני אתאם לכולם" — but only as a natural response to THEIR mention, never proactively.
 4. Capability hints: mention ONE untried capability ONLY every 3rd message (check "Message #N" — hint only when N is divisible by 3). On other messages, just respond to what the user said. NO hints. This prevents feeling pushy. When you do hint, weave it naturally into the reply — never a separate "אגב, אני גם יודעת..." sentence on its own.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
@@ -3137,9 +3165,10 @@ async function execute1on1Actions(params: {
             if (action.new_date) {
               updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
             } else if (action.new_time && match.scheduled_for) {
-              // Time-only update: keep existing date, replace time
-              const existingDate = new Date(match.scheduled_for).toISOString().slice(0, 10);
-              updates.scheduled_for = `${existingDate}T${action.new_time}:00+03:00`;
+              // Time-only update: keep existing date (in Israel timezone), replace time
+              const d = new Date(match.scheduled_for);
+              const israelDate = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" }); // YYYY-MM-DD
+              updates.scheduled_for = `${israelDate}T${action.new_time}:00+03:00`;
             }
             const { error: updErr } = await supabase.from(cfg.table).update(updates).eq("id", match.id);
             if (updErr) console.error(`${logPrefix} ${action.type} error:`, updErr);
@@ -4002,7 +4031,6 @@ async function claimAndProcessBatch(
   }];
   const { summary } = await executeActions(householdId, actions);
   console.log(`[Batch] Executed:`, summary);
-  await incrementUsage(householdId);
 
   // Generate reply accounting for dedup outcomes
   const newItems = summary.filter((s) => s.startsWith("Shopping:"));
@@ -4026,6 +4054,11 @@ async function claimAndProcessBatch(
   if (existsItems.length > 0) {
     const names = existsItems.map((s) => s.match(/"(.+?)"/)?.[1]).filter(Boolean);
     replyParts.push(`${names.join(", ")} כבר ברשימה 👍`);
+  }
+
+  // Only charge usage when at least one new item was actually added
+  if (newItems.length > 0) {
+    await incrementUsage(householdId);
   }
 
   const batchReply = replyParts.join("\n") || "🛒 עדכנתי את הרשימה";
@@ -4528,7 +4561,7 @@ Deno.serve(async (req: Request) => {
       // If no recent action to undo, fall through to normal classification
     }
 
-    // 7. Check usage limits (free tier: 30 actions/month)
+    // 7. Check usage limits (free tier: 40 actions/month)
     const usage = await checkUsageLimit(householdId);
     const usageOk = usage.allowed;
 
@@ -4618,7 +4651,7 @@ Deno.serve(async (req: Request) => {
     // 8. Route based on intent + confidence
     const CONFIDENCE_HIGH = 0.70;
     const CONFIDENCE_LOW = 0.50;
-    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request" && classification.intent !== "correct_bot" && classification.intent !== "instruct_bot";
+    const isActionable = classification.intent !== "ignore" && classification.intent !== "info_request" && classification.intent !== "question" && classification.intent !== "recall_memory" && classification.intent !== "correct_bot" && classification.intent !== "instruct_bot";
 
     // 8a. Shopping batch: collect rapid-fire shopping items into one reply
     if (classification.intent === "add_shopping" && classification.confidence >= CONFIDENCE_HIGH) {
@@ -5189,18 +5222,23 @@ Deno.serve(async (req: Request) => {
     }
 
     if (classification.intent === "delete_memory") {
-      // Soft-delete the most recent active memory for this household
-      const { data: recent } = await supabase.from("family_memories")
-        .select("id")
+      // Soft-delete by content match (fuzzy), fallback to most recent
+      const { data: allMemories } = await supabase.from("family_memories")
+        .select("id, content, member_phone")
         .eq("household_id", householdId)
         .eq("active", true)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+        .order("created_at", { ascending: false });
 
-      if (recent) {
-        await supabase.from("family_memories").update({ active: false }).eq("id", recent.id);
-        console.log(`[Memory] Deleted memory ${recent.id}`);
+      if (allMemories && allMemories.length > 0) {
+        const rawText = (entities?.raw_text || message.text || "").toLowerCase();
+        // Try content-match: find a memory whose content appears in the user's request (or vice versa)
+        const match = allMemories.find((m: any) => {
+          const mc = (m.content || "").toLowerCase();
+          return rawText.includes(mc) || mc.includes(rawText.replace(/תשכחי|תמחקי|שלי|את |ש/g, "").trim());
+        });
+        const target = match || allMemories[0]; // fallback to most recent if no content match
+        await supabase.from("family_memories").update({ active: false }).eq("id", target.id);
+        console.log(`[Memory] Deleted memory ${target.id} (${match ? "content-matched" : "most-recent fallback"})`);
       }
     }
 
@@ -5216,7 +5254,9 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     console.error("[Webhook] Unhandled error:", err);
     await notifyAdmin("Unhandled webhook error", String(err));
-    return new Response("Internal error", { status: 500 });
+    // Always return 200 to prevent Whapi retry loops that cause duplicate processing.
+    // Errors are logged + admin-notified above; retries would just fail the same way.
+    return new Response("OK", { status: 200 });
   }
 });
 
@@ -5490,7 +5530,7 @@ async function checkUsageLimit(householdId: string): Promise<{ allowed: boolean;
     return { allowed: true, count: 0, isPaid: true };
   }
 
-  // Free tier: 30 actions per month
+  // Free tier: 40 actions per month
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
@@ -5503,11 +5543,11 @@ async function checkUsageLimit(householdId: string): Promise<{ allowed: boolean;
     .gte("created_at", startOfMonth.toISOString());
 
   const usageCount = count || 0;
-  return { allowed: usageCount < 30, count: usageCount, isPaid: false };
+  return { allowed: usageCount < 40, count: usageCount, isPaid: false };
 }
 
 async function maybeSendSoftWarning(groupId: string, householdId: string, usageCount: number, language?: string) {
-  if (usageCount < 25 || usageCount >= 30) return;
+  if (usageCount < 35 || usageCount >= 40) return;
 
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
@@ -6005,10 +6045,11 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       // This is better than new Date() which creates a past-looking event
       let scheduledFor = e.time_iso;
       if (!scheduledFor) {
-        const today = new Date();
-        today.setHours(18, 0, 0, 0); // Default to 6 PM
-        scheduledFor = today.toISOString();
-        console.log(`[Webhook] M13: No time_iso for add_event, defaulting to 18:00 today. time_raw: ${e.time_raw}`);
+        // Default to 18:00 Israel time (Edge Function runs in UTC)
+        const now = new Date();
+        const israelDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" }); // YYYY-MM-DD
+        scheduledFor = `${israelDateStr}T18:00:00+03:00`;
+        console.log(`[Webhook] M13: No time_iso for add_event, defaulting to 18:00 IST. time_raw: ${e.time_raw}`);
       }
       actions.push({
         type: "add_event",

@@ -172,7 +172,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 7. Check usage limits (free tier: 30 actions/month)
+    // 7. Check usage limits (free tier: 40 actions/month)
     const usage = await checkUsageLimit(householdId);
     const usageOk = usage.allowed;
 
@@ -419,7 +419,7 @@ async function checkUsageLimit(householdId: string): Promise<{ allowed: boolean;
 
   if (sub && sub.plan !== "free") return { allowed: true, count: 0, isPaid: true };
 
-  // Free tier: 30 actions per month
+  // Free tier: 40 actions per month
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
@@ -432,12 +432,12 @@ async function checkUsageLimit(householdId: string): Promise<{ allowed: boolean;
     .gte("created_at", startOfMonth.toISOString());
 
   const usageCount = count || 0;
-  return { allowed: usageCount < 30, count: usageCount, isPaid: false };
+  return { allowed: usageCount < 40, count: usageCount, isPaid: false };
 }
 
 async function maybeSendSoftWarning(groupId: string, householdId: string, usageCount: number, language?: string) {
   // Send soft warning at 25 actions (once per month)
-  if (usageCount < 25 || usageCount >= 30) return;
+  if (usageCount < 35 || usageCount >= 40) return;
 
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
@@ -792,7 +792,7 @@ function getOnboardingWaitingMessage(msgCount: number): string {
 const ONBOARDING_QA: Array<{ patterns: RegExp[]; answer: string }> = [
   {
     patterns: [/כמה.*עול|מחיר|עלות|תשלום|חינם|בחינם|פרימיום|premium|price|cost|free/i],
-    answer: "30 פעולות בחודש בחינם! אם תרצו להמשיך בלי הגבלה, Premium עולה 9.90 ₪ לחודש 😊\n\nאבל קודם כל, הוסיפו אותי לקבוצה ותראו איך זה עובד!",
+    answer: "40 פעולות בחודש בחינם! אם תרצו להמשיך בלי הגבלה, Premium עולה 9.90 ₪ לחודש 😊\n\nאבל קודם כל, הוסיפו אותי לקבוצה ותראו איך זה עובד!",
   },
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],
