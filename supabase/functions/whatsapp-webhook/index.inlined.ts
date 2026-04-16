@@ -2699,6 +2699,7 @@ async function executeActions(
 
 // Transliterate common English Israeli names to Hebrew
 const NAME_MAP: Record<string, string> = {
+  // --- Original entries ---
   yaron: "ירון", adi: "עדי", noa: "נועה", noah: "נועה", lior: "ליאור",
   roie: "רועי", roi: "רועי", dan: "דן", omer: "עומר", omar: "עומר",
   gal: "גל", ido: "עידו", nir: "ניר", tal: "טל", ori: "אורי",
@@ -2715,6 +2716,50 @@ const NAME_MAP: Record<string, string> = {
   inbar: "ענבר", hadar: "הדר", agam: "אגם", alma: "אלמה",
   itay: "איתי", itai: "איתי", ilan: "אילן", amir: "אמיר",
   tomer: "תומר", dor: "דור", guy: "גיא", matan: "מתן",
+  // --- Expanded: common male names ---
+  gilad: "גלעד", timor: "טימור", liran: "לירן", daniel: "דניאל",
+  ariel: "אריאל", david: "דוד", michael: "מיכאל", jonathan: "יונתן",
+  yonatan: "יונתן", adam: "אדם", ben: "בן", tom: "תום", noam: "נועם",
+  asaf: "אסף", boaz: "בועז", yossi: "יוסי", yosi: "יוסי",
+  avi: "אבי", moshe: "משה", mosh: "משה", yoav: "יואב",
+  nadav: "נדב", erez: "ארז", ziv: "זיו", peleg: "פלג",
+  kobi: "קובי", koby: "קובי", yaniv: "יניב", yotam: "יותם",
+  raz: "רז", sagee: "שגיא", sagi: "שגיא", lavi: "לביא",
+  shmueli: "שמואל", shmuel: "שמואל", yitzchak: "יצחק", itzhak: "יצחק",
+  isaac: "יצחק", haim: "חיים", chaim: "חיים", jacob: "יעקב",
+  yakov: "יעקב", yaakov: "יעקב", tzahi: "צחי", tsahi: "צחי",
+  eli: "אלי", elad: "אלעד", elhanan: "אלחנן",
+  amitay: "אמיתי", amitai: "אמיתי", nimrod: "נמרוד", shahaf: "שחף",
+  omri: "עומרי", eden: "עדן", nitzan: "ניצן", stav: "סתיו",
+  harel: "הראל", arik: "אריק", roni: "רוני", barak: "ברק",
+  gilboa: "גלבוע", dani: "דני", udi: "אודי", oded: "עודד",
+  ohad: "אוהד", meir: "מאיר", naor: "נאור", liam: "ליאם",
+  yam: "ים", or: "אור", elia: "אליה", neriya: "נריה",
+  // --- Expanded: common female names ---
+  dana: "דנה", hila: "הילה", natali: "נטלי", natalie: "נטלי",
+  nofar: "נופר", efrat: "אפרת", reut: "רעות",
+  orly: "אורלי", rachel: "רחל", sarah: "שרה", sara: "שרה",
+  dafna: "דפנה", daphna: "דפנה", keren: "קרן",
+  naama: "נעמה", naomi: "נעמי", rona: "רונה",
+  ronit: "רונית", sigal: "סיגל", hagit: "הגית", galit: "גלית",
+  dikla: "דיקלה", carmela: "כרמלה", carmel: "כרמל",
+  hagar: "הגר", tehila: "תהילה", teehila: "תהילה",
+  revital: "רביטל", rinat: "רינת", einat: "עינת",
+  avigail: "אביגיל", yarden: "ירדן", shelly: "שלי",
+  sheli: "שלי", tali: "טלי", merav: "מירב", miri: "מירי",
+  lilach: "לילך", lilac: "לילך", anat: "ענת", ayelet: "איילת",
+  sivan: "סיון", idit: "עידית", osnat: "אסנת",
+  liora: "ליאורה", ella: "אלה", nirit: "נירית", ortal: "אורטל",
+  limor: "לימור", hadas: "הדס", ilana: "אילנה",
+  oshrat: "אושרת", pnina: "פנינה", shoshana: "שושנה",
+  // --- Expanded: additional common names ---
+  bar: "בר", yonit: "יונית", avital: "אביטל", ruti: "רותי",
+  ruth: "רות", lea: "לאה", leah: "לאה",
+  ethan: "איתן", etan: "איתן", elai: "אלעי",
+  nave: "נווה", naveh: "נווה", noaa: "נועה",
+  yarin: "ירין", shaul: "שאול", reuven: "ראובן",
+  yehuda: "יהודה", shimon: "שמעון", gidi: "גידי",
+  uri: "אורי", avishai: "אבישי", eliya: "אליה",
 };
 
 // Names where English spelling maps to multiple Hebrew spellings — Sheli should ask
@@ -2741,9 +2786,14 @@ function hebrewizeName(raw: string): string {
   if (!first) return "";
   // Already Hebrew? Use as-is
   if (/[\u0590-\u05FF]/.test(first)) return first;
-  // Try lookup
+  // Try lookup (case-insensitive)
   const lower = first.toLowerCase();
   if (NAME_MAP[lower]) return NAME_MAP[lower];
+  // Strip trailing 's' (English possessive/plural) — "Gilads" → "Gilad", "Yarons" → "Yaron"
+  if (lower.length > 2 && lower.endsWith("s")) {
+    const stripped = lower.slice(0, -1);
+    if (NAME_MAP[stripped]) return NAME_MAP[stripped];
+  }
   // English name with no mapping — use as-is (better than nothing)
   return first;
 }
@@ -2910,19 +2960,17 @@ function isAmbiguousName(senderName?: string): string[] | null {
 
 function getOnboardingWelcome(senderName?: string): string {
   const name = hebrewizeName(senderName || "");
-  const gender = name ? detectGender(name) : null;
   const greeting = name
     ? `היי ${name}! 😊 אני שלי, נעים מאוד!`
-    : `היי! 👋 אני שלי, נעים מאוד!`;
-  const cta = gender === "male" ? "רוצה לנסות?" : gender === "female" ? "רוצה לנסות?" : "רוצים לנסות?";
+    : `היי! 😊 אני שלי, נעים מאוד!`;
   return `${greeting}
 
-אני יודעת לנהל רשימת קניות, לסדר מטלות ולהזכיר דברים חשובים.
+אני יודעת לנהל רשימת קניות, לרשום מטלות, לעקוב אחרי הוצאות ולהזכיר דברים חשובים.
 אפשר גם לשלוח לי הודעה קולית, אני מבינה! 🎤
 
-גרים עם עוד מישהו? אפשר גם להוסיף אותי לקבוצת הווטסאפ שלכם 🏠
+יש בבית ילדים? אפשר גם להוסיף אותי לקבוצת הווטסאפ שלכם ואני אעזור לעשות סדר במשפחה 🏠
 
-${cta} נסו לכתוב:
+רוצים לנסות? כתבו לי:
 "חלב, ביצים ולחם"
 או
 "תזכירי לי לקנות ברוקולי וגבינה" 🛒`;
@@ -3113,6 +3161,8 @@ RULES:
 6. NEVER ask personal questions (kids' names, ages, family structure). Learn ONLY from what they volunteer.
 7. If user corrects their name ("קוראים לי X", "שמי X") → apologize warmly ("סורי! 🙈"), use correct name going forward.
 8. If user says something you can't help with (weather, politics, trivia) → deflect playfully, pivot back: "אני יותר בקטע של קניות ומטלות 😄 אבל אם צריך משהו לבית — אני כאן!"
+    WEB APP: Sheli has a web app at sheli.ai where users can see all their lists, tasks, events, and expenses in one dashboard. When someone asks "איפה הרשימה?", "איך אני רואה?", "יש אפליקציה?", "where can I see my list?" → direct them to sheli.ai. Example: "הכל מרוכז פה:\n\nsheli.ai"
+    NEVER say "אין לי אתר" or "אין אפליקציה" — there IS one.
 9. Compound Hebrew product names (חלב אורז, שמן זית, נייר טואלט, חמאת בוטנים) are ONE item. Never split.
 10. First interaction with a new name: say "נעים להכיר" (NOT "נעים לפגוש אותך" — we haven't met in person). After a voice message specifically: "נעים לשמוע אותך" (nice to hear you — personal touch).
 11. Voice messages: user may send transcribed voice text — handle identically to typed text. If the user already SENT a voice message, do NOT suggest voice as a new feature — they already know.
