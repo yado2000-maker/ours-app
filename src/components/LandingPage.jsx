@@ -46,6 +46,12 @@ const CONTENT = {
       { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור איך קוראים לכלב שלכם, מתי היומולדת של אמא ושביום שלישי תמיד נגמר החלב" },
       { Icon: ExpenseFeatureIcon, title: "מעקב הוצאות", subtitle: "\u0022שילמתי 85 על פיצה\u0022 — ושלי רושמת. עוקבת אחרי הוצאות ומעדכנת אתכם כשתרצו" },
     ],
+    familyTitle: "שלי לכל המשפחה",
+    familyItems: [
+      { Icon: ShoppingFeatureIcon, title: "רשימת קניות משותפת", subtitle: "אבא מוסיף חלב מהעבודה, אמא מוסיפה ביצים מהדרך. הכל ברשימה אחת" },
+      { Icon: ChoresFeatureIcon, title: "מטלות בית וילדים", subtitle: "מי מוריד זבל? מי אוסף מהחוג? שלי מחלקת ועוקבת" },
+      { Icon: FamilyGroupIcon, title: "הוסיפו שלי לקבוצה", subtitle: "הוסיפו את שלי לקבוצת ווטסאפ של המשפחה — וכולם מסודרים" },
+    ],
     stepsTitle: "איך זה עובד?",
     steps: [
       { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "טקסט או הודעה קולית, שלי מבינה הכל" },
@@ -92,6 +98,12 @@ const CONTENT = {
       { Icon: ChoresFeatureIcon, title: "Tasks & chores", subtitle: "Manage your tasks and your house chores. Sheli remembers and updates" },
       { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember your dog's name, when mom's birthday is, and that you always run out of milk on Tuesdays" },
       { Icon: ExpenseFeatureIcon, title: "Expense tracking", subtitle: "\u0022I paid 85 for pizza\u0022 — and Sheli logs it. Tracks expenses and updates you when you want" },
+    ],
+    familyTitle: "Sheli for the whole family",
+    familyItems: [
+      { Icon: ShoppingFeatureIcon, title: "Shared shopping list", subtitle: "Dad adds milk from work, mom adds eggs on the go. One list for everyone" },
+      { Icon: ChoresFeatureIcon, title: "House chores & kids", subtitle: "Who takes out the trash? Who picks up from practice? Sheli assigns and tracks" },
+      { Icon: FamilyGroupIcon, title: "Add Sheli to the group", subtitle: "Add Sheli to your family WhatsApp group — everyone stays organized" },
     ],
     stepsTitle: "How does it work?",
     steps: [
