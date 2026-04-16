@@ -35,16 +35,16 @@ const CONTENT = {
     ],
     cta: "שלחו הודעה לשלי",
     freeBadge: "חינם לגמרי · עד 40 פעולות בחודש · בלי כרטיס אשראי",
-    bridge: "רק לעצמך או לכל המשפחה ביחד: שלי עושה לכם סדר בחיים",
+    bridge: ["רק לעצמך או לכל המשפחה ביחד", "שלי עושה לכם סדר בחיים"],
     signin: "יש לי כבר חשבון \u2190 כניסה",
     featuresTitle: "מה שלי יודעת לעשות?",
     features: [
       { Icon: ShoppingFeatureIcon, title: "רשימת קניות", subtitle: "כתבו \u0022חלב\u0022 לשלי והיא מוסיפה לרשימה. בלי אפליקציה, בלי הקלדה" },
       { Icon: ReminderFeatureIcon, title: "תזכורות חכמות", subtitle: "\u0022שלי, תזכירי לי...\u0022 והיא מזכירה בזמן. גם דברים שחוזרים כל שבוע" },
       { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
-      { Icon: ChoresFeatureIcon, title: "משימות ומטלות", subtitle: "נהלו את המשימות ואת מטלות הבית. שלי זוכרת ומעדכנת" },
-      { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור איך קוראים לכלב שלכם, מתי היומולדת של אמא ושביום שלישי תמיד נגמר החלב" },
+      { Icon: ChoresFeatureIcon, title: "ניהול משימות ומטלות - גם לילדים!", subtitle: "תור מי לפנות מדיח? ומי אוסף מהחוג? מושלם להורים עסוקים" },
       { Icon: ExpenseFeatureIcon, title: "מעקב הוצאות", subtitle: "\u0022שילמתי 85 על פיצה\u0022 — ושלי רושמת. עוקבת אחרי הוצאות ומעדכנת אתכם כשתרצו" },
+      { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור איך קוראים לכלב שלכם, מתי היומולדת של אמא ושביום שלישי תמיד נגמר החלב" },
     ],
     familyTitle: "שלי לכל המשפחה",
     familyItems: [
@@ -88,16 +88,16 @@ const CONTENT = {
     ],
     cta: "Message Sheli",
     freeBadge: "Completely free \u00B7 Up to 40 actions/month \u00B7 No credit card",
-    bridge: "Just for you or the whole family: Sheli puts your life in order",
+    bridge: ["Just for you or the whole family", "Sheli puts your life in order"],
     signin: "I have an account \u2192 Sign in",
     featuresTitle: "What can Sheli do?",
     features: [
       { Icon: ShoppingFeatureIcon, title: "Shopping lists", subtitle: "Text \u0022milk\u0022 to Sheli and it's on the list. No app needed." },
       { Icon: ReminderFeatureIcon, title: "Smart reminders", subtitle: "\u0022Sheli, remind me...\u0022 and she'll remind you on time. Even recurring ones." },
       { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
-      { Icon: ChoresFeatureIcon, title: "Tasks & chores", subtitle: "Manage your tasks and your house chores. Sheli remembers and updates" },
-      { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember your dog's name, when mom's birthday is, and that you always run out of milk on Tuesdays" },
+      { Icon: ChoresFeatureIcon, title: "Tasks & chores \u2014 for kids too!", subtitle: "Whose turn to empty the dishwasher? Who picks up from practice? Perfect for busy parents" },
       { Icon: ExpenseFeatureIcon, title: "Expense tracking", subtitle: "\u0022I paid 85 for pizza\u0022 — and Sheli logs it. Tracks expenses and updates you when you want" },
+      { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember your dog's name, when mom's birthday is, and that you always run out of milk on Tuesdays" },
     ],
     familyTitle: "Sheli for the whole family",
     familyItems: [
@@ -155,7 +155,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <section className="landing-hero">
         <h1 className="landing-wordmark">sheli</h1>
         <p className="landing-tagline">{c.tagline}</p>
-        <p className="landing-bridge">{c.bridge}</p>
+        <p className="landing-bridge">{c.bridge[0]}<br />{c.bridge[1]}</p>
 
         {/* WhatsApp Mock — 1:1 personal chat */}
         <div className="wa-mock">
