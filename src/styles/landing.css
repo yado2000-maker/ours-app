@@ -377,7 +377,7 @@
 /* ─── Features ─── */
 
 .landing-features {
-  padding: 48px 20px;
+  padding: 32px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -439,7 +439,7 @@
 /* ─── Sheli for the Family ─── */
 
 .landing-family {
-  padding: 48px 20px;
+  padding: 32px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -488,7 +488,7 @@
 /* ─── How It Works ─── */
 
 .landing-steps {
-  padding: 48px 20px;
+  padding: 32px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -539,7 +539,7 @@
 /* ─── FAQ ─── */
 
 .landing-faq {
-  padding: 48px 20px;
+  padding: 32px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
