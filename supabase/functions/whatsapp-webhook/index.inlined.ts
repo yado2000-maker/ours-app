@@ -275,20 +275,20 @@ class WhapiProvider implements WhatsAppProvider {
       const mediaId = audioData?.id as string | undefined;
       const mediaDuration = (audioData?.seconds ?? audioData?.duration) as number | undefined;
 
-      // Extract reaction info (for reaction-type messages)
-      const reactionData = msg.reaction as Record<string, unknown> | undefined;
-      const reactionEmoji = (reactionData?.emoji as string | undefined) || undefined;
-      // Whapi reaction target: try msg_id, then message_id — format is underdocumented
-      const reactionTargetId = (reactionData?.msg_id as string | undefined)
-        || (reactionData?.message_id as string | undefined)
-        || undefined;
+      // Extract reaction info — Whapi sends reactions as type:"action" with action.type:"reaction"
+      // NOT as type:"reaction" with msg.reaction. See: support.whapi.cloud/help-desk/receiving/webhooks/incoming-webhooks-format
+      const actionData = msg.action as Record<string, unknown> | undefined;
+      const isReactionAction = actionData?.type === "reaction";
+      const reactionEmoji = isReactionAction ? (actionData?.emoji as string | undefined) || undefined : undefined;
+      const reactionTargetId = isReactionAction ? (actionData?.target as string | undefined) || undefined : undefined;
 
       // DEBUG: Log raw reaction payload on first encounters to confirm field names
-      if (type === "reaction") {
-        console.log(`[WhapiProvider] Reaction payload:`, JSON.stringify(msg.reaction || msg));
+      if (type === "action" || type === "reaction") {
+        console.log(`[WhapiProvider] Action/Reaction payload:`, JSON.stringify({ type, action: msg.action, reaction: msg.reaction }));
       }
 
       // Map Whapi message types to our types
+      // Whapi sends reactions as type:"action" with action.type:"reaction"
       const typeMap: Record<string, IncomingMessage["type"]> = {
         text: "text",
         image: "image",
@@ -300,6 +300,7 @@ class WhapiProvider implements WhatsAppProvider {
         document: "document",
         reaction: "reaction",
       };
+      const resolvedType: IncomingMessage["type"] = (type === "action" && isReactionAction) ? "reaction" : (typeMap[type] || "other");
 
       return {
         messageId: id,
@@ -307,7 +308,7 @@ class WhapiProvider implements WhatsAppProvider {
         senderPhone: from.replace("@s.whatsapp.net", ""),
         senderName: fromName,
         text: text,
-        type: typeMap[type] || "other",
+        type: resolvedType,
         timestamp,
         chatType,
         mediaUrl,
