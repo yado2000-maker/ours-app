@@ -253,36 +253,95 @@ git commit -m "feat(expenses): add types and parseAmount helper to webhook"
 In the INTENTS section (after the `add_reminder` definition around line 567), add:
 
 ```
-- add_expense: Logging a household payment. Hebrew triggers: "שילמתי", "שילמנו", "שולם", "[name] שילם/שילמה". Must include an amount (number or Hebrew word). Category inferred from description. Attribution: speaker (שילמתי), named (אבא שילם), joint (שילמנו/ביחד), household (שולם, passive voice). Multi-currency: default ILS. Explicit: "יורו"/"euro"/"€" → EUR, "דולר"/"$" → USD, "פאונד"/"£" → GBP.
-  - NOT expense: "שילמתי עליו" (treating someone socially, not household expense). "המשכנתא עולה X" (price statement, not payment). "לשלם חשמל" (TODO/task, not completed payment). Shopping with price ("חלב ב-12 שקל") = add_shopping, not expense.
-  - NOT task: "שילמתי X" is PAST TENSE (already paid). "לשלם X" is FUTURE (task). Never classify a payment as add_task.
-- query_expense: Asking about household spending. Triggers: "כמה שילמנו", "תסכמי הוצאות", "סיכום הוצאות". Has a period (this_month/last_month) and optional category.
+- add_expense: Logging a household payment/cost that ALREADY HAPPENED. Hebrew triggers include many forms:
+  PAYMENT VERBS (past tense): "שילמתי/שילמנו/שולם/שילם/שילמה" (paid), "העברתי" (transferred), "הוצאתי/הוציא" (spent), "כיסיתי" (covered), "סגרתי" (closed/settled).
+  COST VERBS (past tense): "עלה/עלתה לי/לנו X" (cost me/us X — PAST), "יצא לנו X" (came out to X), "ירד לי X" (was charged X).
+  SLANG: "שרפתי X על Y" (burned X on Y), "הלכו X על Y" (X went on Y), "טסו X שקל" (X flew away), "נפל חשבון של X" (bill of X dropped), "חטפתי חשבון של X" (got hit with bill).
+  FORMAL: "ביצעתי תשלום", "העברתי תשלום" (made/transferred payment).
+  BIG PURCHASES: "קניתי [non-grocery] ב-X" (bought [appliance/furniture/flights] for X).
+  Must include an amount (number or Hebrew word). Category inferred from description.
+  Attribution: speaker (שילמתי/עלה לי), named (אבא שילם), joint (שילמנו/עלה לנו/יצא לנו), household (שולם/נפל חשבון, passive voice).
+  Multi-currency: default ILS. Explicit: "יורו"/"euro"/"€" → EUR, "דולר"/"$" → USD, "פאונד"/"£" → GBP.
+  KEY TENSE RULE: PAST = expense (שילמתי, עלה). PRESENT/general = ignore (עולה, המחיר). FUTURE = task (לשלם, צריך לשלם).
+  - NOT expense: "שילמתי עליו" (treating someone socially). "המשכנתא עולה X" (present tense = price statement). "לשלם חשמל" (future = task). "חלב ב-12 שקל" (grocery = add_shopping). "הגיע חשבון של X" (bill arrived, not yet paid = task or ignore).
+- query_expense: Asking about household spending. Triggers: "כמה שילמנו", "כמה הוצאנו", "כמה עלה לנו", "תסכמי הוצאות", "סיכום הוצאות", "מה ההוצאות". Has a period (this_month/last_month) and optional category.
 ```
 
-**Step 2: Add examples in the EXAMPLES section**
+**Step 2: Add POSITIVE examples (comprehensive Hebrew expense patterns)**
 
 Find the examples section (around line 720+) and add:
 
 ```
+// ── EXPENSE: Direct payment verbs ──
 [User]: "שילמתי 1300 חשמל" → {"intent":"add_expense","confidence":0.95,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"שילמתי 1300 חשמל"}}
 [User]: "אבא שילם 500 סופר" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"סופר","expense_category":"מזון","expense_attribution":"named","expense_paid_by_name":"אבא","raw_text":"אבא שילם 500 סופר"}}
 [User]: "שילמנו 2400 ארנונה" → {"intent":"add_expense","confidence":0.94,"entities":{"amount_text":"2400","amount_minor":240000,"expense_currency":"ILS","expense_description":"ארנונה","expense_category":"ארנונה","expense_attribution":"joint","raw_text":"שילמנו 2400 ארנונה"}}
 [User]: "שולם 180 ביטוח" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"180","amount_minor":18000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"household","raw_text":"שולם 180 ביטוח"}}
+[User]: "שילמתי לו 500 לעבודה שעשה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"עבודה","expense_attribution":"speaker","raw_text":"שילמתי לו 500 לעבודה שעשה"}}
+
+// ── EXPENSE: "Cost me/us" (past tense עלה/עלתה) ──
+[User]: "החשמל עלה 1300" → {"intent":"add_expense","confidence":0.92,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"household","raw_text":"החשמל עלה 1300"}}
+[User]: "עלה לי 300 השמאי" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"300","amount_minor":30000,"expense_currency":"ILS","expense_description":"שמאי","expense_category":"שמאי","expense_attribution":"speaker","raw_text":"עלה לי 300 השמאי"}}
+[User]: "הגן עלה לנו 4200 החודש" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"4200","amount_minor":420000,"expense_currency":"ILS","expense_description":"גן","expense_category":"גן","expense_attribution":"joint","raw_text":"הגן עלה לנו 4200 החודש"}}
+
+// ── EXPENSE: Transfer/bank language ──
+[User]: "העברתי 5000 שכירות" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"5000","amount_minor":500000,"expense_currency":"ILS","expense_description":"שכירות","expense_category":"שכירות","expense_attribution":"speaker","raw_text":"העברתי 5000 שכירות"}}
+[User]: "ירד לי מהחשבון 1200 ביטוח" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"1200","amount_minor":120000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"speaker","raw_text":"ירד לי מהחשבון 1200 ביטוח"}}
+[User]: "חייבו אותי 450 על הביטוח" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"450","amount_minor":45000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"speaker","raw_text":"חייבו אותי 450 על הביטוח"}}
+
+// ── EXPENSE: Slang/colloquial (common in Israeli WhatsApp) ──
+[User]: "שרפתי 500 על דלק" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"דלק","expense_category":"דלק","expense_attribution":"speaker","raw_text":"שרפתי 500 על דלק"}}
+[User]: "יצא לנו 600 הקניות" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"600","amount_minor":60000,"expense_currency":"ILS","expense_description":"קניות","expense_category":"סופר","expense_attribution":"joint","raw_text":"יצא לנו 600 הקניות"}}
+[User]: "הלכו 400 על חשמל" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"400","amount_minor":40000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"household","raw_text":"הלכו 400 על חשמל"}}
+[User]: "הוצאתי 200 על פיצה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"פיצה","expense_category":"אוכל","expense_attribution":"speaker","raw_text":"הוצאתי 200 על פיצה"}}
+[User]: "נפל חשבון של 1300 חשמל" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"household","raw_text":"נפל חשבון של 1300 חשמל"}}
+
+// ── EXPENSE: Bill settled / big purchases / donations ──
+[User]: "סגרתי את החשמל, 1300" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"סגרתי את החשמל, 1300"}}
+[User]: "קניתי מזגן ב-3000" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"3000","amount_minor":300000,"expense_currency":"ILS","expense_description":"מזגן","expense_category":"בית","expense_attribution":"speaker","raw_text":"קניתי מזגן ב-3000"}}
+[User]: "תרמתי 200 לבית הספר" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"תרומה לבית הספר","expense_category":"חינוך","expense_attribution":"speaker","raw_text":"תרמתי 200 לבית הספר"}}
+
+// ── EXPENSE: Multi-currency ──
 [User]: "שילמתי 150 יורו דלק" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"150","amount_minor":15000,"expense_currency":"EUR","expense_description":"דלק","expense_category":"דלק","expense_attribution":"speaker","raw_text":"שילמתי 150 יורו דלק"}}
+[User]: "עלה לנו 80 דולר הארוחה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"80","amount_minor":8000,"expense_currency":"USD","expense_description":"ארוחה","expense_category":"אוכל","expense_attribution":"joint","raw_text":"עלה לנו 80 דולר הארוחה"}}
+
+// ── EXPENSE QUERIES ──
 [User]: "כמה שילמנו החודש?" → {"intent":"query_expense","confidence":0.92,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"this_month","raw_text":"כמה שילמנו החודש?"}}
 [User]: "כמה שילמנו חשמל החודש?" → {"intent":"query_expense","confidence":0.93,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"חשמל","expense_query_period":"this_month","raw_text":"כמה שילמנו חשמל החודש?"}}
 [User]: "תסכמי לנו את ההוצאות בחודש שעבר" → {"intent":"query_expense","confidence":0.94,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"last_month","raw_text":"תסכמי לנו את ההוצאות בחודש שעבר"}}
+[User]: "כמה הוצאנו על אוכל החודש?" → {"intent":"query_expense","confidence":0.91,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"אוכל","expense_query_period":"this_month","raw_text":"כמה הוצאנו על אוכל החודש?"}}
 ```
 
-**Step 3: Add negative examples**
+**Step 3: Add NEGATIVE examples (critical disambiguation)**
 
 In the negative examples / disambiguation section:
 
 ```
-[User]: "שילמתי עליו 50 בבית קפה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"שילמתי עליו 50 בבית קפה"}}  // social treating, not household expense
-[User]: "המשכנתא עולה 4000" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"המשכנתא עולה 4000"}}  // price statement, not payment event
-[User]: "לשלם חשמל" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לשלם חשמל","raw_text":"לשלם חשמל"}}  // future action = task, not expense
-[User]: "שילמתי לו 500 לעבודה שעשה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"עבודה","expense_attribution":"speaker","raw_text":"שילמתי לו 500 לעבודה שעשה"}}  // "paid him" = valid expense
+// ── NOT expense: social treating (עליו = for him, social) ──
+[User]: "שילמתי עליו 50 בבית קפה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"שילמתי עליו 50 בבית קפה"}}
+[User]: "כיבדתי אותם" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"כיבדתי אותם"}}
+
+// ── NOT expense: price statement (present tense עולה = statement) ──
+[User]: "המשכנתא עולה 4000 בחודש" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"המשכנתא עולה 4000 בחודש"}}
+[User]: "זה עולה 50 שקל" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"זה עולה 50 שקל"}}
+[User]: "כמה יקר פה" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"כמה יקר פה"}}
+
+// ── NOT expense: future payment = task ──
+[User]: "לשלם חשמל" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לשלם חשמל","raw_text":"לשלם חשמל"}}
+[User]: "צריך לשלם ארנונה" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לשלם ארנונה","raw_text":"צריך לשלם ארנונה"}}
+[User]: "צריך להעביר לבעל הבית" → {"intent":"add_task","confidence":0.88,"entities":{"title":"להעביר לבעל הבית","raw_text":"צריך להעביר לבעל הבית"}}
+
+// ── NOT expense: bill arrived (not paid yet) ──
+[User]: "הגיע חשבון חשמל של 1300" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"הגיע חשבון חשמל של 1300"}}
+[User]: "קיבלנו חשבון מים" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"קיבלנו חשבון מים"}}
+
+// ── NOT expense: grocery purchase = shopping ──
+[User]: "קניתי חלב ב-12" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"חלב","qty":"1"}],"raw_text":"קניתי חלב ב-12"}}
+
+// ── TENSE DISAMBIGUATION (the hardest one) ──
+// PAST "עלה" = expense. PRESENT "עולה" = statement.
+[User]: "עלה 1300 חשמל" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_attribution":"household","raw_text":"עלה 1300 חשמל"}}
+[User]: "עולה 1300 חשמל" → {"intent":"ignore","confidence":0.82,"entities":{"raw_text":"עולה 1300 חשמל"}}
 ```
 
 **Step 4: Run esbuild parse check**

@@ -244,36 +244,90 @@ Stored in `household_patterns` as `expense_1on1_visibility: 'household' | 'priva
 - Last-payment lookup ("מי שילם את החשמל הפעם?")
 - Proactive monthly summary (Sheli sends unprompted roundup)
 
-### Haiku prompt examples
+### Haiku prompt examples — comprehensive Hebrew expense expressions
+
+Hebrew speakers use many forms to report expenses. The classifier must recognize ALL of these.
 
 ```
-// Positive — 4 attribution modes
-"שילמתי 1300 חשמל" -> add_expense, attribution=speaker, description="חשמל", amount=1300, currency=ILS
-"אבא שילם 500 סופר" -> add_expense, attribution=named, paid_by_name="אבא", amount=500
-"שילמנו 2400 ארנונה" -> add_expense, attribution=joint, amount=2400
-"שולם 180 ביטוח" -> add_expense, attribution=household, amount=180
-"יעל שילמה 4200 גן" -> add_expense, attribution=named, paid_by_name="יעל", amount=4200
+// ── Direct payment verbs (most common) ──
+"שילמתי 1300 חשמל" -> add_expense, attribution=speaker
+"אבא שילם 500 סופר" -> add_expense, attribution=named, paid_by="אבא"
+"שילמנו 2400 ארנונה" -> add_expense, attribution=joint
+"שולם 180 ביטוח" -> add_expense, attribution=household
+"יעל שילמה 4200 גן" -> add_expense, attribution=named, paid_by="יעל"
+"שילמתי לו 500 לעבודה שעשה" -> add_expense (paid HIM = valid expense)
 
-// Multi-currency
-"שילמתי 150 יורו דלק" -> add_expense, currency=EUR, amount=150
-"paid $50 for gas" -> add_expense, currency=USD, amount=50
+// ── "Cost me/us" — past tense עלה/עלתה (PAST = expense) ──
+"החשמל עלה 1300" -> add_expense, attribution=household
+"עלה לי 300 השמאי" -> add_expense, attribution=speaker
+"הגן עלה לנו 4200 החודש" -> add_expense, attribution=joint
+"עלה לנו 800 הלילה במסעדה" -> add_expense, attribution=joint
 
-// Queries
-"כמה שילמנו החודש?" -> query_expense, query_type=summary, period=this_month
-"תסכמי לנו את ההוצאות בחודש שעבר" -> query_expense, query_type=summary, period=last_month
-"כמה שילמנו חשמל החודש?" -> query_expense, query_type=category_in_period, category=חשמל
+// ── Transfer / bank language ──
+"העברתי 5000 שכירות" -> add_expense, attribution=speaker
+"ירד לי מהחשבון 1200 ביטוח" -> add_expense, attribution=speaker
+"חייבו אותי 450 על הביטוח" -> add_expense, attribution=speaker
+"משכו לי 900 מהאשראי" -> add_expense, attribution=speaker
 
-// Negative examples (NOT expenses)
-"שילמתי עליו 50 בבית קפה" -> ignore (social/treating, not household expense)
-"תקני לי חלב ב-12 שקל" -> add_shopping (shopping context, not expense)
-"המשכנתא עולה 4000 בחודש" -> ignore (price statement, not payment event)
-"שילמתי בפה" -> ignore (slang, no money)
+// ── Slang / colloquial (common Israeli WhatsApp) ──
+"שרפתי 500 על דלק" -> add_expense, attribution=speaker (burned = spent)
+"יצא לנו 600 הקניות" -> add_expense, attribution=joint (came out to)
+"הלכו 400 על חשמל" -> add_expense, attribution=household (went on)
+"הוצאתי 200 על פיצה" -> add_expense, attribution=speaker (spent)
+"נפל חשבון של 1300 חשמל" -> add_expense, attribution=household (bill dropped)
+"טסו 250 שקל על הדלק" -> add_expense, attribution=household (flew away on)
+"חטפתי חשבון של 800" -> add_expense, attribution=speaker (got hit with)
+
+// ── Bill settled / big purchases / donations ──
+"סגרתי את החשמל, 1300" -> add_expense (closed = paid)
+"כיסיתי את הגז, 340" -> add_expense (covered)
+"קניתי מזגן ב-3000" -> add_expense (big purchase, not grocery)
+"תרמתי 200 לבית הספר" -> add_expense (donated)
+"השארתי טיפ של 50" -> add_expense (left a tip)
+"נתתי 500 מתנה לחתונה" -> add_expense (gave wedding gift)
+
+// ── Multi-currency ──
+"שילמתי 150 יורו דלק" -> add_expense, currency=EUR
+"עלה לנו 80 דולר הארוחה" -> add_expense, currency=USD
+
+// ── Queries ──
+"כמה שילמנו החודש?" -> query_expense, type=summary, period=this_month
+"תסכמי לנו את ההוצאות בחודש שעבר" -> query_expense, type=summary, period=last_month
+"כמה שילמנו חשמל החודש?" -> query_expense, type=category_in_period, category=חשמל
+"כמה הוצאנו על אוכל החודש?" -> query_expense, type=category_in_period, category=אוכל
+
+// ── NEGATIVE: social treating (עליו = NOT expense) ──
+"שילמתי עליו 50 בבית קפה" -> ignore (social treating)
+"כיבדתי אותם" -> ignore (treated them)
+
+// ── NEGATIVE: price statement (present tense עולה = NOT expense) ──
+"המשכנתא עולה 4000 בחודש" -> ignore (general statement)
+"זה עולה 50 שקל" -> ignore (price check)
+"כמה יקר פה" -> ignore (complaint)
+
+// ── NEGATIVE: future = task, not expense ──
+"לשלם חשמל" -> add_task (future action)
+"צריך לשלם ארנונה" -> add_task
+"צריך להעביר לבעל הבית" -> add_task
+
+// ── NEGATIVE: bill arrived (not yet paid) ──
+"הגיע חשבון חשמל של 1300" -> ignore (bill arrived, not paid)
+"קיבלנו חשבון מים" -> ignore (received bill)
+
+// ── NEGATIVE: grocery = shopping ──
+"קניתי חלב ב-12" -> add_shopping (grocery item)
+"תקני לי חלב ב-12 שקל" -> add_shopping
+
+// ── TENSE DISAMBIGUATION (the hardest one) ──
+"עלה 1300 חשמל" -> add_expense (PAST = already paid)
+"עולה 1300 חשמל" -> ignore (PRESENT = general statement)
 ```
 
 ### Hebrew-specific guards
 
-- "שילמתי לו X" (paid him) = expense. "שילמתי עליו X" (paid for him) = ignore (social treating). Neither is a task.
-- Amount without payment verb is not expense: "העלות 500" = ignore.
+- **"לו" vs "עליו":** "שילמתי לו" (to him) = expense. "שילמתי עליו" (for/over him) = ignore (social). Neither is a task.
+- **Tense is the signal:** PAST (שילמתי, עלה, יצא, הלכו) = expense. PRESENT (עולה, המחיר) = ignore. FUTURE (לשלם, צריך ל) = task.
+- **"קניתי X ב-Y":** If X is grocery → add_shopping. If X is appliance/furniture/service → add_expense.
 - Amount bounds: 0.50 - 1,000,000 in major currency. Outside -> clarify, don't insert.
 
 ### Amount parsing
