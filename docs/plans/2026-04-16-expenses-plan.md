@@ -4,7 +4,7 @@
 
 **Goal:** Add WhatsApp-first expense tracking with multi-currency, 4 attribution modes, 1:1 privacy, and a read-only web view.
 
-**Architecture:** Two new intents (`add_expense`, `query_expense`) in the existing Haiku→Sonnet pipeline, one new `expenses` table in Supabase, action executor cases, and a new `ExpensesTab.jsx` read-only view. Controlled rollout via `EXPENSES_ENABLED` env var.
+**Architecture:** Two new intents (`add_expense`, `query_expense`) in the existing Haiku→Sonnet pipeline, one new `expenses` table in Supabase, action executor cases, and a new `ExpensesView.jsx` read-only view. No feature flag — dark launch with selective announcement to Kaye family + own household. Classifier confidence threshold (0.70) is the natural guard.
 
 **Tech Stack:** Supabase (Postgres + RLS + Realtime), Deno (Edge Function), React 19, Anthropic Claude (Haiku 4.5 + Sonnet 4)
 
@@ -665,27 +665,11 @@ git commit -m "feat(expenses): add expenses to action count and quick-undo suppo
 
 ---
 
-### Task 8: Feature Flag + Edge Function Deploy
+### Task 8: Deploy Edge Function
 
-**Files:**
-- Modify: `supabase/functions/whatsapp-webhook/index.inlined.ts` (main handler)
+No feature flag — dark launch. The classifier only fires on explicit payment language ("שילמתי X"), which no current user is saying in their groups. Confidence threshold (0.70) is the natural guard.
 
-**Step 1: Add `EXPENSES_ENABLED` env var check**
-
-At the top of the expense-related routing (where `add_expense` and `query_expense` intents are handled), add:
-
-```typescript
-const EXPENSES_ENABLED = Deno.env.get("EXPENSES_ENABLED") === "true";
-
-// In the intent routing:
-if ((classification.intent === "add_expense" || classification.intent === "query_expense") && !EXPENSES_ENABLED) {
-  // Silently treat as ignore — feature not yet enabled
-  classification.intent = "ignore" as any;
-  classification.confidence = 1.0;
-}
-```
-
-**Step 2: Run full esbuild parse check (final)**
+**Step 1: Run full esbuild parse check (final)**
 
 ```bash
 npx --yes esbuild supabase/functions/whatsapp-webhook/index.inlined.ts --bundle --platform=neutral --format=esm --target=esnext --loader:.ts=ts --external:jsr:* --external:npm:* --external:https:* --outfile=/tmp/bundle_test.js
@@ -693,17 +677,15 @@ npx --yes esbuild supabase/functions/whatsapp-webhook/index.inlined.ts --bundle 
 
 Expected: no errors.
 
-**Step 3: Deploy Edge Function**
+**Step 2: Deploy Edge Function**
 
 Open `index.inlined.ts` in Cursor/VS Code → Ctrl+A, Ctrl+C → Supabase Dashboard → Functions → whatsapp-webhook → Code tab → paste → Deploy. Verify JWT = OFF.
 
-Set env var: `EXPENSES_ENABLED=false` (keep off until Task 11 testing).
-
-**Step 4: Commit**
+**Step 3: Commit**
 
 ```bash
 git add supabase/functions/whatsapp-webhook/index.inlined.ts
-git commit -m "feat(expenses): add EXPENSES_ENABLED feature flag, deploy-ready"
+git commit -m "feat(expenses): deploy edge function with expense intents (dark launch)"
 ```
 
 ---
@@ -1205,14 +1187,11 @@ git commit -m "test(expenses): add 8 integration tests for expense intents"
 
 ---
 
-### Task 12: Enable for Beta + Verify E2E
+### Task 12: Verify E2E + Selective Announcement
 
-**Step 1: Enable feature flag**
+No feature flag. Feature is live after Task 8 deploy. Dark launch — classifier only fires on explicit payment language.
 
-In Supabase Dashboard → Edge Function → whatsapp-webhook → Environment Variables:
-- Set `EXPENSES_ENABLED=true`
-
-**Step 2: Manual E2E test in own household**
+**Step 1: Manual E2E test in own household**
 
 Send these messages to Sheli in a WhatsApp group:
 1. `שילמתי 100 חשמל` → expect confirmation
@@ -1221,21 +1200,24 @@ Send these messages to Sheli in a WhatsApp group:
 4. `בטלי` → expect undo of last expense
 5. Open web app → Expenses tab → verify list shows remaining expenses
 
-**Step 3: Run integration tests**
+**Step 2: Run integration tests**
 
 ```bash
 python tests/test_webhook.py
 ```
 
-**Step 4: Enable for Kaye family**
+**Step 3: Tell Adi Kaye only**
 
-Feature flag is global (`EXPENSES_ENABLED=true`), so all households get it. Announce to Adi Kaye via 1:1: "שלי יודעת עכשיו לרשום הוצאות! 💰 נסי: 'שילמתי X על Y'"
+She requested it — announce in 1:1 DM:
+"שלי יודעת עכשיו לרשום הוצאות! 💰 נסי: 'שילמתי X על Y'. אפשר גם לשאול 'כמה שילמנו החודש?'"
 
-**Step 5: Commit any fixes**
+Don't announce to other beta families yet. Let Adi and own household test for a few days. Other users may discover organically — that's fine, the feature works.
+
+**Step 4: Commit any fixes found during testing**
 
 ```bash
 git add -A
-git commit -m "feat(expenses): enable for beta, verified E2E"
+git commit -m "fix(expenses): post-deploy fixes from E2E testing"
 ```
 
 ---

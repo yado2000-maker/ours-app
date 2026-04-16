@@ -496,18 +496,18 @@ Week 1: Kaye family (Adi requested). Observe misclassifications, correction rate
 
 ## Rollout
 
-### Phase 1 — Beta (week 1)
+### Phase 1 — Dark launch + selective announcement (week 1)
 
 - Deploy: DB migration, classifier, action executor, web tab
-- `EXPENSES_ENABLED` env var, off by default
-- Enable for: Kaye family, own household
+- No feature flag — classifier only fires on explicit payment verbs, no accidental triggers with 10-15 users
+- Tell Adi Kaye (she requested it) + test in own household
+- Other users may discover organically — that's fine
 - Observe 5-7 days
 
-### Phase 2 — All beta families (week 2)
+### Phase 2 — Broader announcement + landing page (week 2-3)
 
-- Remove feature flag
-- Landing page updates
-- Announce in 1:1 DMs
+- Landing page updates (after Phase 1 observation)
+- Announce in 1:1 DMs to active beta families
 
 ### Phase 3 — Premium gate (week 4+)
 
