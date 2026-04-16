@@ -159,7 +159,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
         {/* WhatsApp Mock — 1:1 personal chat */}
         <div className="wa-mock">
           <div className="wa-mock-header">
-            <div className="wa-mock-avatar wa-mock-avatar-sheli">{c.mockAvatar}</div>
+            <img src="/icons/icon-192.png" alt="Sheli" className="wa-mock-avatar wa-mock-avatar-sheli" />
             <div className="wa-mock-contact-info">
               <span className="wa-mock-contact-name">{c.mockChatName}</span>
               <span className="wa-mock-contact-status">{c.mockStatus}</span>
@@ -216,17 +216,14 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
 
         <div className="landing-free-badge">{c.freeBadge}</div>
 
-        <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-qr">
-          <img src="/qr-whatsapp.svg" alt="QR code to message Sheli on WhatsApp" width="140" height="140" />
-          <span className="landing-qr-label">{c.qrLabel}</span>
-        </a>
+        <p className="landing-bridge">{c.bridge}</p>
 
         <button className="landing-signin" onClick={handleSignIn}>
           {c.signin}
         </button>
       </section>
 
-      {/* ─── Features (5 cards) ─── */}
+      {/* ─── Features (6 cards) ─── */}
       <section className="landing-features">
         <h2 className="landing-section-title">{c.featuresTitle}</h2>
         <div className="feature-cards">
@@ -238,6 +235,24 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
               <div className="feature-card-text">
                 <h3>{f.title}</h3>
                 <p>{f.subtitle}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── Sheli for the Family ─── */}
+      <section className="landing-family">
+        <h2 className="landing-section-title">{c.familyTitle}</h2>
+        <div className="family-items">
+          {c.familyItems.map((item, i) => (
+            <div key={i} className="family-item">
+              <div className="family-item-icon">
+                <item.Icon size={22} />
+              </div>
+              <div className="family-item-text">
+                <h3>{item.title}</h3>
+                <p>{item.subtitle}</p>
               </div>
             </div>
           ))}
