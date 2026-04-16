@@ -44,6 +44,7 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
       { Icon: ChoresFeatureIcon, title: "משימות ומטלות", subtitle: "נהלו את המשימות ואת מטלות הבית. שלי זוכרת ומעדכנת" },
       { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור איך קוראים לכלב שלכם, מתי היומולדת של אמא ושביום שלישי תמיד נגמר החלב" },
+      { Icon: ExpenseFeatureIcon, title: "מעקב הוצאות", subtitle: "\u0022שילמתי 85 על פיצה\u0022 — ושלי רושמת. עוקבת אחרי הוצאות ומעדכנת אתכם כשתרצו" },
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
@@ -90,6 +91,7 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
       { Icon: ChoresFeatureIcon, title: "Tasks & chores", subtitle: "Manage your tasks and your house chores. Sheli remembers and updates" },
       { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember your dog's name, when mom's birthday is, and that you always run out of milk on Tuesdays" },
+      { Icon: ExpenseFeatureIcon, title: "Expense tracking", subtitle: "\u0022I paid 85 for pizza\u0022 — and Sheli logs it. Tracks expenses and updates you when you want" },
     ],
     stepsTitle: "How does it work?",
     steps: [
