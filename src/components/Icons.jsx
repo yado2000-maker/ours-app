@@ -665,6 +665,21 @@ export function LearningFeatureIcon({ size = 28 }) {
   );
 }
 
+/** Two kids — chores & rotations for children */
+export function KidsIcon({ size = 28 }) {
+  const accent = 'var(--accent, #C4714A)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Left kid */}
+      <circle cx="9.5" cy="9" r="2.8" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M5 22C5 18.69 6.97 16 9.5 16C12.03 16 14 18.69 14 22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      {/* Right kid */}
+      <circle cx="18.5" cy="9" r="2.8" stroke={accent} strokeWidth="1.5" />
+      <path d="M14 22C14 18.69 15.97 16 18.5 16C21.03 16 23 18.69 23 22" stroke={accent} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Coin with shekel — expense tracking feature highlight */
 export function ExpenseFeatureIcon({ size = 28 }) {
   const accent = 'var(--accent, #C4714A)';
