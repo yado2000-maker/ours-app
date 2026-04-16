@@ -338,8 +338,9 @@ Hebrew speakers use many forms to report expenses. The classifier must recognize
 // RULE 2: "קניתי X" (NO amount) = check shopping list, else ignore
 "קניתי חלב" -> complete_shopping IF חלב is on shopping list (mark as got ✓)
 "קניתי חלב" -> ignore IF חלב is NOT on shopping list (social report)
-"קניתי ג'חנונים" -> ignore (social announcement — Sheli stays SILENT)
-"קניתי ארוחה" -> ignore (social sharing)
+"קניתי ג'חנונים" -> complete_shopping IF ג'חנונים is on shopping list (mark got ✓)
+"קניתי ג'חנונים" -> ignore IF NOT on shopping list (social announcement — Sheli stays SILENT)
+"קניתי ארוחה" -> ignore (social sharing, unlikely to be on shopping list)
 "תקני לי חלב ב-12 שקל" -> add_shopping (request, not past purchase)
 
 // ── TENSE DISAMBIGUATION (the hardest one) ──

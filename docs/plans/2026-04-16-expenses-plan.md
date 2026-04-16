@@ -363,8 +363,9 @@ In the negative examples / disambiguation section:
 // RULE 2: "קניתי X" (NO amount) = check shopping list → complete_shopping, else ignore
 [User]: "קניתי חלב" → {"intent":"complete_shopping","confidence":0.85,"entities":{"items_from_quote":["חלב"],"raw_text":"קניתי חלב"}}  // IF חלב is on shopping list → mark as got ✓
 // If חלב is NOT on shopping list → intent should be "ignore" instead
-[User]: "קניתי ג'חנונים" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"קניתי ג'חנונים"}}  // social — Sheli stays SILENT
-[User]: "קניתי ארוחה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"קניתי ארוחה"}}  // social sharing
+[User]: "קניתי ג'חנונים" → {"intent":"complete_shopping","confidence":0.85,"entities":{"items_from_quote":["ג'חנונים"],"raw_text":"קניתי ג'חנונים"}}  // IF ג'חנונים on shopping list → mark got ✓
+// If ג'חנונים NOT on shopping list → intent should be "ignore" (social — Sheli stays SILENT)
+[User]: "קניתי ארוחה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"קניתי ארוחה"}}  // social sharing, unlikely on shopping list
 
 // ── NOT expense: דוח/עלות without amount or fine-context ──
 [User]: "כתבתי דוח" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"כתבתי דוח"}}  // wrote a report (the OTHER meaning of דוח)
