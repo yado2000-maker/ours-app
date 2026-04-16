@@ -16,7 +16,7 @@
 - `src/lib/supabase.js` — Supabase client + V2 data functions (loadHousehold, saveTask, saveAllTasks, loadMessages, insertMessage, etc.) + toDb/fromDb field mappers
 - `src/lib/household-detect.js` — Auto-detect household for returning users
 - `src/lib/prompt.js` — Claude AI system prompt for web app chat
-- `src/components/Icons.jsx` — 27 custom SVG icons (stroke-based, currentColor)
+- `src/components/Icons.jsx` — 30 custom SVG icons (stroke-based, currentColor) incl. ExpenseFeatureIcon, FamilyGroupIcon, KidsIcon
 - `supabase/functions/whatsapp-webhook/index.ts` — WhatsApp bot Edge Function (modular source, not deployed directly)
 - `supabase/functions/whatsapp-webhook/index.inlined.ts` — **Production deployment file** (~1,800 lines, all 6 modules inlined + group management + batching)
 - `supabase/functions/_shared/haiku-classifier.ts` — Stage 1: Haiku intent classifier (9 intents, ~$0.0003/call)
@@ -29,7 +29,7 @@
 - `supabase/functions/otp-sender/index.ts` — Phone OTP delivery via Supabase Send SMS Hook (WhatsApp primary via Whapi.Cloud, Vonage SMS fallback, post-auth bridge message)
 - `tests/classifier_eval.py` — Classifier eval runner (120 cases, Python, batch-of-5 for Tier 1 rate limits)
 - `tests/classifier-test-cases.ts` — 120 test fixtures for intent classifier (TypeScript reference)
-- `src/components/LandingPage.jsx` — Hebrew landing page (hero, WA mock, features, FAQ, QR code)
+- `src/components/LandingPage.jsx` — Bilingual landing page (hero, WA mock, 6 feature cards, family section, FAQ)
 - `src/styles/landing.css` — Landing page styles (mobile-first, RTL)
 - `public/qr-whatsapp.svg` — QR code linking to wa.me/972555175553
 - `supabase/functions/icount-webhook/index.ts` — iCount payment webhook handler
@@ -253,7 +253,10 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 ## Landing Page
 - **Two entry points:** sheli.ai (LandingPage for cold traffic), `sheli.ai?source=wa` (skips landing → auth for WA dashboard users)
 - **wa.me pre-filled text:** `wa.me/972555175553?text=היי%20שלי!` — user taps Send, bot responds with welcome
-- **QR code:** `public/qr-whatsapp.svg` — scannable from desktop/screenshots, links to wa.me
+- **Page flow (2026-04-16):** Wordmark → tagline → bridge one-liner (2-line) → WA mock (Sheli PNG avatar) → CTA → free badge → sign-in → Features (6 cards incl. expenses) → "שלי לכל המשפחה" (3 items) → How it works → FAQ (6 Qs, Israeli dev context) → Bottom CTA
+- **QR code removed** (2026-04-16) — `public/qr-whatsapp.svg` still exists but no longer rendered. Reclaimed vertical space.
+- **Bridge line:** HE "רק לעצמך או לכל המשפחה ביחד / שלי עושה סדר בחיים", EN "Just for you or the whole family / Sheli keeps it all together". Two lines via `<br>`, font-weight 400.
+- **Family section:** 3 items between Features and How It Works — shared shopping (cart icon), chores & rotations (kids icon), add to group (group icon). Background `var(--white)`.
 - **1:1 Q&A:** `ONBOARDING_QA` array in index.inlined.ts — pattern-matched answers for pricing, features, privacy, etc. Zero AI cost.
 
 ## iCount API (Billing)
