@@ -727,6 +727,7 @@ CONVERSATION CONTEXT RULES:
 - A message correcting/updating a previous request is NOT a new add.
   Example: "לא 2, צריך 3" = quantity update on most recent item, not new item.
 - A message between family members ABOUT an item is social chatter → ignore.
+- EXPENSE FOLLOW-UP: If the bot just asked "כמה עלה ה[X]?" (asking for expense amount) and the user replies with JUST A NUMBER (e.g. "1300", "1300 שקל", "250"), classify as add_expense with the DESCRIPTION from the bot's question. Example: bot asked "כמה עלה החשמל?" → user says "1300" → add_expense with expense_description="חשמל", amount_text="1300".
   Example: "גור יש רק 7אפ" = telling Gur something, not requesting the bot.
 - Only classify as actionable when the sender is clearly REQUESTING the bot to act.
 - Messages that riff on/respond to a shared link or media (even if they sound like tasks) = social commentary → ignore.
