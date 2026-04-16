@@ -49,7 +49,7 @@ const CONTENT = {
     familyTitle: "שלי לכל המשפחה",
     familyItems: [
       { Icon: ShoppingFeatureIcon, title: "רשימת קניות משותפת", subtitle: "אבא מוסיף חלב מהעבודה, אמא מוסיפה ביצים מהדרך, והילדים מוסיפים נוטלה. הכל ברשימה אחת" },
-      { Icon: ChoresFeatureIcon, title: "מטלות בית וילדים", subtitle: "מי מוריד זבל? מי אוסף מהחוג? שלי מחלקת ועוקבת" },
+      { Icon: ChoresFeatureIcon, title: "מטלות בית ותורנויות", subtitle: "תור מי להיות ראשון במקלחת? סוף לריבים בין הילדים, שלי זוכרת ומעדכנת" },
       { Icon: FamilyGroupIcon, title: "הוסיפו את שלי לקבוצה", subtitle: "הוסיפו את שלי לקבוצת ווטסאפ של המשפחה — וכולם מסודרים" },
     ],
     stepsTitle: "איך זה עובד?",
@@ -102,7 +102,7 @@ const CONTENT = {
     familyTitle: "Sheli for the whole family",
     familyItems: [
       { Icon: ShoppingFeatureIcon, title: "Shared shopping list", subtitle: "Dad adds milk from work, mom adds eggs on the go, and the kids add Nutella. One list for everyone" },
-      { Icon: ChoresFeatureIcon, title: "House chores & kids", subtitle: "Who takes out the trash? Who picks up from practice? Sheli assigns and tracks" },
+      { Icon: ChoresFeatureIcon, title: "Chores & rotations", subtitle: "Whose turn to shower first? No more fights between the kids \u2014 Sheli remembers and updates" },
       { Icon: FamilyGroupIcon, title: "Add Sheli to your group", subtitle: "Add Sheli to your family WhatsApp group — everyone stays organized" },
     ],
     stepsTitle: "How does it work?",
