@@ -48,9 +48,9 @@ const CONTENT = {
     ],
     familyTitle: "שלי לכל המשפחה",
     familyItems: [
-      { Icon: ShoppingFeatureIcon, title: "רשימת קניות משותפת", subtitle: "אבא מוסיף חלב מהעבודה, אמא מוסיפה ביצים מהדרך. הכל ברשימה אחת" },
+      { Icon: ShoppingFeatureIcon, title: "רשימת קניות משותפת", subtitle: "אבא מוסיף חלב מהעבודה, אמא מוסיפה ביצים מהדרך, והילדים מוסיפים נוטלה. הכל ברשימה אחת" },
       { Icon: ChoresFeatureIcon, title: "מטלות בית וילדים", subtitle: "מי מוריד זבל? מי אוסף מהחוג? שלי מחלקת ועוקבת" },
-      { Icon: FamilyGroupIcon, title: "הוסיפו שלי לקבוצה", subtitle: "הוסיפו את שלי לקבוצת ווטסאפ של המשפחה — וכולם מסודרים" },
+      { Icon: FamilyGroupIcon, title: "הוסיפו את שלי לקבוצה", subtitle: "הוסיפו את שלי לקבוצת ווטסאפ של המשפחה — וכולם מסודרים" },
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
@@ -101,9 +101,9 @@ const CONTENT = {
     ],
     familyTitle: "Sheli for the whole family",
     familyItems: [
-      { Icon: ShoppingFeatureIcon, title: "Shared shopping list", subtitle: "Dad adds milk from work, mom adds eggs on the go. One list for everyone" },
+      { Icon: ShoppingFeatureIcon, title: "Shared shopping list", subtitle: "Dad adds milk from work, mom adds eggs on the go, and the kids add Nutella. One list for everyone" },
       { Icon: ChoresFeatureIcon, title: "House chores & kids", subtitle: "Who takes out the trash? Who picks up from practice? Sheli assigns and tracks" },
-      { Icon: FamilyGroupIcon, title: "Add Sheli to the group", subtitle: "Add Sheli to your family WhatsApp group — everyone stays organized" },
+      { Icon: FamilyGroupIcon, title: "Add Sheli to your group", subtitle: "Add Sheli to your family WhatsApp group — everyone stays organized" },
     ],
     stepsTitle: "How does it work?",
     steps: [
@@ -155,6 +155,7 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       <section className="landing-hero">
         <h1 className="landing-wordmark">sheli</h1>
         <p className="landing-tagline">{c.tagline}</p>
+        <p className="landing-bridge">{c.bridge}</p>
 
         {/* WhatsApp Mock — 1:1 personal chat */}
         <div className="wa-mock">
@@ -215,8 +216,6 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
         </a>
 
         <div className="landing-free-badge">{c.freeBadge}</div>
-
-        <p className="landing-bridge">{c.bridge}</p>
 
         <button className="landing-signin" onClick={handleSignIn}>
           {c.signin}

@@ -365,8 +365,9 @@
 }
 
 .landing-bridge {
-  margin-top: 16px;
-  font-size: 14px;
+  margin: 0 0 24px;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--warm);
   text-align: center;
   max-width: 340px;
