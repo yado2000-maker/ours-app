@@ -327,19 +327,20 @@ Hebrew speakers use many forms to report expenses. The classifier must recognize
 "הגיע חשבון חשמל של 1300" -> ignore (bill arrived, not paid)
 "קיבלנו חשבון מים" -> ignore (received bill)
 
-// ── NEGATIVE: grocery / social "קניתי" = NOT expense ──
-"קניתי חלב ב-12" -> add_shopping (grocery with price = shopping mark-as-got)
-"תקני לי חלב ב-12 שקל" -> add_shopping
-"קניתי ג'חנונים" -> ignore (social announcement — Sheli must NOT interfere)
-"קניתי חלב" -> ignore (reporting a purchase, not requesting action)
+// ── "קניתי" (I bought) — clean 2-rule disambiguation ──
+// RULE 1: "קניתי X ב-[amount]" = add_expense ALWAYS (any item + specific price = expense)
+"קניתי מזגן ב-3000" -> add_expense (appliance + amount)
+"קניתי נעליים ב-400" -> add_expense (clothes + amount)
+"קניתי אייפון ב-5000" -> add_expense (gadget + amount)
+"קניתי טיסות ב-4500" -> add_expense (travel + amount)
+"קניתי חלב ב-12" -> add_expense (even grocery — amount present = expense)
+//
+// RULE 2: "קניתי X" (NO amount) = check shopping list, else ignore
+"קניתי חלב" -> complete_shopping IF חלב is on shopping list (mark as got ✓)
+"קניתי חלב" -> ignore IF חלב is NOT on shopping list (social report)
+"קניתי ג'חנונים" -> ignore (social announcement — Sheli stays SILENT)
 "קניתי ארוחה" -> ignore (social sharing)
-"קניתי נעליים ב-400" -> ignore (personal shopping, not household expense tracking)
-// ONLY "קניתי [big item] ב-[amount]" = add_expense:
-// Big items: מזגן, ארון, מכונת כביסה, מקרר, ספה, טיסות, רכב, שואב אבק
-// "קניתי מזגן ב-3000" -> add_expense (appliance = household expense)
-// "קניתי טיסות ב-4500" -> add_expense (travel = household expense)
-// Rule: "קניתי" + amount + NON-GROCERY BIG ITEM = add_expense.
-// "קניתי" + grocery/food/personal = ignore (or add_shopping if matches shopping context).
+"תקני לי חלב ב-12 שקל" -> add_shopping (request, not past purchase)
 
 // ── TENSE DISAMBIGUATION (the hardest one) ──
 "עלה 1300 חשמל" -> add_expense (PAST = already paid)
@@ -350,7 +351,8 @@ Hebrew speakers use many forms to report expenses. The classifier must recognize
 
 - **"לו" vs "עליו":** "שילמתי לו" (to him) = expense. "שילמתי עליו" (for/over him) = ignore (social). Neither is a task.
 - **Tense is the signal:** PAST (שילמתי, עלה, יצא, הלכו) = expense. PRESENT (עולה, המחיר) = ignore. FUTURE (לשלם, צריך ל) = task.
-- **"קניתי X ב-Y":** If X is grocery → add_shopping. If X is appliance/furniture/service → add_expense.
+- **"קניתי X ב-Y" (with amount):** ALWAYS add_expense — any item with a price is an expense report.
+- **"קניתי X" (no amount):** Check shopping list — if X matches an open item → complete_shopping (mark got ✓). If not → ignore (social chat).
 - Amount bounds: 0.50 - 1,000,000 in major currency. Outside -> clarify, don't insert.
 
 ### Amount parsing

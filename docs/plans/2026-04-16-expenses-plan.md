@@ -267,7 +267,10 @@ In the INTENTS section (after the `add_reminder` definition around line 567), ad
   Multi-currency: default ILS. Explicit: "יורו"/"euro"/"€" → EUR, "דולר"/"$" → USD, "פאונד"/"£" → GBP.
   KEY TENSE RULE: PAST = expense (שילמתי, עלה). PRESENT/general = ignore (עולה, המחיר). FUTURE = task (לשלם, צריך לשלם).
   - NOT expense: "שילמתי עליו" (treating someone socially). "המשכנתא עולה X" (present tense = price statement). "לשלם חשמל" (future = task). "חלב ב-12 שקל" (grocery = add_shopping). "הגיע חשבון של X" (bill arrived, not yet paid = task or ignore).
-  - CRITICAL "קניתי" TRAP: "קניתי" (I bought) is social/informational in 90% of cases. "קניתי ג'חנונים" = social announcement, Sheli must NOT respond. "קניתי חלב" = reporting, ignore. ONLY classify as add_expense when BOTH: (1) specific amount AND (2) big non-grocery item (appliance, furniture, travel, vehicle). "קניתי מזגן ב-3000" = add_expense. "קניתי נעליים ב-400" = ignore (personal shopping).
+  - CRITICAL "קניתי" RULES (clean 2-rule system):
+    RULE 1: "קניתי X ב-[amount]" = ALWAYS add_expense. Any item with a price is an expense report. Clothes, gadgets, groceries, appliances — doesn't matter. Amount present → log it.
+    RULE 2: "קניתי X" (no amount) = check open shopping list. If X matches an item → complete_shopping (mark got ✓, reply "סימנתי ✓"). If no match → ignore (social chat, Sheli stays SILENT).
+    "קניתי ג'חנונים" with no amount and no shopping match = ignore. Sheli must NOT interfere with social announcements.
 - query_expense: Asking about household spending. Triggers: "כמה שילמנו", "כמה הוצאנו", "כמה עלה לנו", "תסכמי הוצאות", "סיכום הוצאות", "מה ההוצאות". Has a period (this_month/last_month) and optional category.
 ```
 
@@ -349,16 +352,19 @@ In the negative examples / disambiguation section:
 [User]: "הגיע חשבון חשמל של 1300" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"הגיע חשבון חשמל של 1300"}}
 [User]: "קיבלנו חשבון מים" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"קיבלנו חשבון מים"}}
 
-// ── NOT expense: "קניתי" — grocery/social/personal = NOT expense ──
-// "קניתי" is the most overloaded verb in Israeli WhatsApp. Sheli must NOT interfere with social chat.
-[User]: "קניתי חלב ב-12" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"חלב","qty":"1"}],"raw_text":"קניתי חלב ב-12"}}  // grocery with price = mark-as-got
-[User]: "קניתי ג'חנונים" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"קניתי ג'חנונים"}}  // social announcement — Sheli stays SILENT
-[User]: "קניתי חלב" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"קניתי חלב"}}  // reporting a purchase, no action needed
+// ── "קניתי" (I bought) — 2-rule disambiguation ──
+// RULE 1: "קניתי X ב-[amount]" = ALWAYS add_expense (any item + price = expense report)
+[User]: "קניתי מזגן ב-3000" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"3000","amount_minor":300000,"expense_currency":"ILS","expense_description":"מזגן","expense_category":"בית","expense_attribution":"speaker","raw_text":"קניתי מזגן ב-3000"}}
+[User]: "קניתי נעליים ב-400" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"400","amount_minor":40000,"expense_currency":"ILS","expense_description":"נעליים","expense_category":"ביגוד","expense_attribution":"speaker","raw_text":"קניתי נעליים ב-400"}}
+[User]: "קניתי אייפון ב-5000" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"5000","amount_minor":500000,"expense_currency":"ILS","expense_description":"אייפון","expense_category":"טכנולוגיה","expense_attribution":"speaker","raw_text":"קניתי אייפון ב-5000"}}
+[User]: "קניתי טיסות ב-4500" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"4500","amount_minor":450000,"expense_currency":"ILS","expense_description":"טיסות","expense_category":"נסיעות","expense_attribution":"speaker","raw_text":"קניתי טיסות ב-4500"}}
+[User]: "קניתי חלב ב-12" → {"intent":"add_expense","confidence":0.82,"entities":{"amount_text":"12","amount_minor":1200,"expense_currency":"ILS","expense_description":"חלב","expense_category":"סופר","expense_attribution":"speaker","raw_text":"קניתי חלב ב-12"}}  // even grocery — amount present = expense
+//
+// RULE 2: "קניתי X" (NO amount) = check shopping list → complete_shopping, else ignore
+[User]: "קניתי חלב" → {"intent":"complete_shopping","confidence":0.85,"entities":{"items_from_quote":["חלב"],"raw_text":"קניתי חלב"}}  // IF חלב is on shopping list → mark as got ✓
+// If חלב is NOT on shopping list → intent should be "ignore" instead
+[User]: "קניתי ג'חנונים" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"קניתי ג'חנונים"}}  // social — Sheli stays SILENT
 [User]: "קניתי ארוחה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"קניתי ארוחה"}}  // social sharing
-[User]: "קניתי נעליים ב-400" → {"intent":"ignore","confidence":0.82,"entities":{"raw_text":"קניתי נעליים ב-400"}}  // personal shopping, not tracked
-// ONLY "קניתי [big household item] ב-[amount]" = add_expense:
-[User]: "קניתי מזגן ב-3000" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"3000","amount_minor":300000,"expense_currency":"ILS","expense_description":"מזגן","expense_category":"בית","expense_attribution":"speaker","raw_text":"קניתי מזגן ב-3000"}}  // appliance = expense
-[User]: "קניתי טיסות ב-4500" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"4500","amount_minor":450000,"expense_currency":"ILS","expense_description":"טיסות","expense_category":"נסיעות","expense_attribution":"speaker","raw_text":"קניתי טיסות ב-4500"}}  // travel = expense
 
 // ── NOT expense: דוח/עלות without amount or fine-context ──
 [User]: "כתבתי דוח" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"כתבתי דוח"}}  // wrote a report (the OTHER meaning of דוח)
