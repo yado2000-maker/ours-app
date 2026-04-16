@@ -57,7 +57,7 @@
 
 .landing-tagline {
   font-size: 16px;
-  font-weight: 400;
+  font-weight: 600;
   color: var(--warm);
   margin: 8px 0 28px;
   text-align: center;
@@ -367,7 +367,7 @@
 .landing-bridge {
   margin: 0 0 24px;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--warm);
   text-align: center;
   max-width: 340px;
