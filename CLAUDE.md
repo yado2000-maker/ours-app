@@ -33,6 +33,9 @@
 - `src/styles/landing.css` — Landing page styles (mobile-first, RTL)
 - `public/qr-whatsapp.svg` — QR code linking to wa.me/972555175553
 - `supabase/functions/icount-webhook/index.ts` — iCount payment webhook handler
+- `src/components/ExpensesView.jsx` — Read-only expenses tab (per-currency totals, category/period filters, RTL)
+- `docs/plans/2026-04-16-expenses-design.md` — Expenses feature design (approved)
+- `docs/plans/2026-04-16-expenses-plan.md` — Expenses implementation plan (12 tasks, completed)
 - `docs/implementation-plan-v3.md` — **Active** implementation plan (replaces V2)
 
 ## Database: Normalized V2 Tables (migration completed 2026-04-02)
@@ -40,6 +43,7 @@
 - **Schema:** `households_v2`, `tasks`, `shopping_items`, `events`, `household_members`, `messages`, `ai_usage`, `subscriptions`, `referrals`, `whatsapp_*`, `reminder_queue`, `onboarding_conversations`, `family_memories`
 - `onboarding_conversations` — 1:1 chat state machine (phone, state, household_id, message_count, referral_code)
 - `family_memories` — Narrative context for Sheli personality. Fields: `id`, `household_id` (FK CASCADE), `member_phone`, `memory_type` (moment/personality/preference/nickname/quote/about_sheli), `content`, `context`, `source` (auto_detected/explicit_save/correction), `scope` (group/direct), `importance` (0.0-1.0), `created_at`, `last_used_at`, `use_count`, `active`. RLS enabled, no policies (service_role only). Max 10/member + 10 household-wide. 2-day freshness gate + 24hr cooldown before Sonnet can reference.
+- `expenses` — Household expense tracking. Fields: `id` (TEXT PK), `household_id` (TEXT FK CASCADE), `amount_minor` (INTEGER, minor currency units — agorot/cents), `currency` (TEXT, ILS/USD/EUR/GBP), `description`, `category`, `paid_by`, `attribution` (speaker/named/joint/household), `occurred_at`, `visibility` (household/private), `source`, `source_message_id`, `logged_by_phone`, `edited`, `deleted`, `deleted_at`. RLS enabled, `is_household_member`. Realtime enabled. Soft-delete forever (money audit trail).
 - `whatsapp_config` added columns: `dashboard_link_sent`, `first_message_at`, `group_message_count`
 - `subscriptions` added column: `stripe_customer_id` (legacy name, used for any payment provider)
 - RPC: `increment_group_message_count(p_group_id)` — atomic counter for dashboard link trigger
@@ -154,6 +158,12 @@
 - **UTC times in Sonnet context** — Always convert `send_at` / `scheduled_for` to Israel time before injecting into prompts. Raw UTC causes Sonnet to misread "13:00 UTC" as "1 PM local" and create phantom duplicate items. Use `toIsraelTimeStr()`.
 - **Classifier is example-driven, not rule-driven** — Adding a RULE to the Haiku prompt ("strip תוסיפי prefix") doesn't work without a matching EXAMPLE (`"תוסיפי חלב" → add_shopping`). Always add both.
 - **`countHouseholdActions(householdId)`** — Returns total items across tasks + shopping + events + reminders. Reusable for nudge threshold AND future paywall.
+- **Expense "שילמתי עליו" ≠ "שילמתי לו"** — "עליו" (treating someone socially) = ignore. "לו" (direct payment to person) = add_expense. Neither is add_task.
+- **Expense tense rule** — PAST (שילמתי, עלה, יצא לנו, שרפתי) = add_expense. PRESENT (עולה, המחיר) = ignore. FUTURE (לשלם, צריך לשלם) = add_task. "תזכירי לי לשלם" = add_reminder.
+- **"קניתי" 2-rule system** — "קניתי X ב-[amount]" = ALWAYS add_expense (any item + price). "קניתי X" (no amount) = check shopping list → complete_shopping if match, ignore if not.
+- **Multi-currency expenses** — default ILS for Hebrew speakers. Explicit "יורו"/"דולר"/"€"/"$" overrides. Never sum across currencies in queries or web view. amount_minor stores in minor units (agorot/cents).
+- **1:1 expense privacy** — 1:1 expenses default to `visibility='private'`. Full visibility preference flow ("למשפחה או בינינו?") is Phase 2. Group expenses are always `visibility='household'`.
+- **Expense without amount** — "שילמתי חשמל" (no number) → Sheli asks "כמה עלה?" → user replies with number → Haiku uses conversation history to carry the description. Added as CONVERSATION CONTEXT RULE in Haiku prompt.
 - **NEVER use `sed -i` on source files** — Windows Git Bash `sed` corrupts file encoding invisibly (bash reads OK, editors show empty). Use `iconv` or the Edit tool for line-ending changes.
 
 ## Phone OTP Auth (deployed 2026-04-08)
@@ -179,7 +189,7 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 - **Cost:** ~$0.50/household/month (down from ~$1.62 all-Sonnet). ~70% reduction.
 - **Accuracy:** 91.7% on 120 test cases (target was 85%). `ignore` 100%, `add_event` 100%, `question` 100%.
 
-### 13 Intent Types
+### 15 Intent Types
 | Intent | Action | DB Operation |
 |--------|--------|-------------|
 | `ignore` | No action, no reply | — |
@@ -195,6 +205,8 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 | `save_memory` | Remember a family fact | INSERT family_memories (importance 0.8) |
 | `recall_memory` | Share what Sheli remembers | Sonnet reply from FAMILY MEMORIES context |
 | `delete_memory` | Forget something | UPDATE family_memories.active=false |
+| `add_expense` | Log a payment | INSERT expenses (amount_minor, currency, attribution, visibility) |
+| `query_expense` | Answer spend question | Aggregate expenses by currency → Sonnet reply |
 
 ### Classification values in `whatsapp_messages.classification`
 `haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`, `skipped_long_voice`, `voice_transcription_failed`
