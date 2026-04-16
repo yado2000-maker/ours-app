@@ -25,7 +25,6 @@ const CONTENT = {
     tagline: "העוזרת החכמה שלכם בווטסאפ",
     mockChatName: "שלי",
     mockStatus: "מחוברת",
-    mockAvatar: "ש",
     mockMessages: [
       { text: "חלב, ביצים ולחם", type: "user" },
       { text: "\u{1F6D2} הוספתי לרשימה!", type: "bot" },
@@ -36,7 +35,7 @@ const CONTENT = {
     ],
     cta: "שלחו הודעה לשלי",
     freeBadge: "חינם לגמרי · עד 40 פעולות בחודש · בלי כרטיס אשראי",
-    qrLabel: "או סרקו את הקוד",
+    bridge: "רק לעצמך או לכל המשפחה ביחד: שלי עושה לכם סדר בחיים",
     signin: "יש לי כבר חשבון \u2190 כניסה",
     featuresTitle: "מה שלי יודעת לעשות?",
     features: [
@@ -72,7 +71,6 @@ const CONTENT = {
     tagline: "Your smart helper on WhatsApp",
     mockChatName: "Sheli",
     mockStatus: "online",
-    mockAvatar: "S",
     mockMessages: [
       { text: "Milk, bread and eggs", type: "user" },
       { text: "\u{1F6D2} Added to the list!", type: "bot" },
@@ -83,7 +81,7 @@ const CONTENT = {
     ],
     cta: "Message Sheli",
     freeBadge: "Completely free \u00B7 Up to 40 actions/month \u00B7 No credit card",
-    qrLabel: "or scan the code",
+    bridge: "Just for you or the whole family: Sheli puts your life in order",
     signin: "I have an account \u2192 Sign in",
     featuresTitle: "What can Sheli do?",
     features: [
