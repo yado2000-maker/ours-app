@@ -165,6 +165,9 @@
 - **1:1 expense privacy** — 1:1 expenses default to `visibility='private'`. Full visibility preference flow ("למשפחה או בינינו?") is Phase 2. Group expenses are always `visibility='household'`.
 - **Expense without amount** — "שילמתי חשמל" (no number) → Sheli asks "כמה עלה?" → user replies with number → Haiku uses conversation history to carry the description. Added as CONVERSATION CONTEXT RULE in Haiku prompt.
 - **NEVER use `sed -i` on source files** — Windows Git Bash `sed` corrupts file encoding invisibly (bash reads OK, editors show empty). Use `iconv` or the Edit tool for line-ending changes.
+- **Bot replies logged to DB** — All `sendMessage` calls go through `sendAndLog()` wrapper. Bot messages stored in `whatsapp_messages` with `sender_phone = BOT_PHONE`, `ai_responded = true`, and `in_reply_to` linking to the triggering user message. `replyType` labels: action_reply, confirmation_ask/accept/reject, direct_reply, nudge, error_fallback, etc.
+- **Emoji reactions routed** — 👍💪✅👌❤️🔥 = confirm (execute pending action or log positive feedback). 😂😤👎❌🤦😡 = wrong (reject pending action or log negative feedback to classification_corrections). All other emoji on Sheli messages = skip. Reactions on non-Sheli messages = skip (social noise).
+- **`sendMessage` returns `SendResult`** — `{ ok: boolean, messageId?: string }`. Whapi message ID parsed from response. Used for `pending_confirmations.bot_message_id` (reaction matching).
 
 ## Phone OTP Auth (deployed 2026-04-08)
 - **Architecture:** Supabase Send SMS Hook → `otp-sender` Edge Function → WhatsApp (Whapi.Cloud) primary, Vonage SMS fallback
@@ -209,7 +212,10 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 | `query_expense` | Answer spend question | Aggregate expenses by currency → Sonnet reply |
 
 ### Classification values in `whatsapp_messages.classification`
-`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`, `skipped_long_voice`, `voice_transcription_failed`
+`haiku_ignore`, `haiku_actionable`, `haiku_low_confidence`, `haiku_reply_only`, `sonnet_escalated`, `sonnet_escalated_social`, `batch_pending`, `batch_actionable`, `batch_empty`, `direct_address_reply`, `skipped_non_text`, `usage_limit_reached`, `correction_applied`, `explicit_undo`, `skipped_long_voice`, `voice_transcription_failed`, `reaction_positive`, `reaction_negative`, `reaction_confirmed`, `reaction_rejected`
+
+### Bot reply `replyType` labels (in `whatsapp_messages.classification` for bot-sent rows)
+`action_reply`, `sonnet_escalated_reply`, `direct_address_reply`, `confirmation_ask`, `confirmation_accept`, `confirmation_reject`, `confirmation_accept_reaction`, `confirmation_reject_reaction`, `quick_undo_reply`, `back_off_reply`, `emoji_reaction`, `direct_reply`, `onboarding_reply`, `group_mgmt`, `nudge`, `error_fallback`, `batch_reply`, `long_voice_reply`, `dedup_reply`, `clarification`
 
 ### `whatsapp_messages` columns (learning system, added 2026-04-04)
 - `batch_id` (TEXT) — groups messages into shopping batches

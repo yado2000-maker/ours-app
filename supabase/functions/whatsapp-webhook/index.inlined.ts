@@ -45,6 +45,8 @@ interface IncomingMessage {
   mediaId?: string;       // Whapi media ID (for downloading via API)
   mediaDuration?: number;  // Duration in seconds (for voice messages)
   quotedText?: string;    // Text of the quoted/replied-to message (WhatsApp reply feature)
+  reactionEmoji?: string;      // emoji used in reaction ("👍", "❤️", etc.)
+  reactionTargetId?: string;   // whatsapp_message_id of the message being reacted to
 }
 
 interface OutgoingMessage {
@@ -61,12 +63,17 @@ interface GroupEvent {
   timestamp: number;
 }
 
+interface SendResult {
+  ok: boolean;
+  messageId?: string;
+}
+
 interface WhatsAppProvider {
   name: string;
   verifyWebhook(req: Request): Promise<boolean>;
   parseIncoming(body: unknown): IncomingMessage | null;
   parseGroupEvent?(body: unknown): GroupEvent | null;
-  sendMessage(msg: OutgoingMessage): Promise<boolean>;
+  sendMessage(msg: OutgoingMessage): Promise<SendResult>;
   sendTemplate?(groupId: string, template: string, params: Record<string, string>): Promise<boolean>;
 }
 
@@ -268,6 +275,19 @@ class WhapiProvider implements WhatsAppProvider {
       const mediaId = audioData?.id as string | undefined;
       const mediaDuration = (audioData?.seconds ?? audioData?.duration) as number | undefined;
 
+      // Extract reaction info (for reaction-type messages)
+      const reactionData = msg.reaction as Record<string, unknown> | undefined;
+      const reactionEmoji = (reactionData?.emoji as string | undefined) || undefined;
+      // Whapi reaction target: try msg_id, then message_id — format is underdocumented
+      const reactionTargetId = (reactionData?.msg_id as string | undefined)
+        || (reactionData?.message_id as string | undefined)
+        || undefined;
+
+      // DEBUG: Log raw reaction payload on first encounters to confirm field names
+      if (type === "reaction") {
+        console.log(`[WhapiProvider] Reaction payload:`, JSON.stringify(msg.reaction || msg));
+      }
+
       // Map Whapi message types to our types
       const typeMap: Record<string, IncomingMessage["type"]> = {
         text: "text",
@@ -294,6 +314,8 @@ class WhapiProvider implements WhatsAppProvider {
         mediaId,
         mediaDuration,
         quotedText: quotedText || undefined,
+        reactionEmoji: reactionEmoji || undefined,
+        reactionTargetId: reactionTargetId || undefined,
       };
     } catch (err) {
       console.error("[WhapiProvider] Parse error:", err);
@@ -341,7 +363,7 @@ class WhapiProvider implements WhatsAppProvider {
     }
   }
 
-  async sendMessage(msg: OutgoingMessage): Promise<boolean> {
+  async sendMessage(msg: OutgoingMessage): Promise<SendResult> {
     try {
       const res = await fetch(`${this.apiUrl}/messages/text`, {
         method: "POST",
@@ -354,10 +376,16 @@ class WhapiProvider implements WhatsAppProvider {
           body: msg.text,
         }),
       });
-      return res.ok;
+      if (!res.ok) return { ok: false };
+      try {
+        const data = await res.json();
+        return { ok: true, messageId: data?.message?.id || data?.sent?.id };
+      } catch {
+        return { ok: true }; // Sent but couldn't parse response
+      }
     } catch (err) {
       console.error("[WhapiProvider] Send error:", err);
-      return false;
+      return { ok: false };
     }
   }
 }
@@ -432,7 +460,7 @@ class MetaCloudProvider implements WhatsAppProvider {
     }
   }
 
-  async sendMessage(msg: OutgoingMessage): Promise<boolean> {
+  async sendMessage(msg: OutgoingMessage): Promise<SendResult> {
     try {
       const res = await fetch(
         `https://graph.facebook.com/v19.0/${this.phoneNumberId}/messages`,
@@ -450,10 +478,16 @@ class MetaCloudProvider implements WhatsAppProvider {
           }),
         }
       );
-      return res.ok;
+      if (!res.ok) return { ok: false };
+      try {
+        const data = await res.json();
+        return { ok: true, messageId: data?.messages?.[0]?.id };
+      } catch {
+        return { ok: true };
+      }
     } catch (err) {
       console.error("[MetaCloudProvider] Send error:", err);
-      return false;
+      return { ok: false };
     }
   }
 }
@@ -551,7 +585,12 @@ INTENTS:
   NOTE on "דוח": Hebrew homograph. "דוח חניה 250" = parking fine (expense). "כתבתי דוח" = wrote a report (ignore). Need fine-context OR amount to classify as expense.
   Must include an amount (number or Hebrew word). Category inferred from description.
   Attribution: speaker (שילמתי/עלה לי), named (אבא שילם), joint (שילמנו/עלה לנו/יצא לנו), household (שולם/נפל חשבון, passive voice).
-  Multi-currency: default ILS. Explicit: "יורו"/"euro"/euro-sign = EUR, "דולר"/"$" = USD, "פאונד"/"pound-sign" = GBP.
+  Multi-currency: default ILS. Recognize ALL these variants:
+    ILS: שקל, שקלים, ש"ח, שח, ש״ח, ₪ (default when no currency mentioned)
+    USD: דולר, דולרים, $
+    EUR: יורו, אירו, €
+    GBP: פאונד, לירה, £
+    JPY: ין, yen, ¥
   KEY TENSE RULE: PAST = expense (שילמתי, עלה). PRESENT/general = ignore (עולה, המחיר). FUTURE = task (לשלם, צריך לשלם).
   NOT expense: "שילמתי עליו" (treating someone socially). "המשכנתא עולה X" (present tense = price statement). "לשלם חשמל" (future = task). "חלב ב-12 שקל" without "קניתי" (grocery = add_shopping). "הגיע חשבון של X" (bill arrived, not yet paid = ignore).
   CRITICAL "קניתי" RULES:
@@ -616,6 +655,7 @@ HEBREW PATTERNS:
 - "המשימות הושלמו" / "כל המשימות הושלמו" (plural passive past) = complete_task with all currently open task_ids. Same for "הושלם" standalone reply to a task-list message from the bot.
 - "רק X חסר/נשאר" (only X is missing/left) in reply to a bot shopping-list message = complete_shopping for every item EXCEPT X in the quoted list. This is "we did everything except X" — Shira's 2026-04-15 pattern.
 - Greetings, emojis, reactions, "סבבה", "אמן", "בהצלחה" = ignore
+- When conversation history shows a NEGATIVE REACTION (reacted 😂/🤦/👎 to שלי) to Sheli's previous message, the NEXT user message is likely a correction or clarification. Lean toward correct_bot or re-classify with higher attention.
 - "מה הסיסמא?", "שלח קוד" = info_request (NOT add_task)
 - BRINGING/ALREADY HAVE (= ignore, NOT shopping): "מביאה X", "מביא X", "הבאתי X", "לקחתי X", "יש לי X", "כבר קניתי X", "כבר יש X" = someone announcing they're BRINGING or ALREADY HAVE something. This is NOT a request to buy. Ignore it.
   "מביאה ג'חנונים" = ignore (she's bringing it). "צריך ג'חנונים" = add_shopping (she needs it).
@@ -734,6 +774,7 @@ CONVERSATION CONTEXT RULES:
   Example: (after a TikTok about money mistakes) "ואני מוסיף: להשאיר אור בסטודיו" = joke, NOT a task.
 - These rules apply to ALL entity types: shopping, tasks, and events.
 - If you are uncertain whether a message is a request or just conversation, set confidence: 0.55 and needs_conversation_review: true.
+- AMBIGUOUS NOUN PHRASES: A bare noun phrase that describes a SPECIFIC physical object (not a common grocery item) — like a notebook, gift, clothing item, or school supply — could be shopping, a task, a reminder, or just social chatter. When the phrase has NO verb and is NOT a clearly recognizable supermarket/grocery item (milk, bread, eggs, fruits, vegetables, cleaning supplies), set confidence: 0.55 and needs_conversation_review: true. Let Sonnet ask the user what they meant. Common groceries (חלב, ביצים, אננס, נייר טואלט, etc.) are still high-confidence add_shopping.
 ` : ""}HEBREW DAYS: ראשון=Sunday, שני=Monday, שלישי=Tuesday, רביעי=Wednesday, חמישי=Thursday, שישי=Friday, שבת=Saturday
 ISRAEL WEEK: Sunday (ראשון) is the FIRST work day, NOT weekend. Weekend in Israel = Friday + Saturday ONLY. Never call Sunday "סוף השבוע".
 
@@ -820,6 +861,9 @@ EXAMPLES:
 [אבא]: "הבאתי לחם" → {"intent":"ignore","confidence":0.95,"entities":{"raw_text":"הבאתי לחם"}}
 [אבא]: "איפה בנות?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה בנות?"}}
 [אמא]: "איפה אתם? מתי מגיעים?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה אתם? מתי מגיעים?"}}
+[אמא]: "מיני מחברת לנגה" → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"items":[{"name":"מיני מחברת לנגה","category":"אחר"}],"raw_text":"מיני מחברת לנגה"}}
+[אבא]: "סוודר לנועה" → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"items":[{"name":"סוודר לנועה","category":"אחר"}],"raw_text":"סוודר לנועה"}}
+[אמא]: "מתנה לגננת" → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"items":[{"name":"מתנה לגננת","category":"אחר"}],"raw_text":"מתנה לגננת"}}
 [אמא]: "שלי תזכרי שיובל אוהב פיצה עם אננס" → {"intent":"save_memory","confidence":0.95,"entities":{"memory_content":"יובל אוהב פיצה עם אננס","memory_about":"יובל","raw_text":"שלי תזכרי שיובל אוהב פיצה עם אננס"}}
 [אבא]: "שלי מה את זוכרת על נועה?" → {"intent":"recall_memory","confidence":0.90,"entities":{"memory_about":"נועה","raw_text":"שלי מה את זוכרת על נועה?"}}
 [אמא]: "שלי תשכחי את מה שאמרתי קודם" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"שלי תשכחי את מה שאמרתי קודם"}}
@@ -843,14 +887,21 @@ EXAMPLES:
 [אבא]: "קניתי חלב ב-12" → {"intent":"add_expense","confidence":0.82,"entities":{"amount_text":"12","amount_minor":1200,"expense_currency":"ILS","expense_description":"חלב","expense_category":"סופר","expense_attribution":"speaker","raw_text":"קניתי חלב ב-12"}}
 [אמא]: "תרמתי 200 לבית הספר" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"תרומה לבית הספר","expense_category":"חינוך","expense_attribution":"speaker","raw_text":"תרמתי 200 לבית הספר"}}
 [אבא]: "שילמתי 150 יורו דלק" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"150","amount_minor":15000,"expense_currency":"EUR","expense_description":"דלק","expense_category":"דלק","expense_attribution":"speaker","raw_text":"שילמתי 150 יורו דלק"}}
-[אמא]: "עלה לנו 80 דולר הארוחה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"80","amount_minor":8000,"expense_currency":"USD","expense_description":"ארוחה","expense_category":"אוכל","expense_attribution":"joint","raw_text":"עלה לנו 80 דולר הארוחה"}}
-[אבא]: "דוח חניה 250 שח" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"250","amount_minor":25000,"expense_currency":"ILS","expense_description":"דוח חניה","expense_category":"קנס","expense_attribution":"speaker","raw_text":"דוח חניה 250 שח"}}
+[אמא]: "נעליים במאתיים אירו" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"EUR","expense_description":"נעליים","expense_category":"ביגוד","expense_attribution":"speaker","raw_text":"נעליים במאתיים אירו"}}
+[אבא]: "עלה לנו 80 דולר הארוחה" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"80","amount_minor":8000,"expense_currency":"USD","expense_description":"ארוחה","expense_category":"אוכל","expense_attribution":"joint","raw_text":"עלה לנו 80 דולר הארוחה"}}
+[אמא]: "קניתי מטוס קטן ב-$700 אתמול" → {"intent":"add_expense","confidence":0.92,"entities":{"amount_text":"700","amount_minor":70000,"expense_currency":"USD","expense_description":"מטוס קטן","expense_attribution":"speaker","raw_text":"קניתי מטוס קטן ב-$700 אתמול"}}
+[אבא]: "שילמתי 200 שקל גז" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"200","amount_minor":20000,"expense_currency":"ILS","expense_description":"גז","expense_category":"גז","expense_attribution":"speaker","raw_text":"שילמתי 200 שקל גז"}}
+[אמא]: "שילמנו 3500 ש״ח ביטוח" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"3500","amount_minor":350000,"expense_currency":"ILS","expense_description":"ביטוח","expense_category":"ביטוח","expense_attribution":"joint","raw_text":"שילמנו 3500 ש״ח ביטוח"}}
+[אבא]: "שילמתי 10000 ין ארוחה ביפן" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"10000","amount_minor":10000,"expense_currency":"JPY","expense_description":"ארוחה","expense_category":"אוכל","expense_attribution":"speaker","raw_text":"שילמתי 10000 ין ארוחה ביפן"}}
+[אמא]: "דוח חניה 250 שח" → {"intent":"add_expense","confidence":0.90,"entities":{"amount_text":"250","amount_minor":25000,"expense_currency":"ILS","expense_description":"דוח חניה","expense_category":"קנס","expense_attribution":"speaker","raw_text":"דוח חניה 250 שח"}}
 [אמא]: "קנס של 750" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"750","amount_minor":75000,"expense_currency":"ILS","expense_description":"קנס","expense_category":"קנס","expense_attribution":"household","raw_text":"קנס של 750"}}
 [אבא]: "עלות התיקון 800" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"800","amount_minor":80000,"expense_currency":"ILS","expense_description":"תיקון","expense_category":"תחזוקה","expense_attribution":"household","raw_text":"עלות התיקון 800"}}
 [אמא]: "כמה שילמנו החודש?" → {"intent":"query_expense","confidence":0.92,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"this_month","raw_text":"כמה שילמנו החודש?"}}
 [אבא]: "כמה שילמנו חשמל החודש?" → {"intent":"query_expense","confidence":0.93,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"חשמל","expense_query_period":"this_month","raw_text":"כמה שילמנו חשמל החודש?"}}
 [אמא]: "תסכמי לנו את ההוצאות בחודש שעבר" → {"intent":"query_expense","confidence":0.94,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"last_month","raw_text":"תסכמי לנו את ההוצאות בחודש שעבר"}}
 [אבא]: "כמה הוצאנו על אוכל החודש?" → {"intent":"query_expense","confidence":0.91,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"אוכל","expense_query_period":"this_month","raw_text":"כמה הוצאנו על אוכל החודש?"}}
+[אמא]: "כמה הוצאנו בחודש שעבר?" → {"intent":"query_expense","confidence":0.92,"addressed_to_bot":true,"entities":{"expense_query_type":"summary","expense_query_period":"last_month","raw_text":"כמה הוצאנו בחודש שעבר?"}}
+[אבא]: "כמה שילמנו על חשמל החודש?" → {"intent":"query_expense","confidence":0.93,"addressed_to_bot":true,"entities":{"expense_query_type":"category_in_period","expense_query_category":"חשמל","expense_query_period":"this_month","raw_text":"כמה שילמנו על חשמל החודש?"}}
 [אמא]: "שילמתי עליו 50 בבית קפה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"שילמתי עליו 50 בבית קפה"}}
 [אבא]: "המשכנתא עולה 4000 בחודש" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"המשכנתא עולה 4000 בחודש"}}
 [אמא]: "זה עולה 50 שקל" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"זה עולה 50 שקל"}}
@@ -1171,6 +1222,7 @@ When kids or teens troll, tease, or test you — play along! You're the cool old
 
 GROUNDING — MANDATORY:
 NEVER reference events, habits, mistakes, or scenarios that aren't explicitly in this conversation, the action results, or the family memories provided below. When roasting or joking back, use ONLY what the sender actually said or did. If you have nothing specific to reference, keep it generic and short. Do NOT invent stories, habits, or failures to sound witty.
+- If recent conversation history shows someone reacted negatively (reacted 😂/🤦/👎 to שלי) to your last message, acknowledge gracefully and ask for clarification. Don't repeat the same action.
 
 OUT-OF-SCOPE REQUESTS: When someone asks about weather, news, sports scores, trivia, recipes, directions, general knowledge, or anything outside household management (${isHe ? "מטלות, קניות, אירועים" : "tasks, shopping, events"}):
 - Deflect warmly. Acknowledge the question. Redirect to what you CAN do.
@@ -1698,6 +1750,7 @@ You have TWO superpowers Haiku doesn't:
 
    CRITICAL quote rule: when the NEWEST message has a "↳ replying to:" line, base your actions on the quoted content, not on unrelated older messages in history. If the reply says "זה כבר קנינו" / "יש לנו" / "כבר קניתי" and the quote lists shopping items, emit complete_shopping for those specific items, not add_shopping.
 2. CONFIDENT COMMITMENT — a silent drop is worse than a small mistake. Recent churn was caused by Sheli silently ignoring 10 shopping messages in a row while the user was building a grocery list; the family felt abandoned and removed Sheli from the group. Default to TAKING THE ACTION when the evidence says so, and confirm in the reply.
+3. CLARIFYING AMBIGUOUS ITEMS — When a message is a bare noun phrase describing a NON-grocery physical object (notebook, gift, sweater, toy) with no verb, it could be shopping, a task, a reminder, or just chatter. In this case, DO NOT silently ignore and DO NOT blindly add to shopping. Instead: respond=true, actions=[], and ASK a short clarifying question. Example: "מיני מחברת לנגה" → "מיני מחברת לנגה — להוסיף לרשימת הקניות?" Keep the question SHORT (one line) and suggest the most likely intent.
 
 Decide if any messages are ACTIONABLE (shopping, task, event, completion, or question about household state). If so, extract actions and write a SHORT reply acknowledging them. If the current message is clearly addressed to Sheli (by name "שלי", or a direct question to the bot), reply even if there's no action to take — don't leave the user hanging.
 
@@ -1904,12 +1957,12 @@ function isSameEvent(existingTitle: string, newTitle: string, existingDate: stri
 async function fetchRecentConversation(
   groupId: string,
   excludeMessageId?: string
-): Promise<Array<{ sender_name: string; message_text: string; created_at: string }>> {
+): Promise<Array<{ sender_name: string; message_text: string; created_at: string; classification?: string; in_reply_to?: string }>> {
   const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
   const { data: recentByTime } = await supabase
     .from("whatsapp_messages")
-    .select("id, sender_name, message_text, created_at")
+    .select("id, sender_name, message_text, created_at, classification, in_reply_to")
     .eq("group_id", groupId)
     .gte("created_at", fifteenMinAgo)
     .order("created_at", { ascending: true })
@@ -1917,7 +1970,7 @@ async function fetchRecentConversation(
 
   const { data: recentByCount } = await supabase
     .from("whatsapp_messages")
-    .select("id, sender_name, message_text, created_at")
+    .select("id, sender_name, message_text, created_at, classification, in_reply_to")
     .eq("group_id", groupId)
     .order("created_at", { ascending: false })
     .limit(10);
@@ -1943,16 +1996,19 @@ async function fetchRecentConversation(
       sender_name: m.sender_name || "?",
       message_text: m.message_text,
       created_at: m.created_at,
+      classification: m.classification || undefined,
+      in_reply_to: m.in_reply_to || undefined,
     }));
 }
 
 // ─── Expense Amount Parser ───
 
 const CURRENCY_MAP: Record<string, string> = {
-  "₪": "ILS", "שקל": "ILS", "שקלים": "ILS", "ש״ח": "ILS", "שח": "ILS", "nis": "ILS", "ils": "ILS",
+  "₪": "ILS", "שקל": "ILS", "שקלים": "ILS", "ש״ח": "ILS", 'ש"ח': "ILS", "שח": "ILS", "nis": "ILS", "ils": "ILS",
   "$": "USD", "דולר": "USD", "דולרים": "USD", "usd": "USD", "dollars": "USD", "dollar": "USD",
   "€": "EUR", "יורו": "EUR", "אירו": "EUR", "eur": "EUR", "euro": "EUR", "euros": "EUR",
   "£": "GBP", "פאונד": "GBP", "לירה": "GBP", "gbp": "GBP", "pound": "GBP", "pounds": "GBP",
+  "¥": "JPY", "ין": "JPY", "yen": "JPY", "jpy": "JPY",
 };
 
 const MINOR_UNIT: Record<string, number> = {
@@ -2469,11 +2525,36 @@ async function executeActions(
             amount_text, amount_minor: haikuAmount,
             expense_currency, expense_description, expense_category,
             expense_attribution, expense_paid_by_name,
-            expense_occurred_at_hint, expense_visibility_hint
+            expense_occurred_at_hint, expense_visibility_hint,
+            raw_text
           } = action.data as Record<string, any>;
 
-          const currency = (expense_currency || "ILS").toUpperCase();
-          const parsed = parseAmountToMinor(amount_text, haikuAmount, currency);
+          // Fallback currency detection: scan raw text for currency keywords
+          // when Haiku didn't set expense_currency or defaulted to ILS
+          let currency = (expense_currency || "ILS").toUpperCase();
+          if ((!expense_currency || expense_currency === "ILS") && raw_text) {
+            const lowerText = raw_text.toLowerCase();
+            for (const [keyword, code] of Object.entries(CURRENCY_MAP)) {
+              if (lowerText.includes(keyword)) {
+                currency = code;
+                break;
+              }
+            }
+          }
+
+          let parsed = parseAmountToMinor(amount_text, haikuAmount, currency);
+
+          // Fallback amount extraction: if Haiku didn't extract the amount,
+          // scan raw_text for numbers (e.g. "שילמתי 80 דולר" → 80)
+          if ((!parsed || parsed.amount_minor === 0) && raw_text) {
+            // Match: number with optional comma/decimal, or $-prefixed, or ₪/€/£-prefixed
+            const numMatch = raw_text.match(/[$₪€£¥]?\s*([\d,]+(?:\.\d+)?)/);
+            if (numMatch) {
+              const fallbackNum = numMatch[1].replace(/,/g, "");
+              console.log("[Expense] Fallback amount extraction from raw_text: " + fallbackNum + " " + currency);
+              parsed = parseAmountToMinor(fallbackNum, undefined, currency);
+            }
+          }
 
           if (!parsed || parsed.amount_minor === 0) {
             // No amount provided — Sonnet should ask "כמה?"
@@ -3639,12 +3720,9 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
           updated_at: new Date().toISOString(),
         }).eq("phone", phone);
         const reply = `אשמח לקרוא לך ${newName} מעכשיו 😊`;
-        await prov.sendMessage({ groupId: message.groupId, text: reply });
-        await logMessage(
-          { messageId: `rename_${phone}_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: reply, type: "text" },
-          "preferred_name_set",
-          convo.household_id || "unknown"
-        );
+        await sendAndLog(prov, { groupId: message.groupId, text: reply }, {
+          householdId: convo.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "onboarding_reply"
+        });
         console.log(`[1:1] Set preferred_name="${newName}" for ${phone}`);
         return;
       }
@@ -3703,14 +3781,9 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
 
     // Send welcome
     const welcome = getOnboardingWelcome(senderName);
-    await prov.sendMessage({ groupId: message.groupId, text: welcome });
-
-    // Log
-    await logMessage(
-      { messageId: `welcome_${phone}_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: welcome, type: "text" },
-      "onboarding_welcome",
-      "unknown"
-    );
+    await sendAndLog(prov, { groupId: message.groupId, text: welcome }, {
+      householdId: "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "onboarding_reply"
+    });
     console.log(`[1:1] New onboarding conversation for ${phone}${validReferralCode ? ` (referred by ${validReferralCode})` : ""}`);
     return;
   }
@@ -3738,9 +3811,11 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
 
   // --- Joined/personal: shouldn't reach here (mapping handled above), but safety ---
   if (convo.state === "joined" || convo.state === "personal") {
-    await prov.sendMessage({
+    await sendAndLog(prov, {
       groupId: message.groupId,
       text: "אני כבר בקבוצה שלכם! דברו איתי שם, או כתבו לי כאן לדברים אישיים 😊",
+    }, {
+      householdId: convo?.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "onboarding_reply"
     });
     return;
   }
@@ -3813,7 +3888,9 @@ ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: $
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) {
       console.warn("[1:1] No ANTHROPIC_API_KEY — sending fallback");
-      await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
+      await sendAndLog(prov, { groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" }, {
+        householdId: convo.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "error_fallback"
+      });
       return;
     }
 
@@ -3843,7 +3920,9 @@ ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: $
 
     if (!response.ok) {
       console.error(`[1:1] Sonnet error: ${response.status}`);
-      await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
+      await sendAndLog(prov, { groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" }, {
+        householdId: convo.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "error_fallback"
+      });
       return;
     }
 
@@ -3885,31 +3964,31 @@ ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: $
 
     // Send reply
     if (visibleReply) {
-      await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
+      await sendAndLog(prov, { groupId: message.groupId, text: visibleReply }, {
+        householdId: convo.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId,
+        replyType: actions.length > 0 ? "action_reply" : "direct_reply"
+      });
     }
 
     // Group nudge check (one-time, after 2 days OR 5 real actions)
     const updatedConvo = { ...convo, message_count: msgCount, state: newState };
     if (await shouldSendGroupNudge(updatedConvo) && !isQuietHours()) {
-      await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
+      await sendAndLog(prov, { groupId: message.groupId, text: GROUP_NUDGE_MESSAGE }, {
+        householdId: convo.household_id || "unknown", groupId: message.groupId, replyType: "nudge"
+      });
       await supabase.from("onboarding_conversations").update({
         context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
       }).eq("phone", phone);
       console.log(`[1:1] Group nudge sent to ${phone}`);
     }
-
-    // Log
-    await logMessage(
-      { messageId: `onboarding_reply_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: visibleReply, type: "text" },
-      actions.length > 0 ? "onboarding_actionable" : "onboarding_conversational",
-      convo.household_id || "unknown"
-    );
     console.log(`[1:1] Sonnet 1:1 reply for ${phone}: actions=${actions.length}, tried=${newTried.join(",")}`);
 
   } catch (err) {
     console.error("[1:1] handleDirectMessage error:", err);
     try {
-      await prov.sendMessage({ groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" });
+      await sendAndLog(prov, { groupId: message.groupId, text: "אופס, משהו השתבש 🙈 נסו שוב?" }, {
+        householdId: convo?.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "error_fallback"
+      });
     } catch {}
   }
 }
@@ -3993,7 +4072,10 @@ CONVERSATION CONTINUITY — CRITICAL:
     });
 
     if (visibleReply) {
-      await prov.sendMessage({ groupId: message.groupId, text: visibleReply });
+      await sendAndLog(prov, { groupId: message.groupId, text: visibleReply }, {
+        householdId, groupId: message.groupId, inReplyTo: message.messageId,
+        replyType: actions.length > 0 ? "action_reply" : "direct_reply"
+      });
     }
 
     // Group nudge check for personal-household users without a real group
@@ -4007,20 +4089,15 @@ CONVERSATION CONTINUITY — CRITICAL:
         .single();
 
       if (!groupConfig && convo && await shouldSendGroupNudge(convo) && !isQuietHours()) {
-        await prov.sendMessage({ groupId: message.groupId, text: GROUP_NUDGE_MESSAGE });
+        await sendAndLog(prov, { groupId: message.groupId, text: GROUP_NUDGE_MESSAGE }, {
+          householdId, groupId: message.groupId, replyType: "nudge"
+        });
         await supabase.from("onboarding_conversations").update({
           context: { ...(convo.context || {}), group_nudge_sent_at: new Date().toISOString() },
         }).eq("phone", phone);
         console.log(`[1:1 personal] Group nudge sent to ${phone}`);
       }
     } catch {}
-
-    // Log
-    await logMessage(
-      { messageId: `personal_reply_${Date.now()}`, groupId: message.groupId, senderPhone: "972555175553", senderName: "שלי", text: visibleReply, type: "text" },
-      actions.length > 0 ? "personal_actionable" : "personal_conversational",
-      householdId
-    );
     console.log(`[1:1 personal] Reply for ${phone}: actions=${actions.length}`);
   } catch (err) {
     console.error("[1:1 personal] error:", err);
@@ -4105,7 +4182,9 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
       console.log(`[GroupMgmt] Re-activated bot for group ${groupId}`);
     }
     // Send intro message on re-add
-    await provider.sendMessage({ groupId, text: INTRO_MESSAGE });
+    await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
+      householdId: existingConfig.household_id || "unknown", groupId, replyType: "group_mgmt"
+    });
     return;
   }
 
@@ -4152,7 +4231,9 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
     if (error) {
       console.error(`[GroupMgmt] Failed to create household:`, error);
       // Still send intro even if household creation fails
-      await provider.sendMessage({ groupId, text: INTRO_MESSAGE });
+      await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
+        householdId: "unknown", groupId, replyType: "group_mgmt"
+      });
       return;
     }
     console.log(`[GroupMgmt] Created new household ${householdId} (${groupName})`);
@@ -4180,7 +4261,9 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
   console.log(`[GroupMgmt] Pre-mapped ${humanParticipants.length} participants`);
 
   // 7. Send introduction message
-  await provider.sendMessage({ groupId, text: INTRO_MESSAGE });
+  await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
+    householdId: householdId || "unknown", groupId, replyType: "group_mgmt"
+  });
   console.log(`[GroupMgmt] Intro message sent to ${groupId}`);
 
   // 8. Notify any pending 1:1 onboarding conversations that their group is now active
@@ -4218,9 +4301,11 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
 כתבו לי כאן. אף אחד אחר לא רואה.
 
 אני תמיד כאן 💛`;
-      await provider.sendMessage({
+      await sendAndLog(provider, {
         groupId: onboardingConvo.phone,
         text: postGroupMsg,
+      }, {
+        householdId: householdId || "unknown", groupId: onboardingConvo.phone, replyType: "group_mgmt"
       });
       console.log(`[1:1] Personal channel message sent to ${p.phone} — state: personal, household: ${householdId}`);
     }
@@ -4462,7 +4547,9 @@ async function claimAndProcessBatch(
   }
 
   const batchReply = replyParts.join("\n") || "🛒 עדכנתי את הרשימה";
-  await provider.sendMessage({ groupId, text: batchReply });
+  await sendAndLog(provider, { groupId, text: batchReply }, {
+    householdId, groupId, replyType: "batch_reply"
+  });
 
   // Mark all batch messages as processed
   await supabase
@@ -4588,7 +4675,9 @@ Deno.serve(async (req: Request) => {
               longVoiceText = casual[Math.floor(Math.random() * casual.length)];
             }
             try {
-              await provider.sendMessage({ groupId: chatTarget, text: longVoiceText });
+              await sendAndLog(provider, { groupId: chatTarget, text: longVoiceText }, {
+                householdId: "unknown", groupId: chatTarget, inReplyTo: message.messageId, replyType: "long_voice_reply"
+              });
             } catch (e) { console.error("[LongVoice] reply failed:", e); }
           }
         }
@@ -4626,6 +4715,88 @@ Deno.serve(async (req: Request) => {
 
       message.text = cleanTranscript;
       console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}" → final: "${cleanTranscript.slice(0, 80)}"`);
+    }
+
+    // 3a-reaction. Handle emoji reactions to Sheli's messages
+    if (message.type === "reaction" && message.reactionEmoji && message.reactionTargetId) {
+      const CONFIRM_EMOJI = /^(👍|💪|✅|👌|❤️|🔥)$/;
+      const WRONG_EMOJI = /^(😂|😤|👎|❌|🤦|🤦‍♀️|🤦‍♂️|😡)$/;
+
+      // Step 1: Is this a reaction to a Sheli message?
+      const botPhoneReaction = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+      const { data: botMsg } = await supabase
+        .from("whatsapp_messages")
+        .select("id, whatsapp_message_id, classification, message_text, household_id")
+        .eq("whatsapp_message_id", message.reactionTargetId)
+        .eq("sender_phone", botPhoneReaction)
+        .maybeSingle();
+
+      if (!botMsg) {
+        // Reaction to someone else's message — social noise, skip silently
+        return new Response("OK", { status: 200 });
+      }
+
+      const hhId = botMsg.household_id || "unknown";
+      const isConfirm = CONFIRM_EMOJI.test(message.reactionEmoji);
+      const isWrong = WRONG_EMOJI.test(message.reactionEmoji);
+
+      if (!isConfirm && !isWrong) {
+        // Unrecognized emoji on Sheli's message — skip
+        return new Response("OK", { status: 200 });
+      }
+
+      // Step 2: Check for pending confirmation targeting this bot message
+      const { data: pending } = await supabase
+        .from("pending_confirmations")
+        .select("id, action_type, action_data")
+        .eq("bot_message_id", message.reactionTargetId)
+        .eq("status", "pending")
+        .maybeSingle();
+
+      if (pending) {
+        if (isConfirm) {
+          const actions = [{ type: pending.action_type, data: pending.action_data }];
+          const { summary } = await executeActions(hhId, actions, message.senderName);
+          console.log(`[Reaction] Confirmed via ${message.reactionEmoji}:`, summary);
+          await supabase.from("pending_confirmations")
+            .update({ status: "confirmed" }).eq("id", pending.id);
+          await sendAndLog(provider,
+            { groupId: message.groupId, text: "מעולה, סידרתי! ✓" },
+            { householdId: hhId, groupId: message.groupId, replyType: "confirmation_accept_reaction" });
+          await logMessage(message, "reaction_confirmed", hhId);
+        } else {
+          await supabase.from("pending_confirmations")
+            .update({ status: "rejected" }).eq("id", pending.id);
+          await sendAndLog(provider,
+            { groupId: message.groupId, text: "אוקי, ביטלתי 🤷‍♀️" },
+            { householdId: hhId, groupId: message.groupId, replyType: "confirmation_reject_reaction" });
+          await logMessage(message, "reaction_rejected", hhId);
+        }
+        return new Response("OK", { status: 200 });
+      }
+
+      // Step 3: No pending confirmation — log as feedback on Sheli's message
+      if (isConfirm) {
+        console.log(`[Reaction] Positive ${message.reactionEmoji} from ${message.senderName} on: "${botMsg.message_text?.slice(0, 60)}"`);
+        await logMessage(message, "reaction_positive", hhId);
+      } else {
+        console.log(`[Reaction] Negative ${message.reactionEmoji} from ${message.senderName} on: "${botMsg.message_text?.slice(0, 60)}"`);
+        await logMessage(message, "reaction_negative", hhId);
+        // Store as correction signal for Stream B learning
+        supabase.from("classification_corrections").insert({
+          household_id: hhId,
+          correction_type: "reaction_negative",
+          original_data: {
+            bot_message_text: botMsg.message_text,
+            bot_classification: botMsg.classification,
+            reaction_emoji: message.reactionEmoji,
+            reactor_name: message.senderName,
+          },
+        }).then(({ error }) => {
+          if (error) console.error("[Reaction] correction log error:", error.message);
+        });
+      }
+      return new Response("OK", { status: 200 });
     }
 
     // 3b. Skip all non-text/non-voice messages (photos, stickers, video, etc.)
@@ -4842,7 +5013,9 @@ Deno.serve(async (req: Request) => {
           .update({ status: "confirmed" })
           .eq("id", pendingConfirm.id);
 
-        await provider.sendMessage({ groupId: message.groupId, text: "מעולה, סידרתי! ✓" });
+        await sendAndLog(provider, { groupId: message.groupId, text: "מעולה, סידרתי! ✓" }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "confirmation_accept"
+        });
         await logMessage(message, "confirmation_accepted", householdId);
         return new Response("OK", { status: 200 });
       }
@@ -4852,9 +5025,11 @@ Deno.serve(async (req: Request) => {
           .update({ status: "rejected" })
           .eq("id", pendingConfirm.id);
 
-        await provider.sendMessage({
+        await sendAndLog(provider, {
           groupId: message.groupId,
           text: "אוקי, ביטלתי 🤷‍♀️ אפשר להסביר שוב ואני אנסה להבין",
+        }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "confirmation_reject"
         });
         await logMessage(message, "confirmation_rejected", householdId);
         return new Response("OK", { status: 200 });
@@ -4902,9 +5077,11 @@ Deno.serve(async (req: Request) => {
         hit_count: 1,
       }, { onConflict: "household_id,pattern_type,pattern_key" });
 
-      await provider.sendMessage({
+      await sendAndLog(provider, {
         groupId: message.groupId,
         text: "חח סורי! 🙈 לא התכוונתי להתערב. מחזירה את עצמי לפינה 😅",
+      }, {
+        householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "back_off_reply"
       });
       await logMessage(message, "haiku_ignore", householdId);
       return new Response("OK", { status: 200 });
@@ -4915,7 +5092,9 @@ Deno.serve(async (req: Request) => {
     if (PURE_EMOJI.test(message.text.trim()) && message.text.trim().length <= 20 && !message.text.trim().match(/[a-zA-Z\u0590-\u05FF\u0600-\u06FF0-9]/)) {
       const emojiReply = await generateEmojiReply(message.text.trim(), message.senderName);
       if (emojiReply) {
-        await provider.sendMessage({ groupId: message.groupId, text: emojiReply });
+        await sendAndLog(provider, { groupId: message.groupId, text: emojiReply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "emoji_reaction"
+        });
       }
       await logMessage(message, "haiku_ignore", householdId);
       return new Response("OK", { status: 200 });
@@ -4943,9 +5122,11 @@ Deno.serve(async (req: Request) => {
         if (new Date(lastAction.created_at).getTime() > sixtySecsAgo) {
           const undone = await undoLastAction(householdId, lastAction.classification_data);
           if (undone.length > 0) {
-            await provider.sendMessage({
+            await sendAndLog(provider, {
               groupId: message.groupId,
               text: `בוטל ✓`,
+            }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "quick_undo_reply"
             });
             await supabase.from("classification_corrections").insert({
               household_id: householdId,
@@ -4996,6 +5177,12 @@ Deno.serve(async (req: Request) => {
           // SECURITY: sanitize stored names/text to prevent second-order prompt injection
           const safeName = (m.sender_name || "?").replace(/[\x00-\x1f\x7f\[\]{}]/g, "").slice(0, 50);
           const safeText = (m.message_text || "").slice(0, 500);
+
+          // Format reactions to Sheli's messages distinctly
+          if (m.classification === "reaction_positive" || m.classification === "reaction_negative") {
+            return `[${time} ${safeName} reacted ${safeText} to שלי]`;
+          }
+
           return `[${time} ${safeName}]: ${safeText}`;
         }).join("\n")
       : undefined;
@@ -5114,7 +5301,9 @@ Deno.serve(async (req: Request) => {
           // Previously we only stripped — silently dropping reminders when this path fired.
           if (reply) reply = await rescueRemindersAndStrip(reply, classification, message, householdId);
           if (reply) {
-            await provider.sendMessage({ groupId: message.groupId, text: reply });
+            await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "direct_address_reply"
+            });
             await maybeMarkDashboardMentioned(message.groupId, reply);
           }
           await logMessage(message, "direct_address_reply", householdId, classification);
@@ -5133,7 +5322,9 @@ Deno.serve(async (req: Request) => {
       const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName);
       await incrementUsage(householdId);
       if (sonnetResult.reply) {
-        await provider.sendMessage({ groupId: message.groupId, text: sonnetResult.reply });
+        await sendAndLog(provider, { groupId: message.groupId, text: sonnetResult.reply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "sonnet_escalated_reply"
+        });
         await maybeMarkDashboardMentioned(message.groupId, sonnetResult.reply);
       }
       await logMessage(message, "sonnet_escalated", householdId, classification);
@@ -5163,9 +5354,11 @@ Deno.serve(async (req: Request) => {
           new Date(lastBotMsg.created_at).getTime() > Date.now() - 5 * 60 * 1000;
 
         if (lastBotWasConfused) {
-          await provider.sendMessage({
+          await sendAndLog(provider, {
             groupId: message.groupId,
             text: "רגע, הולכת לבדוק עם הצוות ואחזור אליכם! 🏃‍♀️",
+          }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
           });
           await notifyAdmin(
             `Double confusion in group`,
@@ -5207,13 +5400,41 @@ Deno.serve(async (req: Request) => {
         // Rescue: save any REMINDER blocks (Sonnet-emitted or Haiku-entity fallback) BEFORE stripping
         if (reply) reply = await rescueRemindersAndStrip(reply, directClassification, message, householdId);
         if (reply) {
-          await provider.sendMessage({ groupId: message.groupId, text: reply });
+          await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "direct_address_reply"
+          });
         }
         await logMessage(message, "direct_address_reply", householdId, classification);
         return new Response("OK", { status: 200 });
       }
-      await logMessage(message, "haiku_ignore", householdId, classification);
-      return new Response("OK", { status: 200 });
+      // Expense rescue: Haiku sometimes misclassifies clear expense messages as ignore.
+      // If the message contains a Hebrew payment verb + a number, re-route to Sonnet
+      // for a second opinion before silently dropping it.
+      const EXPENSE_VERBS = /שילמתי|שילמנו|שולם|העברתי|הוצאתי|שרפתי|קניתי|חטפתי|תרמתי/;
+      const EXPENSE_COST = /עלה\s+(לי|לנו)|יצא\s+לנו|ירד\s+לי|נפל\s+חשבון|עלות\s+ה/;
+      const HAS_NUMBER = /\d{2,}|מאתיים|אלף|אלפיים|שלוש\s+מאות|ארבע\s+מאות|חמש\s+מאות/;
+      // "שילמתי עליו/עליה" = social treating (paying for someone), NOT household expense
+      const IS_TREATING = /שילמתי\s+על(יו|יה|יהם|יהן|ינו)/;
+      const looksLikeExpense = (EXPENSE_VERBS.test(message.text) || EXPENSE_COST.test(message.text)) && HAS_NUMBER.test(message.text) && !IS_TREATING.test(message.text);
+      if (looksLikeExpense) {
+        console.log(`[Webhook] Expense rescue: Haiku said ignore but message matches expense pattern — reclassifying as add_expense`);
+        // Route through direct Haiku actionable path (not Sonnet escalation —
+        // old Sonnet classifier doesn't support add_expense actions).
+        // Amount/currency fallbacks in executeActions extract from raw_text.
+        classification.intent = "add_expense";
+        classification.confidence = 0.75; // >= CONFIDENCE_HIGH, takes direct action path
+      } else {
+        await logMessage(message, "haiku_ignore", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+    }
+
+    // Expense confidence boost: old Sonnet classifier (used in medium-confidence escalation)
+    // doesn't support add_expense actions. Any add_expense from Haiku (even medium confidence)
+    // should take the direct action path where amount/currency fallbacks handle extraction.
+    if (classification.intent === "add_expense" && classification.confidence >= CONFIDENCE_LOW && classification.confidence < CONFIDENCE_HIGH) {
+      console.log(`[Webhook] Expense confidence boost: ${classification.confidence.toFixed(2)} → 0.75 (bypassing Sonnet escalation)`);
+      classification.confidence = 0.75;
     }
 
     // Low confidence → normally treat as ignore, BUT direct address always gets a reply
@@ -5240,9 +5461,11 @@ Deno.serve(async (req: Request) => {
           new Date(lastBotMsgLow.created_at).getTime() > Date.now() - 5 * 60 * 1000;
 
         if (lastBotWasConfusedLow) {
-          await provider.sendMessage({
+          await sendAndLog(provider, {
             groupId: message.groupId,
             text: "רגע, הולכת לבדוק עם הצוות ואחזור אליכם! 🏃‍♀️",
+          }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
           });
           await notifyAdmin(
             `Double confusion in group`,
@@ -5260,7 +5483,9 @@ Deno.serve(async (req: Request) => {
         // so Sonnet DOES emit REMINDER blocks for these cases — previously silently stripped.
         if (reply) reply = await rescueRemindersAndStrip(reply, directClassification, message, householdId);
         if (reply) {
-          await provider.sendMessage({ groupId: message.groupId, text: reply });
+          await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "direct_address_reply"
+          });
         }
         await logMessage(message, "direct_address_reply", householdId, classification);
         return new Response("OK", { status: 200 });
@@ -5299,7 +5524,9 @@ Deno.serve(async (req: Request) => {
           let { reply } = await generateReply(directClassification, message.senderName, replyCtx);
           if (reply) reply = await rescueRemindersAndStrip(reply, directClassification, message, householdId);
           if (reply) {
-            await provider.sendMessage({ groupId: message.groupId, text: reply });
+            await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "direct_address_reply"
+            });
           }
           await logMessage(message, "direct_address_reply", householdId, classification);
           return new Response("OK", { status: 200 });
@@ -5341,11 +5568,15 @@ Deno.serve(async (req: Request) => {
           }
         }
         const dedupReply = "👍 " + dedupMessages.join("\n");
-        await provider.sendMessage({ groupId: message.groupId, text: dedupReply });
+        await sendAndLog(provider, { groupId: message.groupId, text: dedupReply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "dedup_reply"
+        });
       } else {
         await incrementUsage(householdId);
         if (sonnetResult.reply) {
-          await provider.sendMessage({ groupId: message.groupId, text: sonnetResult.reply });
+          await sendAndLog(provider, { groupId: message.groupId, text: sonnetResult.reply }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "sonnet_escalated_reply"
+          });
         }
       }
       await logMessage(message, "sonnet_escalated", householdId, classification);
@@ -5364,6 +5595,14 @@ Deno.serve(async (req: Request) => {
       const afterReminderRescue = await rescueRemindersAndStrip(reply, classification, message, householdId);
       const cleanReply = cleanPendingAction(afterReminderRescue);
 
+      let confBotMsgId: string | undefined;
+      if (cleanReply) {
+        const sendResult = await sendAndLog(provider, { groupId: message.groupId, text: cleanReply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "confirmation_ask"
+        });
+        confBotMsgId = sendResult.messageId;
+      }
+
       if (pendingAction && pendingAction.action_type) {
         // Store pending confirmation
         const confId = Math.random().toString(36).slice(2, 10);
@@ -5378,13 +5617,10 @@ Deno.serve(async (req: Request) => {
           created_by: message.senderName,
           expires_at: expiresAt,
           status: "pending",
+          bot_message_id: confBotMsgId || null,
         });
         if (error) console.error("[Webhook] Failed to store pending confirmation:", error);
         else console.log(`[Webhook] Stored pending confirmation ${confId}: ${pendingAction.action_type}`);
-      }
-
-      if (cleanReply) {
-        await provider.sendMessage({ groupId: message.groupId, text: cleanReply });
       }
       await logMessage(message, "instruct_bot", householdId, classification);
       return new Response("OK", { status: 200 });
@@ -5405,7 +5641,9 @@ Deno.serve(async (req: Request) => {
       // symmetric with the other direct-address code paths.
       if (reply) reply = await rescueRemindersAndStrip(reply, classification, message, householdId);
       if (reply) {
-        await provider.sendMessage({ groupId: message.groupId, text: reply });
+        await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
+        });
         await maybeMarkDashboardMentioned(message.groupId, reply);
       }
       await logMessage(message, "haiku_reply_only", householdId, classification);
@@ -5432,7 +5670,9 @@ Deno.serve(async (req: Request) => {
       const clarifyMsg = (config.language === "he")
         ? `לא מצאתי בדיוק למה את/ה מתכוון/ת 🤔 אפשר לפרט?`
         : `I'm not sure which one you mean 🤔 Can you be more specific?`;
-      await provider.sendMessage({ groupId: message.groupId, text: clarifyMsg });
+      await sendAndLog(provider, { groupId: message.groupId, text: clarifyMsg }, {
+        householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
+      });
       await logMessage(message, "haiku_actionable", householdId, classification);
       return new Response("OK", { status: 200 });
     }
@@ -5464,7 +5704,9 @@ Deno.serve(async (req: Request) => {
         }
       }
       const dedupReply = "👍 " + dedupMessages.join("\n");
-      await provider.sendMessage({ groupId: message.groupId, text: dedupReply });
+      await sendAndLog(provider, { groupId: message.groupId, text: dedupReply }, {
+        householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "dedup_reply"
+      });
       await logMessage(message, "haiku_actionable", householdId, classification);
       return new Response("OK", { status: 200 });
     }
@@ -5649,7 +5891,9 @@ Deno.serve(async (req: Request) => {
     }
 
     if (reply) {
-      await provider.sendMessage({ groupId: message.groupId, text: reply });
+      await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+        householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
+      });
       console.log(`[Webhook] Reply sent`);
     }
 
@@ -5863,6 +6107,40 @@ async function logMessage(
   }
 }
 
+// ─── Bot Reply Logger (wraps sendMessage) ───
+
+async function sendAndLog(
+  prov: WhatsAppProvider,
+  msg: OutgoingMessage,
+  ctx: {
+    householdId?: string;
+    groupId: string;
+    inReplyTo?: string;
+    replyType?: string;
+  }
+): Promise<SendResult> {
+  const result = await prov.sendMessage(msg);
+
+  // Fire-and-forget — don't block the reply path
+  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+  supabase.from("whatsapp_messages").insert({
+    household_id: ctx.householdId || "unknown",
+    group_id: ctx.groupId,
+    sender_phone: botPhone,
+    sender_name: "שלי",
+    message_text: msg.text,
+    message_type: "text",
+    whatsapp_message_id: result.messageId || null,
+    classification: ctx.replyType || "bot_reply",
+    ai_responded: true,
+    in_reply_to: ctx.inReplyTo || null,
+  }).then(({ error }) => {
+    if (error) console.error("[sendAndLog] DB error:", error.message);
+  });
+
+  return result;
+}
+
 async function upsertMemberMapping(householdId: string, phone: string, name: string) {
   try {
     // Skip the bot's own messages (phone matches the bot's number)
@@ -5974,16 +6252,8 @@ async function maybeSendSoftWarning(groupId: string, householdId: string, usageC
     ? `נשארו לכם ${remaining} פעולות חינמיות החודש. רוצים להמשיך בלי הגבלה? 9.90 ₪ לחודש 🔗 sheli.ai/upgrade`
     : `You have ${remaining} free actions left this month. Want unlimited? $2.70/month 🔗 sheli.ai/upgrade`;
 
-  await provider.sendMessage({ groupId, text: warningMsg });
-  // M2 fix: use correct column names (matching logMessage function)
-  await supabase.from("whatsapp_messages").insert({
-    whatsapp_message_id: `warning_${Date.now()}`,
-    group_id: groupId,
-    household_id: householdId,
-    sender_phone: "system",
-    sender_name: "system",
-    message_text: warningMsg,
-    classification: "soft_warning",
+  await sendAndLog(provider, { groupId, text: warningMsg }, {
+    householdId, groupId, replyType: "nudge"
   });
   console.log(`[Webhook] Soft warning sent to ${groupId} (${remaining} actions remaining)`);
 }
@@ -6043,7 +6313,9 @@ async function maybeSendDashboardLink(groupId: string, householdId: string, conf
       ? `📊 רוצים לראות הכל במקום אחד?\nמטלות, קניות ואירועים — הכל בדשבורד אחד.\n🔗 sheli.ai?source=wa`
       : `📊 Want to see everything in one place?\nTasks, shopping, and events — all in one dashboard.\n🔗 sheli.ai?source=wa`;
 
-    await provider.sendMessage({ groupId, text: msg });
+    await sendAndLog(provider, { groupId, text: msg }, {
+      householdId, groupId, replyType: "nudge"
+    });
     await supabase
       .from("whatsapp_config")
       .update({ dashboard_link_sent: true })
@@ -6087,7 +6359,9 @@ async function maybeSendReferralAnnouncement(groupId: string, householdId: strin
 
     const msg = `🎁 חברים מביאים חברים!\nאהבתם את שלי? שתפו עם חברים —\nשניכם מקבלים חודש פרימיום במתנה!\n\nשלחו את הקישור: sheli.ai/r/${hh.referral_code}`;
 
-    await provider.sendMessage({ groupId, text: msg });
+    await sendAndLog(provider, { groupId, text: msg }, {
+      householdId, groupId, replyType: "nudge"
+    });
     await supabase
       .from("whatsapp_config")
       .update({ referral_announced: true })
@@ -6153,9 +6427,11 @@ async function maybeCompleteReferral(householdId: string, usageCount: number) {
       .single();
 
     if (referredConfig) {
-      await provider.sendMessage({
+      await sendAndLog(provider, {
         groupId: referredConfig.group_id,
         text: "🎉 חודש פרימיום במתנה! המשיכו להשתמש בשלי ללא הגבלה.",
+      }, {
+        householdId: referral.referred_household_id, groupId: referredConfig.group_id, replyType: "nudge"
       });
     }
 
@@ -6175,9 +6451,11 @@ async function maybeCompleteReferral(householdId: string, usageCount: number) {
         .single();
 
       const familyName = referredHh?.name || "בית חדש";
-      await provider.sendMessage({
+      await sendAndLog(provider, {
         groupId: referringConfig.group_id,
         text: `🎉 ${familyName} הצטרפו בזכותכם! חודש פרימיום במתנה לשניכם!`,
+      }, {
+        householdId: referral.referrer_household_id, groupId: referringConfig.group_id, replyType: "nudge"
       });
     }
 
@@ -6529,6 +6807,7 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
           expense_paid_by_name: e.expense_paid_by_name,
           expense_occurred_at_hint: e.expense_occurred_at_hint,
           expense_visibility_hint: e.expense_visibility_hint,
+          raw_text: e.raw_text,
         },
       });
       break;
@@ -6658,9 +6937,11 @@ async function handleCorrection(
   const lastAction = await getLastBotAction(message.groupId, householdId);
 
   if (!lastAction) {
-    await provider.sendMessage({
+    await sendAndLog(provider, {
       groupId: message.groupId,
       text: "לא מצאתי פעולה אחרונה לתקן 🤔",
+    }, {
+      householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
     });
     return;
   }
@@ -6729,7 +7010,9 @@ async function handleCorrection(
   // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
   await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
 
-  await provider.sendMessage({ groupId: message.groupId, text: reply });
+  await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
+    householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
+  });
   await logMessage(message, "correction_applied", householdId, classification);
 }
 
@@ -6805,5 +7088,7 @@ async function sendUpgradePrompt(groupId: string, householdId: string, language?
     ? `היי ${getHouseholdNameCached(householdId) || "הבית"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה, 9.90 ₪ לחודש.\n🔗 ${paymentUrl}`
     : `Hey ${getHouseholdNameCached(householdId) || "there"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping, $2.70/month.\n🔗 ${paymentUrl}`;
 
-  await provider.sendMessage({ groupId, text: upgradeMsg });
+  await sendAndLog(provider, { groupId, text: upgradeMsg }, {
+    householdId, groupId, replyType: "nudge"
+  });
 }
