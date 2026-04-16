@@ -2984,6 +2984,12 @@ CAPABILITIES YOU CAN DEMONSTRATE:
   - If user engages: ask what rotation + who participates → create it
 - Reminders: user says time+action → "אזכיר!" with time. When giving examples, use universal tasks like "לאסוף ילדים ב-5" or "לשלם חשבון" — NEVER food examples (meat/cooking) which may alienate vegetarians.
 - Events: user says date+event → "שמרתי ביומן!" with date/time
+- Expenses: user reports a payment → you log it. Examples: "שילמתי 1300 חשמל", "עלה לנו 800 במסעדה", "שרפתי 500 על דלק", "דוח חניה 250". Log amount, category, who paid.
+  CRITICAL "קניתי" RULE: "קניתי X ב-[amount]" = expense (any item + price). "קניתי X" without amount = check if X is on shopping list → mark got, else ignore.
+  KEY TENSE: PAST (שילמתי, עלה, יצא לנו) = expense. PRESENT (עולה) = price info, not expense. FUTURE (לשלם) = task.
+  NOT expense: "שילמתי עליו" (social treating). "המשכנתא עולה X" (general statement). "הגיע חשבון" (bill arrived, not paid).
+  Multi-currency: default ILS. "יורו"/"EUR" → EUR, "דולר"/"$" → USD.
+- Expense queries: "כמה שילמנו החודש?" or "תסכמי הוצאות" → use the EXPENSE HISTORY section (if provided in context) to answer. Group by currency. Never fabricate totals.
 - Voice messages: user can send a voice note (up to 30s) and you understand it! Mention this ONLY on the designated hint message (every 3rd message). Do NOT force it into messages 1-2.
 
 FORMATTING (WhatsApp RTL):
@@ -3046,6 +3052,9 @@ ADD:
   IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00). If user says "ב-5" → today 17:00 IST. If "בעוד שעה" → compute from current time. If time already passed today → use tomorrow. The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
+- expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
+  attribution values: "speaker" (שילמתי), "named" (אבא שילם → paid_by_name="אבא"), "joint" (שילמנו), "household" (שולם, passive)
+  Currency: "ILS" (default), "EUR" (יורו/EUR), "USD" (דולר/$), "GBP" (פאונד/£)
 UPDATE (rename/edit existing):
 - update_shopping: {"type":"update_shopping","old_name":"פסטה","new_name":"פסטה פנה"}
 - update_task: {"type":"update_task","old_text":"לנקות","new_text":"לנקות את המטבח"}
@@ -3238,21 +3247,33 @@ function toIsraelTimeStr(utcDate: string): string {
   }
 }
 
-// Load active household items (tasks, shopping, events, reminders) for Sonnet context.
+// Load active household items (tasks, shopping, events, reminders, expenses) for Sonnet context.
 // Times are converted to Israel timezone strings so Sonnet doesn't misread UTC as local.
 async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; scheduled_for?: string; send_at?: string }[]> {
   const nowIso = new Date().toISOString();
-  const [tasksRes, shopRes, eventsRes, remindersRes] = await Promise.all([
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  const [tasksRes, shopRes, eventsRes, remindersRes, expensesRes] = await Promise.all([
     supabase.from("tasks").select("title").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(10),
     supabase.from("shopping_items").select("name").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(10),
     supabase.from("events").select("title, scheduled_for").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(10),
     supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(10),
+    supabase.from("expenses").select("amount_minor, currency, description, category, paid_by, attribution, occurred_at")
+      .eq("household_id", householdId).eq("deleted", false)
+      .gte("occurred_at", thirtyDaysAgo)
+      .order("occurred_at", { ascending: false }).limit(20),
   ]);
   return [
     ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
     ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
     ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: toIsraelTimeStr(r.scheduled_for) })),
     ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: toIsraelTimeStr(r.send_at) })),
+    ...(expensesRes.data || []).map((r: any) => {
+      const unit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100 };
+      const sym: Record<string, string> = { ILS: "\u20AA", USD: "$", EUR: "\u20AC", GBP: "\u00A3" };
+      const u = unit[r.currency] || 100;
+      const s = sym[r.currency] || r.currency;
+      return { type: "expense", text: `${s}${(r.amount_minor / u).toLocaleString("he-IL")} ${r.description}${r.paid_by ? " (" + r.paid_by + ")" : ""}` };
+    }),
   ];
 }
 
@@ -3271,7 +3292,7 @@ const ITEMS_BASED_TYPES = new Set([
   "update_task", "remove_task",
   "update_reminder", "remove_reminder",
   "update_event", "remove_event",
-  "name_correction",
+  "name_correction", "expense",
 ]);
 
 async function execute1on1Actions(params: {
@@ -3318,6 +3339,10 @@ async function execute1on1Actions(params: {
     if (ITEMS_BASED_TYPES.has(action.type)) {
       if (action.type === "shopping" && (!action.items || !Array.isArray(action.items) || action.items.length === 0)) {
         droppedActions.push({ reason: "shopping_no_items", action });
+        return false;
+      }
+      if (action.type === "expense" && (!action.amount || (typeof action.amount === "number" && action.amount <= 0))) {
+        droppedActions.push({ reason: "expense_no_amount", action });
         return false;
       }
       return true;
@@ -3438,6 +3463,39 @@ async function execute1on1Actions(params: {
           } else {
             console.warn(`${logPrefix} Could not parse reminder time: ${JSON.stringify(action)}`);
           }
+          break;
+        }
+        case "expense": {
+          const amount = action.amount;
+          const currency = (action.currency || "ILS").toUpperCase();
+          const minorUnit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100, JPY: 1 };
+          const unit = minorUnit[currency] || 100;
+          const amountMinor = Math.round((typeof amount === "number" ? amount : parseFloat(amount) || 0) * unit);
+
+          if (amountMinor <= 0 || amountMinor > 100000000) {
+            console.warn(`${logPrefix} Suspicious expense amount: ${amount} ${currency}`);
+            break;
+          }
+
+          const attribution = action.attribution || "speaker";
+          const paidBy = attribution === "named" ? (action.paid_by_name || userName)
+                       : attribution === "speaker" ? userName
+                       : null;
+
+          const { error: expErr } = await supabase.from("expenses").insert({
+            household_id: householdId,
+            amount_minor: amountMinor,
+            currency,
+            description: action.description || "הוצאה",
+            category: action.category || action.description || "אחר",
+            paid_by: paidBy,
+            attribution,
+            visibility: "private",
+            source: "whatsapp",
+            logged_by_phone: phone,
+          });
+          if (expErr) console.error(`${logPrefix} Expense insert error:`, expErr);
+          else console.log(`${logPrefix} Expense logged: ${amountMinor} ${currency} "${action.description}" by ${paidBy || "household"}`);
           break;
         }
         // --- UPDATE / REMOVE actions (table-driven) ---
