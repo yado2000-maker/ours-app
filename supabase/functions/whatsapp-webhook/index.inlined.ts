@@ -860,6 +860,9 @@ EXAMPLES:
 [אבא]: "עלויות גבוהות" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"עלויות גבוהות"}}
 [אמא]: "עלה 1300 חשמל" → {"intent":"add_expense","confidence":0.88,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_attribution":"household","raw_text":"עלה 1300 חשמל"}}
 [אבא]: "עולה 1300 חשמל" → {"intent":"ignore","confidence":0.82,"entities":{"raw_text":"עולה 1300 חשמל"}}
+[אמא]: "שילמתי חשמל" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":null,"amount_minor":null,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"שילמתי חשמל"}}
+[אבא]: "שילמנו ארנונה" → {"intent":"add_expense","confidence":0.85,"entities":{"amount_text":null,"amount_minor":null,"expense_currency":"ILS","expense_description":"ארנונה","expense_category":"ארנונה","expense_attribution":"joint","raw_text":"שילמנו ארנונה"}}
+[אמא]: "סגרתי את הגז" → {"intent":"add_expense","confidence":0.80,"entities":{"amount_text":null,"amount_minor":null,"expense_currency":"ILS","expense_description":"גז","expense_category":"גז","expense_attribution":"speaker","raw_text":"סגרתי את הגז"}}
 
 CRITICAL — "שלי" DISAMBIGUATION:
 "שלי" is BOTH the bot's name AND Hebrew for "my/mine".
@@ -1084,7 +1087,11 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
       actionSummary = `${sender} wants Sheli to forget something. Confirm you'll forget it, keep it light.`;
       break;
     case "add_expense":
-      actionSummary = "An expense was just logged: " + (e.expense_currency || "ILS") + " " + (e.amount_text || "?") + ' for "' + (e.expense_description || "?") + '". Attribution: ' + (e.expense_attribution || "speaker") + (e.expense_paid_by_name ? ", paid by " + e.expense_paid_by_name : "") + ".";
+      if (!e.amount_text && !e.amount_minor) {
+        actionSummary = 'Expense-needs-amount: User said they paid for "' + (e.expense_description || "something") + '" but did NOT mention an amount. Ask them how much it cost. Do NOT log anything yet.';
+      } else {
+        actionSummary = "An expense was just logged: " + (e.expense_currency || "ILS") + " " + (e.amount_text || "?") + ' for "' + (e.expense_description || "?") + '". Attribution: ' + (e.expense_attribution || "speaker") + (e.expense_paid_by_name ? ", paid by " + e.expense_paid_by_name : "") + ".";
+      }
       break;
     case "query_expense":
       actionSummary = "User is asking about expenses. " + ((classification as any).__queryResult || "No expense data available yet.");
@@ -1220,6 +1227,11 @@ For attribution=joint: say "שילמתם ביחד" instead of "מי שילם:".
 For attribution=household (passive voice, no specific payer): omit "מי שילם:" entirely.
 For amounts >1000: add a money emoji.
 NEVER fabricate or change the amount. Use exactly what was logged.
+
+INCOMPLETE EXPENSE (no amount):
+When the action summary says "Expense-needs-amount", the user reported a payment but forgot the amount.
+Ask naturally: "כמה עלה [description]?" or "כמה שילמת על ה[description]?"
+Do NOT log anything. Just ask for the number. When they reply with just a number, it will be classified as add_expense with the amount.
 
 EXPENSE QUERY (query_expense):
 The expense query data is provided in the ACTION JUST TAKEN section. Format it naturally in Hebrew.
@@ -2462,7 +2474,13 @@ async function executeActions(
           const currency = (expense_currency || "ILS").toUpperCase();
           const parsed = parseAmountToMinor(amount_text, haikuAmount, currency);
 
-          if (!parsed || parsed.amount_minor < 50 || parsed.amount_minor > 100000000) {
+          if (!parsed || parsed.amount_minor === 0) {
+            // No amount provided — Sonnet should ask "כמה?"
+            console.log("[Expense] No amount provided for: " + (expense_description || "unknown") + " — will ask user");
+            summary.push("Expense-needs-amount: " + (expense_description || "הוצאה"));
+            break;
+          }
+          if (parsed.amount_minor < 50 || parsed.amount_minor > 100000000) {
             // Suspicious amount — log but skip insert
             console.warn("[Expense] Suspicious amount: text=" + amount_text + " minor=" + haikuAmount + " currency=" + currency);
             summary.push("Expense-skipped: suspicious amount");
@@ -2985,6 +3003,7 @@ CAPABILITIES YOU CAN DEMONSTRATE:
 - Reminders: user says time+action → "אזכיר!" with time. When giving examples, use universal tasks like "לאסוף ילדים ב-5" or "לשלם חשבון" — NEVER food examples (meat/cooking) which may alienate vegetarians.
 - Events: user says date+event → "שמרתי ביומן!" with date/time
 - Expenses: user reports a payment → you log it. Examples: "שילמתי 1300 חשמל", "עלה לנו 800 במסעדה", "שרפתי 500 על דלק", "דוח חניה 250". Log amount, category, who paid.
+  INCOMPLETE EXPENSE (no amount): If user says "שילמתי חשמל" or "סגרתי את הגז" WITHOUT a number → do NOT create an expense action. Instead ASK: "כמה עלה החשמל?" or "כמה שילמת על הגז?". When they reply with just a number, THEN create the expense action with that amount.
   CRITICAL "קניתי" RULE: "קניתי X ב-[amount]" = expense (any item + price). "קניתי X" without amount = check if X is on shopping list → mark got, else ignore.
   KEY TENSE: PAST (שילמתי, עלה, יצא לנו) = expense. PRESENT (עולה) = price info, not expense. FUTURE (לשלם) = task.
   NOT expense: "שילמתי עליו" (social treating). "המשכנתא עולה X" (general statement). "הגיע חשבון" (bill arrived, not paid).
