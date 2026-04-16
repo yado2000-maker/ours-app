@@ -202,6 +202,24 @@ def check_db_item(table, household_id, column, value, should_exist=True):
         return False, f"Expected {table}.{column} NOT to contain '{value}' but found {len(rows)} rows"
     return True, ""
 
+def check_db_item_exact(table, household_id, column, value):
+    """Check the most recent row in a DB table for an exact column value.
+    Used for numeric/enum fields (e.g. amount_minor=130000, currency='EUR')
+    where ilike pattern matching doesn't apply."""
+    rows = sb_get(table, {
+        "household_id": f"eq.{household_id}",
+        "deleted": "eq.false",
+        "select": f"id,{column}",
+        "order": "created_at.desc",
+        "limit": "1",
+    })
+    if not rows:
+        return False, f"No rows in {table} for household {household_id}"
+    actual = rows[0].get(column)
+    if actual == value:
+        return True, ""
+    return False, f"Expected {table}.{column}={value}, got {actual}"
+
 # ─── Setup / Teardown ───
 
 def setup_test_household():
@@ -277,7 +295,7 @@ def setup_test_household():
 def cleanup_test_data():
     """Remove all test data created during the run."""
     print("\n  Cleaning up test data...")
-    for table in ["tasks", "shopping_items", "events", "reminder_queue"]:
+    for table in ["tasks", "shopping_items", "events", "reminder_queue", "expenses"]:
         try:
             sb_delete(table, {"household_id": f"eq.{TEST_HOUSEHOLD_ID}"})
         except Exception:
@@ -319,10 +337,21 @@ def clear_reminder_queue():
     except Exception:
         pass
 
+def clear_expenses():
+    """Drop all expenses rows for the test household.
+
+    Used as per-test `setup` for expense cases so each test's db_check isn't
+    polluted by leftover rows from previous expense tests.
+    """
+    try:
+        sb_delete("expenses", {"household_id": f"eq.{TEST_HOUSEHOLD_ID}"})
+    except Exception:
+        pass
+
 # ─── Test Cases ───
 
 def build_test_cases():
-    """Build all 46 test cases."""
+    """Build all 55 test cases (47 original + 8 expenses)."""
     cases = []
 
     # ── Category 1: Shopping List Management (10 tests) ──
@@ -645,6 +674,71 @@ def build_test_cases():
         notes="Same message ID sent twice — second should be ignored (bug A)",
     ))
 
+    # ── Category 9: Expenses (8 tests) ──
+    cases.append(TestCase(
+        "expense_speaker_ils", "Expenses",
+        "שילמתי 1300 חשמל",
+        expected_intent="add_expense",
+        reply_pattern=r"רשמתי.*1,?300.*חשמל",
+        setup=clear_expenses,
+        db_check={"table": "expenses", "field": "amount_minor", "value": 130000},
+        notes="Speaker attribution, ILS default, amount stored as minor units",
+    ))
+    cases.append(TestCase(
+        "expense_named", "Expenses",
+        "אבא שילם 500 סופר",
+        expected_intent="add_expense",
+        reply_pattern=r"רשמתי.*500",
+        setup=clear_expenses,
+        notes="Named attribution — 'dad paid'",
+    ))
+    cases.append(TestCase(
+        "expense_joint", "Expenses",
+        "שילמנו 2400 ארנונה",
+        expected_intent="add_expense",
+        reply_pattern=r"רשמתי.*2,?400",
+        setup=clear_expenses,
+        notes="Joint attribution — 'we paid'",
+    ))
+    cases.append(TestCase(
+        "expense_eur", "Expenses",
+        "שילמתי 150 יורו דלק",
+        expected_intent="add_expense",
+        setup=clear_expenses,
+        db_check={"table": "expenses", "field": "currency", "value": "EUR"},
+        notes="EUR currency detection from 'יורו'",
+    ))
+    cases.append(TestCase(
+        "expense_neg_treating", "Expenses",
+        "שילמתי עליו 50 בבית קפה",
+        expected_intent="ignore",
+        setup=clear_expenses,
+        notes="Social treating ('paid for him') — NOT a household expense",
+    ))
+    cases.append(TestCase(
+        "expense_neg_task", "Expenses",
+        "צריך לשלם ארנונה",
+        expected_intent="add_task",
+        setup=clear_expenses,
+        notes="Future payment obligation — should be a task, not an expense",
+    ))
+    cases.append(TestCase(
+        "expense_query_summary", "Expenses",
+        "שלי כמה שילמנו החודש?",
+        expected_intent="query_expense",
+        reply_pattern=r"(סה.כ|הוצאות|₪|עדיין לא)",
+        setup=clear_expenses,
+        notes="Monthly summary query — bot should reply with totals or 'nothing yet'",
+    ))
+    cases.append(TestCase(
+        "expense_slang", "Expenses",
+        "שרפתי 500 על דלק",
+        expected_intent="add_expense",
+        reply_pattern=r"רשמתי.*500",
+        setup=clear_expenses,
+        notes="Hebrew slang 'שרפתי' (burned) = paid",
+    ))
+
     return cases
 
 # ─── Test Runner ───
@@ -728,13 +822,23 @@ def run_test(tc):
 
     # Check DB state if specified
     if tc.db_check:
-        ok, err = check_db_item(
-            tc.db_check["table"],
-            TEST_HOUSEHOLD_ID,
-            tc.db_check["column"],
-            tc.db_check["value"],
-            tc.db_check.get("should_exist", True),
-        )
+        # Two modes: "column" uses ilike pattern match (text fields),
+        # "field" uses exact value match (numeric/enum fields like expenses)
+        if "field" in tc.db_check:
+            ok, err = check_db_item_exact(
+                tc.db_check["table"],
+                TEST_HOUSEHOLD_ID,
+                tc.db_check["field"],
+                tc.db_check["value"],
+            )
+        else:
+            ok, err = check_db_item(
+                tc.db_check["table"],
+                TEST_HOUSEHOLD_ID,
+                tc.db_check["column"],
+                tc.db_check["value"],
+                tc.db_check.get("should_exist", True),
+            )
         if not ok:
             tc.result = "fail"
             tc.detail = err
