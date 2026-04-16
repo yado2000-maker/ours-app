@@ -89,7 +89,7 @@ const CONTENT = {
     ],
     cta: "Message Sheli",
     freeBadge: "Completely free \u00B7 Up to 40 actions/month \u00B7 No credit card",
-    bridge: ["Just for you or the whole family", "Sheli puts your life in order"],
+    bridge: ["Just for you or the whole family", "Sheli keeps it all together"],
     signin: "I have an account \u2192 Sign in",
     featuresTitle: "What can Sheli do?",
     features: [
