@@ -6,6 +6,8 @@ import {
   ChoresFeatureIcon,
   ReminderFeatureIcon,
   LearningFeatureIcon,
+  ExpenseFeatureIcon,
+  FamilyGroupIcon,
   ChevronRightIcon,
 } from "./Icons.jsx";
 
