@@ -6,6 +6,16 @@ export const supabase = createClient(SB_URL, SB_KEY);
 
 const TASK_MAP = { assignedTo: 'assigned_to', completedBy: 'completed_by', completedAt: 'completed_at' };
 const EVENT_MAP = { assignedTo: 'assigned_to', scheduledFor: 'scheduled_for' };
+const EXPENSE_MAP = {
+  amountMinor: 'amount_minor',
+  paidBy: 'paid_by',
+  occurredAt: 'occurred_at',
+  createdAt: 'created_at',
+  updatedAt: 'updated_at',
+  sourceMessageId: 'source_message_id',
+  loggedByPhone: 'logged_by_phone',
+  deletedAt: 'deleted_at',
+};
 
 const toDb = (obj, map) => {
   const out = {};
@@ -34,13 +44,14 @@ export const uid  = () => Math.random().toString(36).slice(2, 10);
 // ─── Normalized table functions (v2) ───
 
 export const loadHousehold = async (hhId) => {
-  const [hhRes, membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes] = await Promise.all([
+  const [hhRes, membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes, expensesRes] = await Promise.all([
     supabase.from("households_v2").select("*").eq("id", hhId).single(),
     supabase.from("household_members").select("*").eq("household_id", hhId),
     supabase.from("tasks").select("*").eq("household_id", hhId),
     supabase.from("shopping_items").select("*").eq("household_id", hhId),
     supabase.from("events").select("*").eq("household_id", hhId),
     supabase.from("rotations").select("*").eq("household_id", hhId).eq("active", true),
+    supabase.from("expenses").select("*").eq("household_id", hhId).eq("deleted", false).eq("visibility", "household").order("occurred_at", { ascending: false }).limit(100),
   ]);
   if (!hhRes.data) return null;
   return {
@@ -59,6 +70,7 @@ export const loadHousehold = async (hhId) => {
       members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
       frequency: r.frequency && typeof r.frequency === "string" ? JSON.parse(r.frequency) : r.frequency,
     })),
+    expenses: (expensesRes.data || []).map(e => fromDb(e, EXPENSE_MAP)),
   };
 };
 
@@ -204,6 +216,42 @@ export const loadMessages = async (hhId, userId) => {
     .order("created_at", { ascending: true });
   if (error) console.error("[loadMessages]", error);
   return (data || []).map(m => ({ role: m.role, content: m.content, ts: new Date(m.created_at).getTime() }));
+};
+
+export const loadExpenses = async (hhId, { period = 'this_month', category = 'all' } = {}) => {
+  const now = new Date();
+  let start, end;
+  if (period === 'last_month') {
+    const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const m = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+    start = new Date(y, m, 1).toISOString();
+    end = new Date(y, m + 1, 0, 23, 59, 59).toISOString();
+  } else if (period === 'all_time') {
+    start = '2020-01-01T00:00:00Z';
+    end = new Date(2099, 0).toISOString();
+  } else {
+    // this_month
+    start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+  }
+
+  let q = supabase.from("expenses")
+    .select("*")
+    .eq("household_id", hhId)
+    .eq("deleted", false)
+    .eq("visibility", "household")
+    .gte("occurred_at", start)
+    .lte("occurred_at", end)
+    .order("occurred_at", { ascending: false })
+    .limit(200);
+
+  if (category && category !== 'all') {
+    q = q.eq("category", category);
+  }
+
+  const { data, error } = await q;
+  if (error) { console.error("[loadExpenses]", error); return []; }
+  return (data || []).map(e => fromDb(e, EXPENSE_MAP));
 };
 
 export const insertMessage = async (hhId, userId, msg) => {

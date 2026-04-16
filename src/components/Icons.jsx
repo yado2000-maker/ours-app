@@ -705,6 +705,23 @@ export function EditIcon({ size = 14 }) {
   );
 }
 
+/** Receipt — for expenses tab */
+export function ReceiptIcon({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M4 2.5V17.5L6 16L8 17.5L10 16L12 17.5L14 16L16 17.5V2.5L14 4L12 2.5L10 4L8 2.5L6 4Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M7.5 8.5H12.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <path d="M7.5 11.5H10.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Heart icon — for favorites / love */
 export function HeartIcon({ size = 16, filled = false }) {
   return (

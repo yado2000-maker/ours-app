@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import T from "./locales/index.js";
 import "./styles/app.css";
-import { supabase, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents, loadMessages, insertMessage, trackWebSession } from "./lib/supabase.js";
+import { supabase, lsGet, lsSet, uid8, loadHousehold, saveTask, saveShoppingItem, saveEvent, deleteTask, deleteShoppingItem, deleteEvent, clearDoneTasks, clearGotShopping, saveAllTasks, saveAllShopping, saveAllEvents, loadMessages, insertMessage, trackWebSession, loadExpenses } from "./lib/supabase.js";
 import buildPrompt from "./lib/prompt.js";
 import { analytics, identifyUser } from "./lib/analytics.js";
 import Setup from "./components/Setup.jsx";
@@ -12,8 +12,9 @@ import { useAuth } from "./hooks/useAuth.js";
 import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
 import WeekView from "./components/WeekView.jsx";
+import ExpensesView from "./components/ExpensesView.jsx";
 import MenuPanel from "./components/modals/MenuPanel.jsx";
-import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
+import { ChatIcon, TasksIcon, ShoppingIcon, WeekIcon, ReceiptIcon, MicIcon, StopIcon, SendIcon, VoiceWaveIcon } from "./components/Icons.jsx";
 import JoinOrCreate from "./components/JoinOrCreate.jsx";
 import { detectHousehold, joinByCode } from "./lib/household-detect.js";
 import AdminDashboard from "./components/AdminDashboard.jsx";
@@ -53,6 +54,7 @@ export default function Sheli() {
   const [shopping, setShopping]   = useState([]);
   const [events, setEvents]       = useState([]);
   const [rotations, setRotationsS] = useState([]);
+  const [expenses, setExpenses]     = useState([]);
   const [input, setInput]         = useState("");
   const [busy, setBusy]           = useState(false);
   const [showMenu, setShowMenu]   = useState(false);
@@ -144,7 +146,7 @@ export default function Sheli() {
           const data = await loadData(joinId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []);
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []); setExpenses(data.expenses || []);
             if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             window.history.replaceState({}, "", window.location.pathname);
             setScreen("pick"); return;
@@ -158,7 +160,7 @@ export default function Sheli() {
           const data = await loadData(hhId);
           if (data) {
             setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []);
+            setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []); setExpenses(data.expenses || []);
             if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             const savedUser = lsGet("sheli-user");
             if (savedUser) {
@@ -193,7 +195,7 @@ export default function Sheli() {
           loadData(detected.id).then(data => {
             if (data) {
               setHouseholdS(data.hh); setLang(data.hh.lang || "en");
-              setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []);
+              setTasksS(data.tasks || []); setShoppingS(data.shopping || []); setEventsS(data.events || []); setRotationsS(data.rotations || []); setExpenses(data.expenses || []);
               if (data.msgs?.length > 0) setAllMsgs({ [session.user.id]: data.msgs });
             }
           }).catch(e => console.warn("[Boot] Background load:", e));
@@ -318,6 +320,18 @@ export default function Sheli() {
       .on("postgres_changes", { event: "*", schema: "public", table: "rotations", filter: `household_id=eq.${hhId}` }, reloadRotations)
       .subscribe();
 
+    const reloadExpenses = async () => {
+      if (Date.now() - lastSaveRef.current < 3000) return;
+      const { data } = await supabase.from("expenses").select("*").eq("household_id", hhId).eq("deleted", false).eq("visibility", "household").order("occurred_at", { ascending: false }).limit(100);
+      if (data) {
+        const EXPENSE_MAP = { amount_minor:'amountMinor', paid_by:'paidBy', occurred_at:'occurredAt', created_at:'createdAt', updated_at:'updatedAt', source_message_id:'sourceMessageId', logged_by_phone:'loggedByPhone', deleted_at:'deletedAt' };
+        setExpenses(data.map(e => { const o={...e}; for(const[k,v]of Object.entries(EXPENSE_MAP)){if(o[k]!==undefined){o[v]=o[k];delete o[k];}} return o; }));
+      }
+    };
+    const ch7 = supabase.channel(`expenses-${hhId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "expenses", filter: `household_id=eq.${hhId}` }, reloadExpenses)
+      .subscribe();
+
     return () => {
       supabase.removeChannel(ch1);
       supabase.removeChannel(ch2);
@@ -325,6 +339,7 @@ export default function Sheli() {
       supabase.removeChannel(ch4);
       supabase.removeChannel(ch5);
       supabase.removeChannel(ch6);
+      supabase.removeChannel(ch7);
     };
   }, [screen]);
 
@@ -341,7 +356,7 @@ export default function Sheli() {
     setIsFounder(true);
 
     setHouseholdS(hh); setLang(hh.lang || "en");
-    setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]);
+    setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setExpenses([]);
     const founder = hh.members[0];
     if (founder) {
       lsSet("sheli-user", founder);
@@ -388,7 +403,7 @@ export default function Sheli() {
     localStorage.removeItem("sheli-user");
     localStorage.removeItem("sheli-founder");
     localStorage.removeItem("sheli-onboarded");
-    setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setInput("");
+    setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setExpenses([]); setInput("");
     setShowMenu(false); setScreen("setup");
   };
 
@@ -781,7 +796,7 @@ export default function Sheli() {
             localStorage.removeItem("sheli-founder");
             localStorage.removeItem("sheli-onboarded");
             localStorage.removeItem("sheli-msgs");
-            setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setIsFounder(false);
+            setHousehold(null); setUser(null); setAllMsgs({}); setTasksS([]); setShoppingS([]); setEventsS([]); setRotationsS([]); setExpenses([]); setIsFounder(false);
             await signOut();
             setShowMenu(false); setScreen("welcome");
           }}
@@ -866,6 +881,18 @@ export default function Sheli() {
             <WeekView tasks={tasks} events={events} rotations={rotations} t={t} lang={lang} onDeleteEvent={deleteEventHandler} />
           )}
 
+          {tab === "expenses" && (
+            <ExpensesView
+              expenses={expenses}
+              t={t}
+              loading={!dataLoaded}
+              onPeriodChange={(period) => {
+                const hhId = lsGet("sheli-hhid");
+                if (hhId) loadExpenses(hhId, { period }).then(setExpenses);
+              }}
+            />
+          )}
+
         </div>
 
         {/* ── Bottom Nav ── */}
@@ -887,6 +914,10 @@ export default function Sheli() {
           <button className={`nav-btn ${tab==="week"?"active":""}`} onClick={() => setTab("week")}>
             <span className="nav-icon"><WeekIcon size={20} /></span>
             <span className="nav-label">{t.navWeek}</span>
+          </button>
+          <button className={`nav-btn ${tab==="expenses"?"active":""}`} onClick={() => setTab("expenses")}>
+            <span className="nav-icon"><ReceiptIcon size={20} /></span>
+            <span className="nav-label">{t.navExpenses}</span>
           </button>
         </div>
 

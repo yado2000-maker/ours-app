@@ -106,5 +106,20 @@ const en = {
   menuReferralCopy: "Copy",
   menuReferralCopied: "Copied!",
   menuReferralStats: (sent, completed) => `Invited: ${sent} people \u00B7 ${completed} activated`,
+  // Expenses
+  navExpenses: "Expenses",
+  expensesTitle: "Expenses",
+  expensesEmpty: "No expenses logged yet. Tell Sheli on WhatsApp \u2014 'I paid X for Y'.",
+  expensesTotal: "Total",
+  expensesPaidBy: "Paid by:",
+  expensesJoint: "Together",
+  expensesNotSpecified: "Not specified",
+  expensesThisMonth: "This month",
+  expensesLastMonth: "Last month",
+  expensesAllTime: "All time",
+  expensesAllCategories: "All categories",
+  expensesAddViaWA: "Add via WhatsApp",
+  expensesEditHint: "To edit, message Sheli on WhatsApp",
+  expensesCount: "expenses",
 };
 export default en;
