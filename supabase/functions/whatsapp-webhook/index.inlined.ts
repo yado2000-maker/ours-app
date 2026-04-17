@@ -3826,6 +3826,10 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   }
 
   // --- New user: first message ever ---
+  // WhatsApp anti-spam (2026-04-17 ban): no immediate auto-welcome. Classify
+  // the first message: if actionable we bundle a one-line intro into the
+  // Sonnet reply (below). Otherwise we queue a welcome with jitter + rate cap
+  // (see supabase/migrations/2026_04_18_welcome_queue.sql).
   if (!convo) {
     // Check for referral code
     const referralMatch = text.match(/(?:שלום|שלי|shalom|hey|hi)\s+([A-Z0-9]{6})\b/i);
@@ -3843,22 +3847,72 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       }
     }
 
-    await supabase.from("onboarding_conversations").insert({
-      phone,
-      state: "welcomed",
-      message_count: 1,
-      referral_code: validReferralCode,
-      context: { name: senderName, gender: detectGender(hebrewizeName(senderName)) },
-      tried_capabilities: [],
-    });
+    // Classify first message to decide: bundle intro into action reply, or queue welcome.
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
+    const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+    const emptyCtx: ClassifierContext = {
+      members: [],
+      openTasks: [],
+      openShopping: [],
+      today: new Date().toISOString().slice(0, 10),
+      dayOfWeek: hebrewDays[new Date().getDay()],
+    };
+    const classification = text
+      ? await classifyIntent(text, senderName || "משתמש", emptyCtx, apiKey)
+      : fallbackIgnore("");
+    const ACTIONABLE_FIRST = new Set([
+      "add_shopping", "add_task", "add_reminder", "add_event", "add_expense",
+    ]);
+    const shouldBundle = ACTIONABLE_FIRST.has(classification.intent)
+      && (classification.confidence ?? 0) >= 0.6;
 
-    // Send welcome
-    const welcome = getOnboardingWelcome(senderName);
-    await sendAndLog(prov, { groupId: message.groupId, text: welcome }, {
-      householdId: "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "onboarding_reply"
-    });
-    console.log(`[1:1] New onboarding conversation for ${phone}${validReferralCode ? ` (referred by ${validReferralCode})` : ""}`);
-    return;
+    if (shouldBundle) {
+      // Path A — bundle: create convo as chatting, fall through to Sonnet with
+      // first_message_intro=true so Sonnet prepends a one-line "היי! אני שלי"
+      // intro to its action confirmation.
+      const insertRes = await supabase.from("onboarding_conversations").insert({
+        phone,
+        state: "chatting",
+        message_count: 0, // incremented to 1 in the chatting flow below
+        referral_code: validReferralCode,
+        context: {
+          name: senderName,
+          gender: detectGender(hebrewizeName(senderName)),
+          first_message_intro: true,
+        },
+        tried_capabilities: [],
+      }).select().single();
+      convo = insertRes.data;
+      console.log(`[1:1] New user ${phone} — actionable first msg (${classification.intent}@${classification.confidence?.toFixed(2)}), bundling intro`);
+      // fall through to chatting flow
+    } else {
+      // Path B — queue: insert into welcome_queue with 30–90s jitter + random
+      // variant 1–3. pg_cron drain_welcome_queue runs every minute with a
+      // 6-per-rolling-hour global cap. No reply sent now.
+      const jitterSec = 30 + Math.floor(Math.random() * 61); // 30..90
+      const scheduledFor = new Date(Date.now() + jitterSec * 1000).toISOString();
+      const templateVariant = 1 + Math.floor(Math.random() * 3); // 1..3
+      const displayName = hebrewizeName(senderName || "") || null;
+
+      await supabase.from("welcome_queue").upsert({
+        phone_number: phone,
+        display_name: displayName,
+        scheduled_for: scheduledFor,
+        template_variant: templateVariant,
+      }, { onConflict: "phone_number" });
+
+      await supabase.from("onboarding_conversations").insert({
+        phone,
+        state: "welcome_queued",
+        message_count: 1,
+        referral_code: validReferralCode,
+        context: { name: senderName, gender: detectGender(hebrewizeName(senderName)) },
+        tried_capabilities: [],
+      });
+
+      console.log(`[1:1] New user ${phone} — queued welcome (variant=${templateVariant}, +${jitterSec}s)${validReferralCode ? ` (ref=${validReferralCode})` : ""}`);
+      return;
+    }
   }
 
   // --- Dormant user returning → reset to chatting naturally ---
@@ -3872,8 +3926,8 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     convo.state = "chatting";
   }
 
-  // --- Nudging/sleeping/welcomed user replying → back to chatting ---
-  if (convo.state === "nudging" || convo.state === "sleeping" || convo.state === "welcomed") {
+  // --- Nudging/sleeping/welcomed/welcome_queued user replying → back to chatting ---
+  if (convo.state === "nudging" || convo.state === "sleeping" || convo.state === "welcomed" || convo.state === "welcome_queued") {
     await supabase.from("onboarding_conversations").update({
       state: "chatting",
       updated_at: new Date().toISOString(),
@@ -3952,8 +4006,15 @@ CONVERSATION CONTINUITY — CRITICAL:
 - You are mid-conversation. Reply to what they just said, the way a friend would.
 - If they ask a question, answer it directly.
 - If they send an action, execute it naturally.
-- Follow rule 4 for capability hints: ONLY when ${msgCount} is divisible by 3.` : `
-FIRST MESSAGE: This is the user's first reply after your welcome. Brief warmth is fine, but focus on what they said.`}
+- Follow rule 4 for capability hints: ONLY when ${msgCount} is divisible by 3.` : (
+  convo.context?.first_message_intro ? `
+FIRST MESSAGE BUNDLE — CRITICAL:
+- This is the user's VERY FIRST message to you. They have NOT received a separate welcome.
+- They sent an actionable request. Execute the action AND open your reply with ONE short warm line (e.g. "היי! אני שלי 💚" or "היי, אני שלי, נעים מאוד 😊").
+- ONE line of intro. No feature list, no essay, no "אני יודעת לעשות X ו-Y ו-Z".
+- Then confirm the action naturally ("הוספתי לרשימה: חלב, ביצים" / "רשמתי תזכורת ל...").
+- Do NOT mention groups, pricing, or the web app in this first reply.` : `
+FIRST MESSAGE: This is the user's first reply after your welcome. Brief warmth is fine, but focus on what they said.`)}
 ${ambiguousOptions && !nameAskedAlready ? `\nNAME SPELLING: The user's name "${userName}" could be spelled ${ambiguousOptions.join(" or ")} in Hebrew. In your FIRST reply, ask naturally which spelling they prefer. Example: "אגב, ${ambiguousOptions[0]} או ${ambiguousOptions[1]}? אני אוהבת לדייק 😊". After asking, include a name_correction action with their answer. This is a ONE-TIME question — do not ask again.` : ""}
 ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}`;
 
@@ -4019,6 +4080,13 @@ ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: $
     // If we showed the ambiguous name prompt, mark it as asked even if user didn't answer yet
     if (ambiguousOptions && !nameAskedAlready) {
       const ctx = { ...(convo.context || {}), name_spelling_asked: true };
+      await supabase.from("onboarding_conversations").update({ context: ctx }).eq("phone", phone);
+    }
+
+    // Clear first_message_intro flag so the bundled-welcome hint fires exactly once.
+    if (convo.context?.first_message_intro) {
+      const ctx = { ...(convo.context || {}) };
+      delete ctx.first_message_intro;
       await supabase.from("onboarding_conversations").update({ context: ctx }).eq("phone", phone);
     }
 
