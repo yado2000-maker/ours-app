@@ -3894,11 +3894,12 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       const templateVariant = 1 + Math.floor(Math.random() * 3); // 1..3
       const displayName = hebrewizeName(senderName || "") || null;
 
-      await supabase.from("welcome_queue").upsert({
+      await supabase.from("outbound_queue").upsert({
         phone_number: phone,
         display_name: displayName,
         scheduled_for: scheduledFor,
         template_variant: templateVariant,
+        message_type: "welcome",
       }, { onConflict: "phone_number" });
 
       await supabase.from("onboarding_conversations").insert({
