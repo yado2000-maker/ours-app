@@ -12,10 +12,16 @@ linked device; re-pair must happen first). Never crashes.
 
 What it does when Whapi is AUTH'd:
   - Paginates GET /messages/list?time_from=<ts> (Whapi caps at 100/page).
-  - For each message:
+  - 1:1 chats:
       * inbound (from_me=false)  -> classification='backlog_imported_user'
                                     + Haiku classification_data
       * outbound (from_me=true)  -> classification='manual_reply_imported'
+  - Group chats (chat_id ending @g.us):
+      * Looked up via whatsapp_config → household_id. Unmapped groups are
+        logged and stored with household_id='unknown' for later linkage.
+      * Same classification labels as 1:1. Inbound messages get a
+        classification_data.recovery_state tag ('handled'/'needs_recovery'/
+        'low_intent') computed once the batch has all messages (two-pass).
   - Dedupes on whatsapp_message_id (Whapi gives real IDs, unlike exports).
 
 Does NOT materialize action rows (tasks/shopping/etc). Leave that to
@@ -34,6 +40,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (  # noqa: E402
     BOT_PHONE, WHAPI_TOKEN, haiku_classify, message_already_imported,
     requests, sb_get, sb_post,
+)
+from import_chat_exports import (  # noqa: E402
+    is_low_intent, reply_resolves_ask,
 )
 
 # Webhook went silent when the ban hit (2026-04-17 ~05:42 UTC).
@@ -80,63 +89,162 @@ def household_for_phone(phone: str) -> str | None:
     return None
 
 
-def import_message(msg: dict, dry_run: bool = False) -> str:
-    """Returns status code: 'inserted', 'dup', 'skip_no_id', 'skip_non_text'."""
-    wa_id = msg.get("id") or msg.get("_id")
-    if not wa_id:
-        return "skip_no_id"
-    if msg.get("type") not in (None, "text", "voice", "ptt", "audio", "image", "document"):
-        return "skip_non_text"
+def household_for_group(group_jid: str) -> str | None:
+    """Look up household by Whapi group JID (e.g. 12036305xxxx-1590xxxxxx@g.us)."""
+    rows = sb_get(
+        "whatsapp_config",
+        {"group_id": f"eq.{group_jid}", "select": "household_id", "limit": "1"},
+    )
+    if rows:
+        return rows[0].get("household_id")
+    return None
 
-    # Whapi chat_id shape: "{phone}@s.whatsapp.net" (1:1) or "{id}@g.us" (group).
-    chat_id: str = msg.get("chat_id") or msg.get("from") or ""
-    if chat_id.endswith("@g.us"):
-        # Groups already handled live via webhook; skip here to stay in scope.
-        return "skip_non_text"
-    phone = (msg.get("from") or chat_id).split("@")[0]
-    from_me = bool(msg.get("from_me"))
+
+def _extract_text(msg: dict) -> str:
     text_obj = msg.get("text") or {}
     text = text_obj.get("body") if isinstance(text_obj, dict) else str(text_obj or "")
     if not text:
         text = msg.get("caption") or ""
-    text = (text or "").strip()
+    return (text or "").strip()
+
+
+def normalize_whapi_message(msg: dict) -> dict | None:
+    """Return {wa_id, chat_id, is_group, phone, from_me, sender_name, text, ts_iso}
+    or None if the message should be skipped."""
+    wa_id = msg.get("id") or msg.get("_id")
+    if not wa_id:
+        return None
+    if msg.get("type") not in (None, "text", "voice", "ptt", "audio", "image", "document"):
+        return None
+    chat_id: str = msg.get("chat_id") or msg.get("from") or ""
+    is_group = chat_id.endswith("@g.us")
+    phone = (msg.get("from") or chat_id).split("@")[0]
+    from_me = bool(msg.get("from_me"))
+    text = _extract_text(msg)
     if not text:
-        return "skip_non_text"
-
+        return None
     ts_unix = msg.get("timestamp") or 0
-    ts_iso = datetime.fromtimestamp(int(ts_unix), tz=timezone.utc).isoformat() if ts_unix else datetime.now(timezone.utc).isoformat()
+    ts_iso = (datetime.fromtimestamp(int(ts_unix), tz=timezone.utc).isoformat()
+              if ts_unix else datetime.now(timezone.utc).isoformat())
+    return {
+        "wa_id": wa_id,
+        "chat_id": chat_id,
+        "is_group": is_group,
+        "phone": phone,
+        "from_me": from_me,
+        "sender_name": msg.get("from_name") or "משתמש",
+        "text": text,
+        "ts_iso": ts_iso,
+    }
 
-    if message_already_imported(wa_id):
-        return "dup"
 
-    household_id = household_for_phone(phone) or "unknown"
-    if from_me:
-        sender_phone = BOT_PHONE
-        sender_name = "שלי"
-        classification = "manual_reply_imported"
-        cls_data = None
-    else:
-        sender_phone = phone
-        sender_name = msg.get("from_name") or "משתמש"
-        classification = "backlog_imported_user"
-        cls_data = haiku_classify(text, sender_name) if not dry_run else None
+def _resolve_group_backlog(group_msgs: list[dict], use_llm: bool) -> None:
+    """Annotate each inbound message dict with 'recovery_state' and, if
+    low_intent, a tentative classification.
 
-    if dry_run:
-        return "inserted"
+    group_msgs: chronological list of normalized messages from ONE group.
+    Mutates in place. Expects each msg to already carry classification_data
+    (for inbound) via an earlier Haiku pass.
+    """
+    from datetime import datetime as _dt
+    n = len(group_msgs)
+    ts_parsed: list[datetime] = []
+    for m in group_msgs:
+        try:
+            ts_parsed.append(_dt.fromisoformat(m["ts_iso"].replace("Z", "+00:00")))
+        except Exception:
+            ts_parsed.append(datetime.now(timezone.utc))
+    for i, m in enumerate(group_msgs):
+        if m["from_me"]:
+            continue
+        cls = m.get("classification_data") or {}
+        if is_low_intent(m["text"], cls):
+            m["recovery_state"] = "low_intent"
+            continue
+        next_reply: dict | None = None
+        for j in range(i + 1, n):
+            if group_msgs[j]["from_me"]:
+                delta = (ts_parsed[j] - ts_parsed[i]).total_seconds()
+                if delta <= 30 * 60:
+                    next_reply = group_msgs[j]
+                break
+        if not next_reply:
+            m["recovery_state"] = "needs_recovery"
+            continue
+        m["recovery_state"] = (
+            "handled" if reply_resolves_ask(m["text"], next_reply["text"], use_llm=use_llm)
+            else "needs_recovery"
+        )
 
-    sb_post("whatsapp_messages", {
-        "household_id": household_id,
-        "group_id": chat_id,
-        "sender_phone": sender_phone,
-        "sender_name": sender_name,
-        "message_text": text,
-        "message_type": "text",
-        "whatsapp_message_id": wa_id,
-        "classification": classification,
-        "classification_data": cls_data,
-        "created_at": ts_iso,
-    })
-    return "inserted"
+
+def import_batch(messages: list[dict], dry_run: bool = False) -> dict[str, int]:
+    """Normalize → Haiku-classify inbound → compute group resolution → insert.
+    Returns counter dict.
+    """
+    totals: dict[str, int] = {}
+    normalized: list[dict] = []
+    for msg in messages:
+        n = normalize_whapi_message(msg)
+        if n is None:
+            totals["skip_non_text"] = totals.get("skip_non_text", 0) + 1
+            continue
+        if message_already_imported(n["wa_id"]):
+            totals["dup"] = totals.get("dup", 0) + 1
+            continue
+        # Haiku-classify inbound text (1:1 AND group).
+        if not n["from_me"]:
+            n["classification_data"] = (haiku_classify(n["text"], n["sender_name"])
+                                        if not dry_run else None)
+        normalized.append(n)
+
+    # Group messages by chat_id for per-group resolution tracking.
+    by_chat: dict[str, list[dict]] = {}
+    for n in normalized:
+        by_chat.setdefault(n["chat_id"], []).append(n)
+    for chat_id, chat_msgs in by_chat.items():
+        if chat_msgs and chat_msgs[0]["is_group"]:
+            chat_msgs.sort(key=lambda x: x["ts_iso"])
+            _resolve_group_backlog(chat_msgs, use_llm=not dry_run)
+
+    # Now insert (flat iteration).
+    for n in normalized:
+        if dry_run:
+            totals["inserted"] = totals.get("inserted", 0) + 1
+            continue
+        if n["is_group"]:
+            household_id = household_for_group(n["chat_id"]) or "unknown"
+        else:
+            household_id = household_for_phone(n["phone"]) or "unknown"
+        if n["from_me"]:
+            sender_phone = BOT_PHONE
+            sender_name = "שלי"
+            classification = "manual_reply_imported"
+            cls_data = None
+        else:
+            sender_phone = n["phone"]
+            sender_name = n["sender_name"]
+            classification = "backlog_imported_user"
+            cls_data = n.get("classification_data") or {}
+            if "recovery_state" in n:
+                cls_data = {**cls_data, "recovery_state": n["recovery_state"]}
+        try:
+            sb_post("whatsapp_messages", {
+                "household_id": household_id,
+                "group_id": n["chat_id"],
+                "sender_phone": sender_phone,
+                "sender_name": sender_name,
+                "message_text": n["text"],
+                "message_type": "text",
+                "whatsapp_message_id": n["wa_id"],
+                "classification": classification,
+                "classification_data": cls_data,
+                "created_at": n["ts_iso"],
+            })
+            totals["inserted"] = totals.get("inserted", 0) + 1
+        except Exception as e:
+            print(f"    error on {n['wa_id']}: {e}", file=sys.stderr)
+            totals["error"] = totals.get("error", 0) + 1
+    return totals
 
 
 def main() -> int:
@@ -161,23 +269,22 @@ def main() -> int:
     print(f"Whapi AUTH ok. Importing since unix={args.since} "
           f"({datetime.fromtimestamp(args.since, tz=timezone.utc).isoformat()})")
 
+    # Collect all pages first so group resolution can see the full thread
+    # at once (resolution requires chronological context across pages).
     offset = 0
-    totals: dict[str, int] = {}
+    all_messages: list[dict] = []
     while True:
         batch = list_messages(args.since, offset=offset, count=100)
         if not batch:
             break
         print(f"  page offset={offset} size={len(batch)}")
-        for msg in batch:
-            try:
-                status = import_message(msg, dry_run=args.dry_run)
-            except Exception as e:
-                print(f"    error on {msg.get('id')}: {e}", file=sys.stderr)
-                status = "error"
-            totals[status] = totals.get(status, 0) + 1
+        all_messages.extend(batch)
         if len(batch) < 100:
             break
         offset += 100
+    print(f"  collected {len(all_messages)} raw messages")
+
+    totals = import_batch(all_messages, dry_run=args.dry_run)
 
     print("")
     print(f"Done. { {k: v for k, v in sorted(totals.items())} }")
