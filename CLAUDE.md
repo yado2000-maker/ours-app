@@ -37,6 +37,13 @@
 - `docs/plans/2026-04-16-expenses-design.md` — Expenses feature design (approved)
 - `docs/plans/2026-04-16-expenses-plan.md` — Expenses implementation plan (12 tasks, completed)
 - `docs/implementation-plan-v3.md` — **Active** implementation plan (replaces V2)
+- `scripts/import_whapi_backlog.py` — Capability A: Whapi `/messages/list` backfill, QR-safe (exits clean if channel unpaired)
+- `scripts/import_chat_exports.py` — Capability B: parse WhatsApp Business `.txt` exports in `recovery_exports/{phone}_{name}.txt`, materialise tasks/shopping/events/reminders/expenses, idempotent
+- `scripts/plan_recovery_messages.py` — Capability C: Sonnet-generated per-user apology+offer, stages to `outbound_queue` with `message_type='recovery'`
+- `scripts/_common.py` — shared helpers for recovery scripts (Supabase REST, Haiku/Sonnet, sha1 dedup IDs)
+- `tests/test_recovery.py` — 16 offline unit tests for recovery toolchain (parse regexes, state heuristic, schedule spread, dedup IDs)
+- `docs/plans/2026-04-18-welcome-throttle-plan.md` — welcome-throttle implementation plan
+- `docs/plans/2026-04-18-morning-recovery-runbook.md` — ordered ban-lift playbook (apply migrations → deploy → re-pair → import → plan → re-enable webhook → monitor) with rollback section
 
 ## Database: Normalized V2 Tables (migration completed 2026-04-02)
 - **Await all deletes before Realtime re-fetch** — Non-awaited `supabase.delete()` races with Realtime `postgres_changes`. Bulk deletes (clear cart, clear done) fire N events; trailing events slip past 3s debounce → items reappear. Pattern: `lastSaveRef = now(); await delete(); lastSaveRef = now();`
@@ -56,6 +63,10 @@
 - **Realtime:** 5 channels (tasks, shopping_items, events, households_v2, messages) with 3s echo debounce
 - **RLS tightened (2026-04-08):** All tables now use `is_household_member(household_id)` for CRUD. Upsert-safe: INSERT WITH CHECK and UPDATE USING use the same `is_household_member` check, so upserts pass both paths identically. `household_members` INSERT uses `(user_id = auth.uid() OR is_household_member(household_id))` to allow self-join and founder adding members. Bot-only tables (`classification_corrections`, `global_prompt_proposals`, `household_patterns`) have RLS enabled with no policies (service_role only).
 - **Supabase upsert RLS gotcha (historical):** `.upsert()` checks INSERT policy first, even for existing rows. Fixed by making INSERT and UPDATE use the same check (`is_household_member`). Previously all INSERT policies were relaxed to `auth.uid() IS NOT NULL`.
+- `outbound_queue` (2026-04-18) — Rate-limited Whapi outbound carrier. Columns: `phone_number` PK, `display_name`, `scheduled_for`, `template_variant` (nullable SMALLINT 1-3), `body` TEXT, `message_type` TEXT (`welcome`|`recovery`), `metadata` JSONB, `sent_at`, `attempts`, `queued_at`. CHECK constraint: `message_type='welcome' AND template_variant NOT NULL` XOR `message_type='recovery' AND body NOT NULL`. RLS enabled, no policies (service_role only). Drained by `drain_outbound_queue()` SQL function via pg_cron `* * * * *` — hard cap **6 sends per rolling hour** across ALL message types. `FOR UPDATE SKIP LOCKED` makes the drain race-safe. pg_net fire-and-forget; HTTP failures don't auto-retry (optimistic `sent_at` on drain, `attempts<3` gate). Old `welcome_queue` name kept as an alias via the forwarder `drain_welcome_queue()`.
+- `welcome_queue` (2026-04-18 original, renamed same day to `outbound_queue`). Old migration file `2026_04_18_welcome_queue.sql` must be applied BEFORE `2026_04_18_outbound_queue_recovery.sql` — the second file ALTER-renames the table and CANNOT run alone.
+- **Recovery imports use sha1 synthetic message IDs** — `import-{sha1(phone|ts_iso|text)[:12]}`. WhatsApp `.txt` exports strip real message IDs, so idempotency comes from content-hashing. Deterministic → re-running on the same file is a no-op without any bookkeeping.
+- **Past reminders imported from backlog** must be inserted with `status='fired', fired_at=scheduled_for` or the reminder cron will fire them today (user gets phantom reminders for yesterday's events).
 
 ## Supabase Gotchas
 - **RLS blocks everything when auth.uid() is NULL** — Supabase client with publishable key + auth session sends JWT. If JWT is stale/expired, auth.uid() returns NULL and all RLS policies fail silently.
@@ -111,6 +122,11 @@
 
 ## WhatsApp Bot Gotchas
 - **Whapi.Cloud:** Developer Premium ($12/mo), unlimited messages/chats. Paid until 2026-05-07. **Transient webhook drops possible** — one message silently lost during FB launch (2026-04-16, "Individual Proxy Connection: Needs Attention"). No retry mechanism. If a user reports silence, check DB for their phone first, then Whapi webhook logs.
+- **WhatsApp anti-spam triggered at ~40 auto-replies/hour (2026-04-17 ban)** — viral FB post drove 500+ 1:1 signups in <24h, bot phone (+972 55 517 5553) hit WhatsApp's anti-spam classifier, restricted for 24h, linked device unpaired. Post-ban hard rule: **all auto-welcomes + mass outbound go through `outbound_queue` at ≤6/hr globally.** Do NOT add a second outbound path that bypasses the drain. If a new feature needs to send to many users (nudges, campaigns, etc.), extend `outbound_queue.message_type` instead.
+- **New 1:1 users go through welcome-throttle** (since 2026-04-18): first message classified via Haiku. Actionable intent (add_shopping/task/reminder/event/expense at conf≥0.6) → `context.first_message_intro=true` + falls through to Sonnet which prepends one-line intro. Else → row in `outbound_queue` with `message_type='welcome'`, 30-90s jitter, random template variant 1-3. State `welcome_queued` transitions to `chatting` like `welcomed` on next reply.
+- **Whapi `/health` states:** `AUTH` = paired & operational. `QR` = linked device unpaired, needs QR scan from bot phone via Whapi dashboard. `LAUNCH` = still booting. Scripts that touch Whapi must check `/health` first and exit cleanly when != AUTH (see `scripts/import_whapi_backlog.py`).
+- **After any ban/restriction, linked device is unpaired** — Whapi webhook URL also often cleared by Whapi itself. Re-pair QR FIRST, then re-add webhook URL, then monitor. Importers read `/messages/list?time_from=<unix>` to backfill the blackout window (Whapi keeps ~30 days of history).
+- **WhatsApp Business app chat export** is the always-works fallback when Whapi backfill fails. Menu → More → Export chat → Without media → produces `.txt` with `[DD.MM.YYYY, HH:MM:SS] Sender: body` lines. Phone number is stripped from the body; filename convention `{phone}_{name}.txt` carries it.
 - **1-on-1 AND group support (v8)** — Bot accepts both `@g.us` (group) and `@s.whatsapp.net` (direct). Different AI behavior per chat type:
   - **Direct (1-on-1):** Respond to EVERY message — personal assistant mode. Resolve household via `whatsapp_member_mapping` phone lookup. **Full capabilities active (2026-04-12):** auto-creates household on first action, writes to real DB tables (tasks, shopping_items, events, reminder_queue), reminders fire via pg_cron to `phone@s.whatsapp.net`.
   - **Group:** Only respond when mentioned by name ("שלי"), message is actionable (task/shopping/event), or question directed at bot. Skip social noise.
@@ -300,6 +316,10 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 - `npm run build` — Production build
 - `python tests/classifier_eval.py` — Run 120-case Haiku classifier eval (~26 min Tier 1, ~4 min Tier 2, needs ANTHROPIC_API_KEY)
 - `python tests/test_webhook.py` — Run 47-case webhook integration tests (~5 min, needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env). Tests classification, DB writes, dedup, edge cases against production Edge Function.
+- `python -m unittest tests.test_recovery -v` — 16 offline unit tests for the recovery toolchain (~2 s, no network). Covers filename/timestamp parsing, recovery-state heuristic, schedule spread, dedup IDs.
+- `python scripts/import_whapi_backlog.py [--dry-run] [--since <unix>]` — Capability A. Backfill Whapi messages from ban window. Exits clean if channel in QR state.
+- `python scripts/import_chat_exports.py [--dry-run] [--dir recovery_exports] [--file path]` — Capability B. Import WhatsApp Business `.txt` exports from `recovery_exports/{phone}_{name}.txt`, materialise real CMS rows, idempotent.
+- `python scripts/plan_recovery_messages.py [--dry-run] [--start-hour 9] [--spread-hours 4] [--limit N]` — Capability C. Stage Sonnet-generated recovery messages in `outbound_queue`. Drainer sends at 6/hr.
 - Edge Function deploy: `index.inlined.ts` (~89KB) too large for MCP tool. Deploy via Supabase Dashboard paste (Cursor → Ctrl+A, Ctrl+C → Dashboard → Code → paste → Deploy). Verify JWT = OFF.
 - `icount-webhook` Edge Function: separate function, deploy via Dashboard. Verify JWT = OFF. Env var: `ICOUNT_WEBHOOK_SECRET`.
 - Vite dev server: port **5173** (not 3000). launch.json uses `"C:\\Program Files\\nodejs\\node.exe"` as runtimeExecutable.
