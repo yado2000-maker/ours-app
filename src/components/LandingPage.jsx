@@ -12,7 +12,9 @@ import {
   ChevronRightIcon,
 } from "./Icons.jsx";
 
-const WA_LINK = "https://wa.me/972555175553?text=" + encodeURIComponent("היי שלי!");
+// During recovery period: CTA goes to /waitlist instead of WhatsApp.
+// Flip back to WA_LINK once Cloud API migration is live.
+const WAITLIST_LINK = "/waitlist?source=landing_cta";
 
 // ─── Bilingual content ───
 // Rethought for "personal + family" positioning (One Sheli, One Price).
@@ -34,8 +36,8 @@ const CONTENT = {
       { type: "voice", duration: "0:12" },
       { text: "\u{1F4C5} הוספתי ליומן: ארוחת ערב אצל סבא וסבתא ביום שישי", type: "bot" },
     ],
-    cta: "שלחו הודעה לשלי",
-    freeBadge: "חינם לגמרי · עד 40 פעולות בחודש · בלי כרטיס אשראי",
+    cta: "הצטרפו לרשימת ההמתנה",
+    freeBadge: "שלי מוסיפה משפחות בהדרגה · השאירו פרטים ונעדכן כשיגיע תורכם",
     bridge: ["רק לעצמך או לכל המשפחה ביחד", "שלי עושה סדר בחיים"],
     signin: "יש לי כבר חשבון \u2190 כניסה",
     featuresTitle: "מה שלי יודעת לעשות?",
@@ -87,8 +89,8 @@ const CONTENT = {
       { type: "voice", duration: "0:12" },
       { text: "\u{1F4C5} Added to calendar: dinner at grandma's on Friday at 7pm", type: "bot" },
     ],
-    cta: "Message Sheli",
-    freeBadge: "Completely free \u00B7 Up to 40 actions/month \u00B7 No credit card",
+    cta: "Join the waitlist",
+    freeBadge: "Sheli is onboarding families in small batches \u00B7 Leave your details and we'll reach out when it's your turn",
     bridge: ["Just for you or the whole family", "Sheli keeps it all together"],
     signin: "I have an account \u2192 Sign in",
     featuresTitle: "What can Sheli do?",
@@ -211,9 +213,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
           </div>
         </div>
 
-        <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-cta">
+        <a href={WAITLIST_LINK} className="landing-cta">
           {c.cta}
-          <WhatsAppIcon />
         </a>
 
         <div className="landing-free-badge">{c.freeBadge}</div>
@@ -302,9 +303,8 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
       {/* ─── Bottom CTA ─── */}
       <section className="landing-bottom-cta">
         <h2 className="landing-section-title">{c.bottomTitle}</h2>
-        <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="landing-cta">
+        <a href={WAITLIST_LINK} className="landing-cta">
           {c.cta}
-          <WhatsAppIcon />
         </a>
         <span className="landing-bottom-or">{c.bottomOr}</span>
         <button className="landing-cta landing-cta-app" onClick={handleGetStarted}>

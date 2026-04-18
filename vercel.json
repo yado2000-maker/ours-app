@@ -1,7 +1,8 @@
 {
   "regions": ["fra1"],
   "rewrites": [
-    { "source": "/r/:code", "destination": "/api/r/:code" }
+    { "source": "/r/:code", "destination": "/api/r/:code" },
+    { "source": "/waitlist", "destination": "/index.html" }
   ],
   "headers": [
     {

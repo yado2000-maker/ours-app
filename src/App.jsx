@@ -8,6 +8,7 @@ import Setup from "./components/Setup.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
 import WelcomeScreen from "./components/WelcomeScreen.jsx";
 import LandingPage from "./components/LandingPage.jsx";
+import WaitlistPage from "./components/WaitlistPage.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
@@ -42,7 +43,20 @@ async function sendOtpBridge(phone, accessToken) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────────────────
+// Standalone waitlist page — rendered for path /waitlist without going through
+// the auth/household boot. Short-circuits the full Sheli app so recovery-period
+// visitors don't see loading spinners or session checks.
+function isWaitlistPath() {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.replace(/\/+$/, "") === "/waitlist";
+}
+
 export default function Sheli() {
+  if (isWaitlistPath()) return <WaitlistPage />;
+  return <SheliApp />;
+}
+
+function SheliApp() {
   const [screen, setScreen]       = useState("loading");
   const [tab, setTab]             = useState("chat");
   const [household, setHousehold] = useState(null);
