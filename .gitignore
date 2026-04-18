@@ -51,3 +51,5 @@ supabase/.temp/
 # Obsidian vault (Yaron's scratchpad — bug reports, ideas, session notes)
 SHELI/
 .obsidian/
+recovery_exports/*.txt
+recovery_exports/manifest.json

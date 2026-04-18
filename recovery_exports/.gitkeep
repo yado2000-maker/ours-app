@@ -1,0 +1,14 @@
+Drop WhatsApp chat exports here before running:
+  python scripts/import_chat_exports.py
+
+Filename convention (required — phone cannot be recovered from the
+export body):
+
+  {phone_digits}_{DisplayName}.txt
+
+Examples:
+  972544848291_Noam.txt
+  972523955056_Daniel.txt
+
+Dashes in {DisplayName} are rendered as spaces in the imported
+household + member record.
