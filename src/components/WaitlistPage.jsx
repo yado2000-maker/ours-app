@@ -146,22 +146,20 @@ export default function WaitlistPage() {
 
   return (
     <div
-      className="landing-page"
+      className="landing"
       dir={c.dir}
       style={{ fontFamily: lang === "he" ? "'Heebo', sans-serif" : "'Nunito', sans-serif" }}
     >
-      <div className="landing-lang-toggle-wrap">
-        <button
-          type="button"
-          className="landing-lang-toggle"
-          onClick={() => setLang(lang === "he" ? "en" : "he")}
-        >
-          {c.langToggle}
-        </button>
-      </div>
+      <button
+        type="button"
+        className="landing-lang-toggle"
+        onClick={() => setLang(lang === "he" ? "en" : "he")}
+      >
+        {c.langToggle}
+      </button>
 
-      <section className="landing-hero" style={{ maxWidth: 480, margin: "0 auto" }}>
-        <h1 className="sheli-wordmark">sheli</h1>
+      <section className="landing-hero" style={{ maxWidth: 480, margin: "0 auto", width: "100%" }}>
+        <h1 className="landing-wordmark">sheli</h1>
         <h2 className="landing-section-title" style={{ marginTop: 24 }}>
           {c.title}
         </h2>
