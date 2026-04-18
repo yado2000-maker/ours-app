@@ -12,9 +12,9 @@ const CONTENT = {
     dir: "rtl",
     title: "רשימת המתנה לשלי",
     subtitle:
-      "שלי מוסיפה משפחות בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ואחזור אליכם ברגע שיהיה תורכם.",
+      "שלי מוסיפה מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ואחזור אליכם ברגע שיהיה תורכם.",
     fieldFirstName: "שם פרטי",
-    fieldPhone: "מספר טלפון (וואטסאפ)",
+    fieldPhone: "מספר טלפון",
     fieldInterest: "מה הכי מעניין אתכם?",
     interestOptions: [
       { value: "shopping", label: "רשימת קניות משותפת" },
@@ -35,9 +35,9 @@ const CONTENT = {
     dir: "ltr",
     title: "Sheli waitlist",
     subtitle:
-      "Sheli is onboarding families in small batches to keep quality high. Leave your details and I'll reach out when it's your turn.",
+      "Sheli is onboarding new signups in small batches to keep quality high. Leave your details and I'll reach out when it's your turn.",
     fieldFirstName: "First name",
-    fieldPhone: "Phone number (WhatsApp)",
+    fieldPhone: "Phone number",
     fieldInterest: "What's most interesting to you?",
     interestOptions: [
       { value: "shopping", label: "Shared shopping list" },
