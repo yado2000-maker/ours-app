@@ -163,8 +163,13 @@ def parse_export(path: Path) -> list[dict]:
 
 
 def is_bot(sender: str) -> bool:
-    s = sender.strip().lower()
-    return sender in BOT_NAMES or s in {"sheli", "שלי", "shelly", "shelley"}
+    s = sender.strip().lstrip("~").strip().lower()
+    if sender in BOT_NAMES or s in {"sheli", "שלי", "shelly", "shelley"}:
+        return True
+    # Users often save the bot contact as "Sheli.ai", "Sheli AI",
+    # "שלי AI", "שלי - עוזרת Ai", etc. Anyone whose display name
+    # starts with sheli/שלי is the bot in backlog-import context.
+    return s.startswith("sheli") or s.startswith("שלי")
 
 
 # ─── DB operations ──────────────────────────────────────────────────────────
@@ -770,9 +775,17 @@ def process_group_file(path: Path, entry: dict, dry_run: bool = False) -> dict:
             # and only if the message is still "needs_recovery" (meaning the bot
             # likely didn't already handle it live). Keeps the group tidy.
             if state == "needs_recovery":
-                touched = materialize_actions(hh_id, cls, text, ts_iso, sender)
-                for t in touched:
-                    actions_created[t] = actions_created.get(t, 0) + 1
+                try:
+                    touched = materialize_actions(hh_id, cls, text, ts_iso, sender)
+                    for t in touched:
+                        actions_created[t] = actions_created.get(t, 0) + 1
+                except Exception as mat_err:
+                    # Materialisation is best-effort: message is already in DB,
+                    # recovery planner only needs whatsapp_messages rows.
+                    # Schema drift on tasks/events/reminder_queue must not
+                    # block the whole file import.
+                    print(f"    [warn] materialise skipped ({mat_err})",
+                          file=sys.stderr)
 
     print(f"  {fname} (group): hh={hh_id}{' [new]' if created else ''} "
           f"gid={group_id} in={inserted_in} out={inserted_out} "
@@ -867,9 +880,13 @@ def process_file(path: Path, manifest_entry: dict | None = None,
             if ok:
                 inserted_in += 1
                 classifications.append({"text": text, "cls": cls, "ts_iso": ts_iso})
-                touched = materialize_actions(hh_id, cls, text, ts_iso, display_name)
-                for t in touched:
-                    actions_created[t] = actions_created.get(t, 0) + 1
+                try:
+                    touched = materialize_actions(hh_id, cls, text, ts_iso, display_name)
+                    for t in touched:
+                        actions_created[t] = actions_created.get(t, 0) + 1
+                except Exception as mat_err:
+                    print(f"    [warn] materialise skipped ({mat_err})",
+                          file=sys.stderr)
 
     print(f"  {fname}: phone={phone} hh={hh_id}{' [new]' if created else ''} "
           f"in={inserted_in} out={inserted_out} state={recovery_state} "

@@ -3265,7 +3265,12 @@ async function ensureOnboardingHousehold(
     id: hhId,
     name: displayName,
   });
-  if (hhErr) console.error("[1:1] Failed to create household:", hhErr);
+  if (hhErr) {
+    // Fatal — without a household all subsequent action inserts will fail silently,
+    // leaving the user with "רשמתי!" replies but no data (the 2026-04-18 Bat-Chen bug).
+    console.error("[1:1] Failed to create household:", hhErr);
+    throw new Error(`create_household_failed: ${hhErr.message}`);
+  }
 
   const { error: memErr } = await supabase.from("household_members").insert({
     household_id: hhId,
@@ -3274,12 +3279,20 @@ async function ensureOnboardingHousehold(
   });
   if (memErr) console.error("[1:1] Failed to create member:", memErr);
 
-  // Link phone to household for future group-join auto-detection
-  await supabase.from("whatsapp_member_mapping").upsert({
+  // Link phone to household for future lookups. The actual unique constraint
+  // is (household_id, phone_number) — the previous `onConflict: "phone_number"`
+  // spec silently failed (no matching unique), leaving the phone unmapped and
+  // every subsequent message creating another orphan household.
+  // Since hhId is freshly generated, a plain insert never conflicts.
+  const { error: mapErr } = await supabase.from("whatsapp_member_mapping").insert({
     phone_number: phone,
     household_id: hhId,
     member_name: userName || null,
-  }, { onConflict: "phone_number" });
+  });
+  if (mapErr) {
+    console.error("[1:1] Failed to create whatsapp_member_mapping:", mapErr);
+    throw new Error(`create_mapping_failed: ${mapErr.message}`);
+  }
 
   await supabase.from("onboarding_conversations").update({
     household_id: hhId,
@@ -3573,11 +3586,26 @@ async function execute1on1Actions(params: {
   if (realActions.length > 0) {
     // Resolve household if not yet available
     if (!householdId && params.resolveHousehold) {
-      householdId = await params.resolveHousehold();
+      try {
+        householdId = await params.resolveHousehold();
+      } catch (e) {
+        console.error(`${logPrefix} resolveHousehold threw for ${phone}:`, e);
+        householdId = null;
+      }
     }
     if (!householdId) {
-      console.warn(`${logPrefix} No household for ${phone}, skipping ${realActions.length} actions`);
-      return { actions, visibleReply, triedCaps };
+      // Honest fallback: Sonnet likely claimed success ("רשמתי!") but we can't
+      // persist anything. Override the visible reply so we don't lie to the user.
+      // (2026-04-18 Bat-Chen lesson: never silently show success for actions we
+      // couldn't complete.)
+      console.warn(`${logPrefix} No household for ${phone}, skipping ${realActions.length} actions — replacing hallucinated confirmation`);
+      const claimsSuccess = /הוספתי|רשמתי|שמרתי|עדכנתי|הכנסתי|אזכיר/.test(visibleReply);
+      const honestFallback = "אופס 🙈 הייתה לי תקלה ברישום, נסה שוב בעוד רגע?";
+      return {
+        actions: [],
+        visibleReply: claimsSuccess ? honestFallback : visibleReply,
+        triedCaps,
+      };
     }
 
     const mappedActions: any[] = [];

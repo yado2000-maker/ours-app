@@ -41,7 +41,7 @@ from _common import (  # noqa: E402
 )
 
 # Ban window (UTC). Inbound messages in this range are recovery candidates.
-BAN_START_UTC = datetime(2026, 4, 17, 5, 42, tzinfo=timezone.utc)
+BAN_START_UTC = datetime(2026, 4, 16, 0, 0, tzinfo=timezone.utc)
 BAN_END_UTC = datetime(2026, 4, 18, 5, 42, tzinfo=timezone.utc)
 
 # ─── Sonnet prompt (mirrors SHARED_* rules from index.inlined.ts) ───────────

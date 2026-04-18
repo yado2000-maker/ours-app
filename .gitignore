@@ -52,3 +52,4 @@ supabase/.temp/
 SHELI/
 .obsidian/
 recovery_exports/*.txt
+recovery_exports/manifest.json

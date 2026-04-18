@@ -36,7 +36,9 @@ def load_env() -> None:
             continue
         key, _, val = line.partition("=")
         key, val = key.strip(), val.strip().strip('"').strip("'")
-        if key and key not in os.environ:
+        if key and not os.environ.get(key):
+            # Overwrite empty inherited values (e.g. ANTHROPIC_API_KEY='' from
+            # a shell profile) so .env wins over accidental OS-env blanks.
             os.environ[key] = val
 
 
