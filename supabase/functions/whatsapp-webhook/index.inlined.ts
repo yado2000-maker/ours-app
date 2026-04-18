@@ -236,7 +236,10 @@ class WhapiProvider implements WhatsAppProvider {
 
       // Whapi webhook format: https://whapi.readme.io/reference/webhooks
       const messages = (data.messages || []) as Array<Record<string, unknown>>;
-      if (messages.length === 0) return null;
+      if (messages.length === 0) {
+        console.log(`[WhapiProvider:DIAG] parseIncoming null: no messages[] — top-level keys=${JSON.stringify(Object.keys(data || {}))}`);
+        return null;
+      }
 
       const msg = messages[0];
       const chatId = msg.chat_id as string || "";
@@ -251,6 +254,7 @@ class WhapiProvider implements WhatsAppProvider {
         chatType = "direct";
         groupId = chatId.replace("@s.whatsapp.net", ""); // Phone number as reply-to address
       } else {
+        console.log(`[WhapiProvider:DIAG] parseIncoming null: unknown chat_id="${chatId}" type="${msg.type}" from="${msg.from}"`);
         return null; // Unknown chat format
       }
 
@@ -964,8 +968,8 @@ async function classifyIntent(
   const key = apiKey || Deno.env.get("ANTHROPIC_API_KEY") || "";
   const systemPrompt = buildClassifierPrompt(context);
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const callHaiku = () =>
+    fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -980,12 +984,34 @@ async function classifyIntent(
       }),
     });
 
+  try {
+    let res = await callHaiku();
+
+    // Retry once on 429 — ITPM bursts typically clear within 2-5s.
+    // Honor retry-after header when present, else back off 2s (cap 5s).
+    // Without this, every rate-limited message silently became an ignore.
+    if (res.status === 429) {
+      const retryAfter = Number(res.headers.get("retry-after")) || 2;
+      const delayMs = Math.min(retryAfter * 1000, 5000);
+      console.warn(`[HaikuClassifier] 429 rate-limited — retrying after ${delayMs}ms`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      res = await callHaiku();
+      if (res.ok) console.log("[HaikuClassifier] 429 retry succeeded");
+    }
+
     if (!res.ok) {
       console.error(
         "[HaikuClassifier] API error:",
         res.status,
         await res.text()
       );
+      // Persistent 429 → escalate to Sonnet (separate ITPM budget) instead
+      // of silent ignore. conf 0.55 + needs_conversation_review=true lands
+      // in the 0.50-0.69 escalation band. Non-429 failures still fall back
+      // to ignore (cheaper; probably a transient Anthropic issue).
+      if (res.status === 429) {
+        return fallbackRateLimited(message);
+      }
       return fallbackIgnore(message);
     }
 
@@ -1021,6 +1047,21 @@ function fallbackIgnore(message: string): ClassificationOutput {
   return {
     intent: "ignore",
     confidence: 0.75,  // Was 0.0 — caused unnecessary Sonnet escalations ($0.01 each). 0.75 routes through ignore path without escalation.
+    addressed_to_bot: false,  // Explicit false — was undefined, showed as `addressed=undefined` in logs.
+    entities: { raw_text: message },
+  };
+}
+
+function fallbackRateLimited(message: string): ClassificationOutput {
+  // Called only after a retry-on-429 also 429s. We'd rather pay Sonnet's
+  // $0.01 than silently drop the user's message. Sonnet and Haiku have
+  // separate ITPM budgets on Tier 1 (50K each), so this shifts load — it
+  // doesn't cascade the rate limit.
+  return {
+    intent: "ignore",
+    confidence: 0.55,                 // 0.50-0.69 → Sonnet escalation
+    addressed_to_bot: false,
+    needs_conversation_review: true,  // belt-and-suspenders — forces escalation
     entities: { raw_text: message },
   };
 }
@@ -1336,6 +1377,7 @@ REMINDERS: When intent is add_reminder:
   Default buffer: 1 hour earlier for hour-specific deadlines. Honor the user's word choice — "ב-X" and "לפני X" mean different things.
 - THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
 - CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
+- DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed. Recurring phrasings ("כל יום ב-X" / "every day at X" / "daily at X") follow the SAME rule for the first occurrence — today if still ahead, else tomorrow. Do NOT default to tomorrow just because the user said "every day". (Recurring scheduling itself is not yet supported — create one send_at for the next occurrence.)
 - If no time specified at all, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
 - If time IS specified, append this EXACT format at the END of your reply (hidden from user):
   <!--REMINDER:{"reminder_text":"what to remind","send_at":"2026-04-08T16:00:00+03:00"}-->
@@ -1345,7 +1387,7 @@ REMINDERS: When intent is add_reminder:
   "תזכירי לאמא להביא חלב מחר ב-10" → reply "אזכיר לאמא להביא חלב מחר ב-10:00 ✓" + <!--REMINDER:{"reminder_text":"אמא — להביא חלב","send_at":"<tomorrow>T10:00:00+03:00"}-->
   "תזכירי לי לפני השעה 16 לעשות קניות" → reply "אזכיר לך ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"לעשות קניות","send_at":"<today>T15:00:00+03:00"}-->
   "תזכירי לאסנת לעשות רשימה לפני 16" (after earlier message mentioning "יום רביעי") → reply "אזכיר לאסנת לעשות רשימה יום רביעי ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"אסנת — לעשות רשימה","send_at":"<next Wednesday>T15:00:00+03:00"}-->
-- Current time: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+${buildDayAnchor()}
 
 ${ctx.familyMemories ? `
 FAMILY MEMORIES (use naturally, not robotically — only when genuinely relevant):
@@ -3223,7 +3265,13 @@ ADD:
 - shopping: {"type":"shopping","items":["חלב","ביצים"]}
 - task: {"type":"task","text":"לפרוק מדיח"}
 - reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
-  IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00). If user says "ב-5" → today 17:00 IST. If "בעוד שעה" → compute from current time. If time already passed today → use tomorrow. The "time" field is a display hint; "send_at" is what actually schedules the reminder.
+  IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00).
+  DEFAULT-DAY RULE (critical — users noticed this):
+  - Time only, no day qualifier ("ב-5", "ב-8 בערב", "בצהריים") → TODAY at that time if it is still at least 10 minutes in the future in Israel time. Only use tomorrow if the time has already passed today.
+  - "בעוד X דקות/שעות" → now + X.
+  - "מחר" explicitly → tomorrow. "היום" explicitly → today.
+  - Recurring phrasings like "כל יום ב-X" / "every day at X" / "daily at X" → treat the FIRST occurrence exactly like a single reminder: today if X is still ahead, else tomorrow. Do NOT default to tomorrow just because the user said "every day" — start with today whenever possible. (Recurring scheduling itself is not yet supported — create one send_at for the next occurrence; the user can re-ask tomorrow.)
+  The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
@@ -3413,6 +3461,57 @@ function prepareSonnetTurns(turns: { role: string; content: string }[]): { role:
   }
   while (merged.length > 0 && merged[0].role !== "user") merged.shift();
   return merged;
+}
+
+// IL-timezone-safe "today" + day-of-week. Server runs in UTC; around midnight
+// in Israel, `new Date().getDay()` returns the server's day, not IL's.
+// Used by Haiku classifier context building.
+function getIlTodayAndDay(): { today: string; dayOfWeek: string } {
+  const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  const ilDateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const ilDayIdx = new Date(ilDateStr + "T12:00:00Z").getUTCDay();
+  return { today: ilDateStr, dayOfWeek: hebrewDays[ilDayIdx] };
+}
+
+// Explicit day-of-week + ISO date anchor for Sonnet reminder/event scheduling.
+// Without this, Sonnet computes day-of-week from a bare date string and
+// regularly miscounts by ±1 day (observed 2026-04-18: "Monday morning" → Tuesday,
+// "מוצאי שבת" → Sunday). A lookup table makes it impossible to slip.
+// IL-timezone-safe: derives today's calendar date via Asia/Jerusalem, not UTC,
+// so a request at Friday 23:30 IL (= Friday 20:30 UTC) still gets Friday.
+function buildDayAnchor(): string {
+  const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  const englishDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  // IL today's YYYY-MM-DD (en-CA gives ISO-like format in all locales)
+  const ilDateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  // Anchor at UTC noon so UTC-date arithmetic doesn't drift across DST boundaries
+  const anchor = new Date(ilDateStr + "T12:00:00Z");
+  const ilTimeStr = new Date().toLocaleTimeString("he-IL", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hour12: false });
+
+  const lines: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(anchor);
+    d.setUTCDate(d.getUTCDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    const he = hebrewDays[d.getUTCDay()];
+    const en = englishDays[d.getUTCDay()];
+    const label = i === 0 ? " (TODAY)" : i === 1 ? " (tomorrow)" : "";
+    lines.push(`  ${he} (${en}) = ${iso}${label}`);
+  }
+
+  const todayHe = hebrewDays[anchor.getUTCDay()];
+  const todayEn = englishDays[anchor.getUTCDay()];
+
+  return `DATE ANCHOR — use this exact lookup when computing send_at / scheduled_for. Do NOT compute day-of-week from the date yourself.
+Current time in Israel: ${todayHe} (${todayEn}), ${ilDateStr}, ${ilTimeStr}
+Upcoming days:
+${lines.join("\n")}
+Notes:
+- "מוצאי שבת" / "Saturday night" / end of Shabbat = Saturday EVENING (20:00-21:30), SAME calendar date as שבת. NOT Sunday.
+- "שבת הבאה" / "next Saturday" = the שבת row above plus 7 days.
+- "מחר" / "tomorrow" = the row marked (tomorrow).
+- Day names without a qualifier ("יום שני") = the MATCHING row above (never skip a week).`;
 }
 
 // Format a UTC date as a human-readable Israel time string for Sonnet context.
@@ -3778,6 +3877,70 @@ async function execute1on1Actions(params: {
   return { actions, visibleReply, triedCaps };
 }
 
+// Generate a unique welcome message via Sonnet, to reduce text-similarity
+// signal that WhatsApp's anti-spam classifier weights heavily during bursts.
+// Returns the welcome body or null on failure (caller falls back to SQL template).
+// Called once per new-user first-message, cost ~$0.01, latency 2-3s.
+// Safety rails: length bounds, no quotes/metadata in output.
+async function generateUniqueWelcome(
+  displayName: string | null,
+  firstMessage: string,
+): Promise<string | null> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  if (!apiKey) return null;
+
+  const systemPrompt = `You are שלי (Sheli) — a warm, capable Hebrew WhatsApp helper.
+
+Write a SHORT unique welcome reply (Hebrew) to a user who just messaged you for the first time.
+
+HARD RULES:
+- Under 35 Hebrew words total. Under 4 short lines.
+- Feminine first-person (אני שלי, הוספתי, זוכרת).
+- 1-2 emojis max. Natural placement, not decorative spam.
+- Mention 1-2 capabilities NATURALLY (choose from: רשימת קניות, מטלות, תזכורות, הוצאות, תורנויות). Do not list all.
+- Include ONE concrete example the user could try (e.g. "תזכירי לי מחר ב-9 להתקשר לרופא" or "חלב, ביצים, לחם").
+- VARY OPENER, EMOJI, EXAMPLE, STRUCTURE from typical welcomes. This is one of many today — if they all sound the same, WhatsApp flags the account as spam.
+- No welcome cliches that appear in templates: do NOT start with "היי! 😊 אני שלי, נעים מאוד" or "אני שלי — העוזרת החכמה". Use other phrasings.
+- Address by name if given; otherwise skip the name.
+
+Reply with ONLY the welcome text. No quotes, no labels, no metadata blocks.`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 256,
+        system: systemPrompt,
+        messages: [{
+          role: "user",
+          content: `New user${displayName ? ` named ${displayName}` : ""} just sent: "${firstMessage.slice(0, 200)}"`,
+        }],
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`[WelcomeGen] Sonnet ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const text = (data.content?.[0]?.text || "").trim();
+    // Length sanity: too-short = bad generation, too-long = cost/spam risk
+    if (!text || text.length < 25 || text.length > 400) {
+      console.warn(`[WelcomeGen] Length out of range: ${text.length} chars`);
+      return null;
+    }
+    return text;
+  } catch (err) {
+    console.warn(`[WelcomeGen] Fetch error:`, (err as Error).message);
+    return null;
+  }
+}
+
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
   const phone = message.senderPhone;
   const text = (message.text || "").trim();
@@ -3877,13 +4040,13 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
 
     // Classify first message to decide: bundle intro into action reply, or queue welcome.
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
-    const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+    const { today: ilToday, dayOfWeek: ilDayOfWeek } = getIlTodayAndDay();
     const emptyCtx: ClassifierContext = {
       members: [],
       openTasks: [],
       openShopping: [],
-      today: new Date().toISOString().slice(0, 10),
-      dayOfWeek: hebrewDays[new Date().getDay()],
+      today: ilToday,
+      dayOfWeek: ilDayOfWeek,
     };
     const classification = text
       ? await classifyIntent(text, senderName || "משתמש", emptyCtx, apiKey)
@@ -3914,13 +4077,25 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       console.log(`[1:1] New user ${phone} — actionable first msg (${classification.intent}@${classification.confidence?.toFixed(2)}), bundling intro`);
       // fall through to chatting flow
     } else {
-      // Path B — queue: insert into welcome_queue with 30–90s jitter + random
-      // variant 1–3. pg_cron drain_welcome_queue runs every minute with a
-      // 6-per-rolling-hour global cap. No reply sent now.
-      const jitterSec = 30 + Math.floor(Math.random() * 61); // 30..90
-      const scheduledFor = new Date(Date.now() + jitterSec * 1000).toISOString();
-      const templateVariant = 1 + Math.floor(Math.random() * 3); // 1..3
+      // Path B — queue welcome. Reactive send is NOT safe at high velocity
+      // (ban on 2026-04-17 was triggered by ~50 similar welcomes in a short
+      // window, even though they were replies). Keep the 6-10/hr queue cap
+      // to spread them out. To reduce text-similarity signal, we generate
+      // a UNIQUE welcome body per user via Sonnet at queue time — drain uses
+      // body when present, falls back to the 3-variant SQL template if null.
+      //
+      // Priority + ordering is set in the SQL drain function:
+      //   welcomes drain BEFORE recovery (today's users > yesterday's backlog),
+      //   within welcomes, oldest queued_at first (closest to 24h window expiry).
+      const templateVariant = 1 + Math.floor(Math.random() * 3); // fallback variant
       const displayName = hebrewizeName(senderName || "") || null;
+
+      // Generate unique welcome body (2-3s latency, user isn't waiting — queued).
+      // Null result → drain uses the shared template instead.
+      const customBody = await generateUniqueWelcome(displayName, text);
+
+      const jitterSec = 30 + Math.floor(Math.random() * 61); // 30..90s jitter
+      const scheduledFor = new Date(Date.now() + jitterSec * 1000).toISOString();
 
       await supabase.from("outbound_queue").upsert({
         phone_number: phone,
@@ -3928,6 +4103,7 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
         scheduled_for: scheduledFor,
         template_variant: templateVariant,
         message_type: "welcome",
+        body: customBody, // null → drain renders template; non-null → drain sends this
       }, { onConflict: "phone_number" });
 
       await supabase.from("onboarding_conversations").insert({
@@ -3939,7 +4115,7 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
         tried_capabilities: [],
       });
 
-      console.log(`[1:1] New user ${phone} — queued welcome (variant=${templateVariant}, +${jitterSec}s)${validReferralCode ? ` (ref=${validReferralCode})` : ""}`);
+      console.log(`[1:1] New user ${phone} — queued welcome (${customBody ? "custom-sonnet" : "template v" + templateVariant}, +${jitterSec}s)${validReferralCode ? ` (ref=${validReferralCode})` : ""}`);
       return;
     }
   }
@@ -4024,8 +4200,9 @@ CONVERSATION STATE:
 - Items collected so far: ${JSON.stringify(existingItems)}
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
-- Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
+
+${buildDayAnchor()}
 ${msgCount > 1 ? `
 CONVERSATION CONTINUITY — CRITICAL:
 - This is message #${msgCount}. The user already knows who you are.
@@ -4200,7 +4377,8 @@ CONVERSATION STATE:
 - User name: ${userName || "unknown"}
 - User gender: ${userGender || "unknown (use plural אתם)"}
 - Items collected so far: ${JSON.stringify(existingItems)}
-- Current time in Israel: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}
+
+${buildDayAnchor()}
 
 CONVERSATION CONTINUITY — CRITICAL:
 - This user is already onboarded and has you in their group. They know who you are.
@@ -4778,6 +4956,25 @@ Deno.serve(async (req: Request) => {
     // 2. Parse the incoming webhook body
     const body = await req.json();
 
+    // [DIAG] One-line summary for every webhook — gap investigation (2026-04-18).
+    // Shape check: grep logs by phone to confirm whether a user's messages even hit the webhook.
+    try {
+      const b = body as Record<string, unknown>;
+      const m0 = (Array.isArray(b?.messages) ? (b.messages as any[])[0] : null) as Record<string, unknown> | null;
+      const diag = {
+        keys: Object.keys(b || {}).slice(0, 8),
+        msg_count: Array.isArray(b?.messages) ? (b.messages as any[]).length : null,
+        m0_type: m0?.type,
+        m0_chat: m0?.chat_id,
+        m0_from: m0?.from,
+        m0_id: m0?.id,
+        m0_from_me: m0?.from_me,
+        has_statuses: Array.isArray(b?.statuses),
+        event_type: (b?.event as any)?.type,
+      };
+      console.log(`[Webhook:DIAG] ${JSON.stringify(diag)}`);
+    } catch (_) { /* diag must never throw */ }
+
     // 2a. Check for group events (join/leave/promote/demote) before message parsing
     const groupEvent = provider.parseGroupEvent?.(body);
     if (groupEvent) {
@@ -4790,16 +4987,15 @@ Deno.serve(async (req: Request) => {
 
     if (!message) {
       // Not a parseable message (status update, receipt, etc.)
+      // Sub-cause already logged inside parseIncoming (parseIncoming:DIAG).
       return new Response("OK", { status: 200 });
     }
 
-    // 3. Skip bot's own messages (Whapi sends outgoing messages back as webhooks)
-    const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
-    if (message.senderPhone === botPhone || message.senderPhone === botPhone.replace("+", "")) {
-      return new Response("OK", { status: 200 });
-    }
-
-    // 3.1 SECURITY: Deduplicate messages (prevent replay + Whapi retry double-processing)
+    // 3. Deduplicate FIRST (before bot-self skip) — catches sendAndLog-originated
+    // Whapi bounces (sendAndLog inserts the row with the same whatsapp_message_id
+    // that Whapi later echoes back). This ordering lets the bot-self branch below
+    // distinguish "automated bounce already-logged" from "manual operator reply
+    // from WhatsApp Web" (which does NOT exist in DB yet).
     if (message.messageId) {
       const { data: existing } = await supabase
         .from("whatsapp_messages")
@@ -4810,6 +5006,19 @@ Deno.serve(async (req: Request) => {
         console.log(`[Webhook] Duplicate message ${message.messageId}, skipping`);
         return new Response("OK", { status: 200 });
       }
+    }
+
+    // 3a. Bot-self messages: Whapi echoes outgoing messages back as webhooks.
+    // If we reached here (passed dedup), this is a manual WhatsApp Web reply from
+    // the bot phone, NOT a sendAndLog-originated bounce. Log it so Sonnet context
+    // (fetch1on1History) sees operator interventions as prior assistant turns —
+    // otherwise Sheli "forgets" the rescue happened and replies as if it were
+    // a fresh conversation.
+    const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+    if (message.senderPhone === botPhone || message.senderPhone === botPhone.replace("+", "")) {
+      console.log(`[Webhook] Manual operator reply detected in ${message.groupId} — logging for context`);
+      await logMessage(message, "manual_operator_reply");
+      return new Response("OK", { status: 200 });
     }
 
     // 3a. Handle voice messages: transcribe short ones, politely reject long ones
@@ -4985,6 +5194,7 @@ Deno.serve(async (req: Request) => {
 
     // 3d. Skip empty/whitespace-only messages
     if (!message.text || !message.text.trim()) {
+      console.log(`[Webhook:DIAG] empty-text skip: type=${message.type} from=${message.senderPhone} chatType=${message.chatType} id=${message.messageId}`);
       return new Response("OK", { status: 200 });
     }
 
@@ -6670,9 +6880,7 @@ function isQuietHours(): boolean {
 // (Renamed to avoid collision with buildHouseholdContext from ai-classifier)
 
 async function buildClassifierCtx(householdId: string): Promise<ClassifierContext> {
-  const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
-  const today = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const { today: ilTodayStr, dayOfWeek: ilDayOfWeek } = getIlTodayAndDay();
 
   const [membersRes, tasksRes, shoppingRes, patternsRes, rotationsRes] = await Promise.all([
     supabase.from("household_members").select("display_name").eq("household_id", householdId),
@@ -6713,8 +6921,8 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
       members: typeof r.members === "string" ? JSON.parse(r.members) : r.members,
       current_index: r.current_index,
     })),
-    today: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-    dayOfWeek: hebrewDays[today.getDay()],
+    today: ilTodayStr,
+    dayOfWeek: ilDayOfWeek,
     familyPatterns,
   };
 }
