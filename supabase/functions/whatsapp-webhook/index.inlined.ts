@@ -6435,6 +6435,12 @@ let lastErrorNotification = 0; // Rate limit: max 1 notification per 5 minutes
 
 async function notifyAdmin(context: string, errorMsg: string) {
   try {
+    // Silent mode: skip all admin-alert outbound during ban recovery
+    if (isSilentMode()) {
+      console.log(`[SilentMode] suppressed admin alert: ${context} — ${errorMsg.slice(0, 100)}`);
+      return;
+    }
+
     const now = Date.now();
     if (now - lastErrorNotification < 5 * 60 * 1000) return; // Rate limit
     lastErrorNotification = now;
@@ -6489,6 +6495,20 @@ async function logMessage(
 
 // ─── Bot Reply Logger (wraps sendMessage) ───
 
+// SILENT MODE — emergency kill-switch for all outbound messaging.
+// Set env var BOT_SILENT_MODE=true to block every outbound via this wrapper.
+// Use case: WhatsApp anti-spam ban recovery — we want inbound processing
+// (classify, save actions to DB, log context) to continue while NO
+// outbound fires from the bot phone. Flag is read per-call so you can
+// toggle without a redeploy.
+// When true: logs the suppressed text to whatsapp_messages with
+// classification='silent_mode_suppressed' for post-ban audit + returns
+// a dummy SendResult so callers behave as if send succeeded.
+function isSilentMode(): boolean {
+  const flag = (Deno.env.get("BOT_SILENT_MODE") || "").toLowerCase().trim();
+  return flag === "true" || flag === "1" || flag === "yes";
+}
+
 async function sendAndLog(
   prov: WhatsAppProvider,
   msg: OutgoingMessage,
@@ -6499,10 +6519,32 @@ async function sendAndLog(
     replyType?: string;
   }
 ): Promise<SendResult> {
+  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+
+  // Silent mode: log what we WOULD have sent, but don't actually send.
+  // Provides audit trail for post-ban review of missed replies.
+  if (isSilentMode()) {
+    console.log(`[SilentMode] suppressed outbound to ${ctx.groupId} (${ctx.replyType || "bot_reply"}): "${(msg.text || "").slice(0, 80)}"`);
+    supabase.from("whatsapp_messages").insert({
+      household_id: ctx.householdId || "unknown",
+      group_id: ctx.groupId,
+      sender_phone: botPhone,
+      sender_name: "שלי",
+      message_text: msg.text,
+      message_type: "text",
+      whatsapp_message_id: null,
+      classification: "silent_mode_suppressed",
+      ai_responded: false,
+      in_reply_to: ctx.inReplyTo || null,
+    }).then(({ error }) => {
+      if (error) console.error("[SilentMode] audit log error:", error.message);
+    });
+    return { ok: true, messageId: undefined };
+  }
+
   const result = await prov.sendMessage(msg);
 
   // Fire-and-forget — don't block the reply path
-  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
   supabase.from("whatsapp_messages").insert({
     household_id: ctx.householdId || "unknown",
     group_id: ctx.groupId,
