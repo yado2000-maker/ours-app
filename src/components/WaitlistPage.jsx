@@ -196,6 +196,7 @@ export default function WaitlistPage() {
               display: "flex",
               flexDirection: "column",
               gap: 16,
+              width: "100%",
             }}
           >
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -211,6 +212,9 @@ export default function WaitlistPage() {
                     border: "1px solid #ddd",
                     borderRadius: 10,
                     fontFamily: "inherit",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    minWidth: 0,
                   }}
                 />
               </label>
@@ -227,6 +231,9 @@ export default function WaitlistPage() {
                     border: "1px solid #ddd",
                     borderRadius: 10,
                     fontFamily: "inherit",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    minWidth: 0,
                   }}
                 />
               </label>
@@ -249,6 +256,9 @@ export default function WaitlistPage() {
                   fontFamily: "inherit",
                   direction: "ltr",
                   textAlign: lang === "he" ? "right" : "left",
+                  width: "100%",
+                  boxSizing: "border-box",
+                  minWidth: 0,
                 }}
               />
             </label>
@@ -269,6 +279,9 @@ export default function WaitlistPage() {
                   fontFamily: "inherit",
                   direction: "ltr",
                   textAlign: lang === "he" ? "right" : "left",
+                  width: "100%",
+                  boxSizing: "border-box",
+                  minWidth: 0,
                 }}
               />
             </label>
