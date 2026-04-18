@@ -12,14 +12,14 @@ const CONTENT = {
     dir: "rtl",
     title: "רשימת המתנה לשלי",
     subtitle:
-      "שלי מוסיפה מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ואחזור אליכם ברגע שיהיה תורכם.",
+      "שלי קולטת מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ואחזור אליכם ברגע שיהיה תורכם.",
     fieldFirstName: "שם פרטי",
     fieldPhone: "מספר טלפון",
     fieldInterest: "מה הכי מעניין אתכם?",
     interestOptions: [
       { value: "shopping", label: "רשימת קניות משותפת" },
       { value: "reminders", label: "תזכורות" },
-      { value: "family", label: "תיאום משפחתי" },
+      { value: "calendar", label: "יומן פגישות ולו\"ז" },
       { value: "other", label: "משהו אחר" },
     ],
     submit: "שמרו לי מקום",
@@ -35,14 +35,14 @@ const CONTENT = {
     dir: "ltr",
     title: "Sheli waitlist",
     subtitle:
-      "Sheli is onboarding new signups in small batches to keep quality high. Leave your details and I'll reach out when it's your turn.",
+      "Sheli is welcoming new signups in small batches to keep quality high. Leave your details and I'll reach out when it's your turn.",
     fieldFirstName: "First name",
     fieldPhone: "Phone number",
     fieldInterest: "What's most interesting to you?",
     interestOptions: [
       { value: "shopping", label: "Shared shopping list" },
       { value: "reminders", label: "Reminders" },
-      { value: "family", label: "Family coordination" },
+      { value: "calendar", label: "Calendar & appointments" },
       { value: "other", label: "Something else" },
     ],
     submit: "Save my spot",
