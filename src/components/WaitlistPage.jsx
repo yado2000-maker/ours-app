@@ -28,7 +28,7 @@ const CONTENT = {
     submit: "שמרו לי מקום",
     submitting: "רגע אחד...",
     success:
-      "נרשמתם! 🧡\nאחזור אליכם ברגע שיגיע תורכם. תודה על הסבלנות.",
+      "קלטתי אתכם 🧡\nאחזור אליכם ברגע שיגיע תורכם",
     errorInvalidPhone: "מספר טלפון לא תקין",
     errorInvalidEmail: "אימייל לא תקין",
     errorConsentRequired: "צריך לאשר שאפשר לחזור אליכם כדי להירשם",
@@ -56,7 +56,7 @@ const CONTENT = {
     submit: "Save my spot",
     submitting: "One moment...",
     success:
-      "You're on the list! 🧡\nI'll reach out when it's your turn. Thanks for your patience.",
+      "We've got you 🧡\nI'll get back to you when it's your turn",
     errorInvalidPhone: "Invalid phone number",
     errorInvalidEmail: "Invalid email address",
     errorConsentRequired: "Please confirm we can reach out before submitting",
@@ -163,12 +163,14 @@ export default function WaitlistPage() {
         <h2 className="landing-section-title" style={{ marginTop: 24 }}>
           {c.title}
         </h2>
-        <p
-          className="landing-tagline"
-          style={{ fontWeight: 400, fontSize: 16, lineHeight: 1.6, marginTop: 8 }}
-        >
-          {c.subtitle}
-        </p>
+        {status !== "done" && (
+          <p
+            className="landing-tagline"
+            style={{ fontWeight: 400, fontSize: 16, lineHeight: 1.6, marginTop: 8 }}
+          >
+            {c.subtitle}
+          </p>
+        )}
 
         {status === "done" ? (
           <div
@@ -336,8 +338,12 @@ export default function WaitlistPage() {
             <button
               type="submit"
               className="landing-cta"
-              disabled={status === "submitting"}
-              style={{ marginTop: 8 }}
+              disabled={status === "submitting" || !consent}
+              style={{
+                marginTop: 8,
+                opacity: !consent || status === "submitting" ? 0.5 : 1,
+                cursor: !consent || status === "submitting" ? "not-allowed" : "pointer",
+              }}
             >
               {status === "submitting" ? c.submitting : c.submit}
             </button>
