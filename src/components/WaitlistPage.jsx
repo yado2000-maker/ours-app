@@ -12,9 +12,11 @@ const CONTENT = {
     dir: "rtl",
     title: "רשימת המתנה לשלי",
     subtitle:
-      "שלי קולטת מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ואחזור אליכם ברגע שיהיה תורכם.",
+      "שלי קולטת מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ושלי תחזור אליכם ברגע שיגיע תורכם!",
     fieldFirstName: "שם פרטי",
+    fieldLastName: "שם משפחה",
     fieldPhone: "מספר טלפון",
+    fieldEmail: "אימייל",
     fieldInterest: "מה הכי מעניין אתכם?",
     interestOptions: [
       { value: "shopping", label: "רשימת קניות משותפת" },
@@ -22,11 +24,14 @@ const CONTENT = {
       { value: "calendar", label: "יומן פגישות ולו\"ז" },
       { value: "other", label: "משהו אחר" },
     ],
+    consentLabel: "אני מסכימ/ה שתחזרו אליי בווטסאפ או במייל כשיגיע תורי",
     submit: "שמרו לי מקום",
     submitting: "רגע אחד...",
     success:
-      "נרשמתם! 🧡\nאחזור אליכם ברגע שיהיה תורכם. תודה על הסבלנות.",
+      "נרשמתם! 🧡\nאחזור אליכם ברגע שיגיע תורכם. תודה על הסבלנות.",
     errorInvalidPhone: "מספר טלפון לא תקין",
+    errorInvalidEmail: "אימייל לא תקין",
+    errorConsentRequired: "צריך לאשר שאפשר לחזור אליכם כדי להירשם",
     errorAlreadyIn: "המספר כבר רשום ברשימת ההמתנה 🧡",
     errorGeneric: "משהו השתבש. נסו שוב?",
     langToggle: "EN",
@@ -37,7 +42,9 @@ const CONTENT = {
     subtitle:
       "Sheli is welcoming new signups in small batches to keep quality high. Leave your details and I'll reach out when it's your turn.",
     fieldFirstName: "First name",
+    fieldLastName: "Last name",
     fieldPhone: "Phone number",
+    fieldEmail: "Email",
     fieldInterest: "What's most interesting to you?",
     interestOptions: [
       { value: "shopping", label: "Shared shopping list" },
@@ -45,11 +52,14 @@ const CONTENT = {
       { value: "calendar", label: "Calendar & appointments" },
       { value: "other", label: "Something else" },
     ],
+    consentLabel: "I agree to be contacted on WhatsApp or email when it's my turn",
     submit: "Save my spot",
     submitting: "One moment...",
     success:
       "You're on the list! 🧡\nI'll reach out when it's your turn. Thanks for your patience.",
     errorInvalidPhone: "Invalid phone number",
+    errorInvalidEmail: "Invalid email address",
+    errorConsentRequired: "Please confirm we can reach out before submitting",
     errorAlreadyIn: "This number is already on the waitlist 🧡",
     errorGeneric: "Something went wrong. Try again?",
     langToggle: "עב",
@@ -65,11 +75,19 @@ function isValidPhone(phone) {
   return digits.length >= 7 && digits.length <= 15;
 }
 
+function isValidEmail(email) {
+  if (!email) return true; // optional
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export default function WaitlistPage() {
   const [lang, setLang] = useState("he");
   const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [interest, setInterest] = useState("");
+  const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -84,6 +102,14 @@ export default function WaitlistPage() {
       setErrorMsg(c.errorInvalidPhone);
       return;
     }
+    if (!isValidEmail(email.trim())) {
+      setErrorMsg(c.errorInvalidEmail);
+      return;
+    }
+    if (!consent) {
+      setErrorMsg(c.errorConsentRequired);
+      return;
+    }
 
     setStatus("submitting");
 
@@ -92,11 +118,15 @@ export default function WaitlistPage() {
 
     const { error } = await supabase.from("waitlist").insert({
       first_name: firstName.trim() || null,
+      last_name: lastName.trim() || null,
       phone: normalizedPhone,
+      email: email.trim() || null,
       interest: interest || null,
       source,
       referrer_url: document.referrer || null,
       user_agent: navigator.userAgent.slice(0, 200),
+      consent_given: true,
+      consented_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -168,21 +198,39 @@ export default function WaitlistPage() {
               gap: 16,
             }}
           >
-            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>{c.fieldFirstName}</span>
-              <input
-                type="text"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                style={{
-                  padding: "12px 14px",
-                  fontSize: 16,
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                  fontFamily: "inherit",
-                }}
-              />
-            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{c.fieldFirstName}</span>
+                <input
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  style={{
+                    padding: "12px 14px",
+                    fontSize: 16,
+                    border: "1px solid #ddd",
+                    borderRadius: 10,
+                    fontFamily: "inherit",
+                  }}
+                />
+              </label>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{c.fieldLastName}</span>
+                <input
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  style={{
+                    padding: "12px 14px",
+                    fontSize: 16,
+                    border: "1px solid #ddd",
+                    borderRadius: 10,
+                    fontFamily: "inherit",
+                  }}
+                />
+              </label>
+            </div>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 600 }}>{c.fieldPhone}</span>
@@ -193,6 +241,26 @@ export default function WaitlistPage() {
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="050-123-4567"
+                style={{
+                  padding: "12px 14px",
+                  fontSize: 16,
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
+                  fontFamily: "inherit",
+                  direction: "ltr",
+                  textAlign: lang === "he" ? "right" : "left",
+                }}
+              />
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{c.fieldEmail}</span>
+              <input
+                type="email"
+                inputMode="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@example.com"
                 style={{
                   padding: "12px 14px",
                   fontSize: 16,
@@ -243,6 +311,25 @@ export default function WaitlistPage() {
                 </label>
               ))}
             </fieldset>
+
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1.4,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+                style={{ marginTop: 3, flexShrink: 0 }}
+              />
+              <span>{c.consentLabel}</span>
+            </label>
 
             {errorMsg && (
               <div style={{ color: "#c0392b", fontSize: 14 }}>{errorMsg}</div>
