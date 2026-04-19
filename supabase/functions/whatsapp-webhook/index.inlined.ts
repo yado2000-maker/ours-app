@@ -6876,44 +6876,59 @@ async function sendAndLog(
 ): Promise<SendResult> {
   const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
 
+  // whatsapp_messages.household_id is NOT NULL + FK to households_v2.id, so
+  // unknown-sender paths (waitlist-redirect, group bot-only intros, etc.) that
+  // reach sendAndLog without a resolved household can't audit-log. Previously
+  // the code fell back to the string literal "unknown", which triggers an FK
+  // violation every time (observed 2026-04-19 21:36 after inlined.ts deploy).
+  // Fix: only audit-log when we have a real household id. The console.log
+  // still lands in Edge Function logs for post-incident review.
+  const hasValidHousehold = !!ctx.householdId && ctx.householdId !== "unknown";
+
   // Silent mode: log what we WOULD have sent, but don't actually send.
   // Provides audit trail for post-ban review of missed replies.
   if (isSilentMode()) {
     console.log(`[SilentMode] suppressed outbound to ${ctx.groupId} (${ctx.replyType || "bot_reply"}): "${(msg.text || "").slice(0, 80)}"`);
-    supabase.from("whatsapp_messages").insert({
-      household_id: ctx.householdId || "unknown",
-      group_id: ctx.groupId,
-      sender_phone: botPhone,
-      sender_name: "שלי",
-      message_text: msg.text,
-      message_type: "text",
-      whatsapp_message_id: null,
-      classification: "silent_mode_suppressed",
-      ai_responded: false,
-      in_reply_to: ctx.inReplyTo || null,
-    }).then(({ error }) => {
-      if (error) console.error("[SilentMode] audit log error:", error.message);
-    });
+    if (hasValidHousehold) {
+      supabase.from("whatsapp_messages").insert({
+        household_id: ctx.householdId,
+        group_id: ctx.groupId,
+        sender_phone: botPhone,
+        sender_name: "שלי",
+        message_text: msg.text,
+        message_type: "text",
+        whatsapp_message_id: null,
+        classification: "silent_mode_suppressed",
+        ai_responded: false,
+        in_reply_to: ctx.inReplyTo || null,
+      }).then(({ error }) => {
+        if (error) console.error("[SilentMode] audit log error:", error.message);
+      });
+    } else {
+      console.log("[SilentMode] audit log skipped — no household id (unknown-sender path)");
+    }
     return { ok: true, messageId: undefined };
   }
 
   const result = await prov.sendMessage(msg);
 
-  // Fire-and-forget — don't block the reply path
-  supabase.from("whatsapp_messages").insert({
-    household_id: ctx.householdId || "unknown",
-    group_id: ctx.groupId,
-    sender_phone: botPhone,
-    sender_name: "שלי",
-    message_text: msg.text,
-    message_type: "text",
-    whatsapp_message_id: result.messageId || null,
-    classification: ctx.replyType || "bot_reply",
-    ai_responded: true,
-    in_reply_to: ctx.inReplyTo || null,
-  }).then(({ error }) => {
-    if (error) console.error("[sendAndLog] DB error:", error.message);
-  });
+  // Fire-and-forget — don't block the reply path. Same FK guard as above.
+  if (hasValidHousehold) {
+    supabase.from("whatsapp_messages").insert({
+      household_id: ctx.householdId,
+      group_id: ctx.groupId,
+      sender_phone: botPhone,
+      sender_name: "שלי",
+      message_text: msg.text,
+      message_type: "text",
+      whatsapp_message_id: result.messageId || null,
+      classification: ctx.replyType || "bot_reply",
+      ai_responded: true,
+      in_reply_to: ctx.inReplyTo || null,
+    }).then(({ error }) => {
+      if (error) console.error("[sendAndLog] DB error:", error.message);
+    });
+  }
 
   return result;
 }
