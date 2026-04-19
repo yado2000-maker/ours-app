@@ -282,6 +282,7 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 ## RTL / Hebrew Design Rules
 - `dir="rtl"` on parent flips flexbox automatically — most layouts "just work"
 - **Hebrew CTAs: always gender-free plural** — "המשיכו" (not "המשך"), "הירשמו" (not "הירשם"), "התחברו" (not "התחבר"). Masculine plural = universal form in modern Hebrew UX.
+- **Hebrew singular pronouns that ARE gender-neutral:** לך / אותך / בשבילך are written identically for masc + fem in unpointed Hebrew. Prefer them over plural (לכם/אתכם/בשבילכם) when the copy addresses an individual in a question or personal statement — more intimate without introducing gender. Rule of thumb: switch to singular if it only touches pronouns ("מה הכי מעניין אותך?"); stay plural if it would force a gendered verb ("הירשם/י" → use "הירשמו"). Added 2026-04-19 after waitlist copy.
 - Arrows: forward = ← in RTL, → in LTR. Back = → in RTL, ← in LTR.
 - `letter-spacing: 0` on Hebrew text (uppercase letter-spacing breaks Hebrew)
 - Font: Heebo for Hebrew, Nunito for English. Cormorant Garamond removed (too "luxury editorial" for a family app).
