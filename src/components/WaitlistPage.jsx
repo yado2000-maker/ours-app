@@ -10,7 +10,8 @@ import "../styles/landing.css";
 const CONTENT = {
   he: {
     dir: "rtl",
-    title: "רשימת המתנה לשלי",
+    brandTagline: "העוזרת החכמה שלכם בווטסאפ",
+    title: "רשימת המתנה",
     subtitle:
       "שלי קולטת מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ושלי תחזור אליכם ברגע שיגיע תורכם!",
     fieldFirstName: "שם פרטי",
@@ -184,7 +185,15 @@ export default function WaitlistPage() {
         }}
       >
         <h1 className="landing-wordmark">sheli</h1>
-        <h2 className="landing-section-title" style={{ marginTop: 24 }}>
+        {c.brandTagline && (
+          <p
+            className="landing-tagline"
+            style={{ fontWeight: 400, fontSize: 18, marginTop: 4 }}
+          >
+            {c.brandTagline}
+          </p>
+        )}
+        <h2 className="landing-section-title" style={{ marginTop: 40 }}>
           {c.title}
         </h2>
         {status !== "done" && (
