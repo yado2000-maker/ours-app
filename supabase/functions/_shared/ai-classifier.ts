@@ -170,7 +170,7 @@ Respond ONLY as this JSON — no other text:
   ]
 }
 
-${isHe ? 'Shopping categories (Hebrew): פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר' : 'Shopping categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Health Store, Other'}
+${isHe ? 'Shopping categories (Hebrew): פירות וירקות, מוצרי חלב, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר' : 'Shopping categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Health Store, Other'}
 
 Generate 4-char alphanumeric IDs for new items.`.trim();
 }

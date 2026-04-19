@@ -52,6 +52,22 @@ Deno.test("renderTemplate: welcome_direct respects Meta 1024-char body limit", (
   assertEquals(out.length < 1024, true, `welcome_direct rendered to ${out.length} chars`);
 });
 
+Deno.test("TEMPLATES: no bullet characters in any body (RTL flip invariant, 2026-04-19)", () => {
+  // Bullet chars like "•" flip to the visual end in WhatsApp RTL rendering
+  // and feel broken to Hebrew readers. Anti-drift invariant enforced at the
+  // code level so a future copy edit can't silently regress.
+  const bulletChars = ["•", "●", "○", "▪", "▫", "◦"];
+  for (const [id, tpl] of Object.entries(TEMPLATES)) {
+    for (const bullet of bulletChars) {
+      assertEquals(
+        tpl.body.includes(bullet),
+        false,
+        `Template ${id} contains bullet char "${bullet}" — use plain newlines instead`,
+      );
+    }
+  }
+});
+
 Deno.test("renderTemplate: welcome_group has no variables and includes examples + tips", () => {
   const out = renderTemplate("welcome_group", {});
   assertEquals(out.startsWith("שלום לכולם!"), true);

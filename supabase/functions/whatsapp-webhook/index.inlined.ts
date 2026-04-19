@@ -690,7 +690,7 @@ HEBREW PATTERNS:
 
 SHOPPING CATEGORIES (ALWAYS assign one). Categories MUST match this exact list — do NOT invent categories.
 - פירות וירקות: מלפפון, עגבניה, בצל, בצל לבן, בצל סגול, שום, לימון, תפוח, בננה, אבוקדו, פטרוזיליה, כוסברה, נענע, חסה, גזר, פלפל, פלפל חריף, תפוח אדמה, בטטה, קולרבי, צנונית, ברוקולי, כרובית, חציל, קישוא, דלעת, תירס, אפונה, שעועית, פירות יבשים, תמרים, ענבים, תות, אפרסק, שזיף, אגס, מנגו, רימון, אננס, אשכולית, קלמנטינה, נקטרינה, פטריות, כרוב, כרוב סגול, סלק, לפת, שומר, חסה רומית, רוקט, תרד, בצלצל ירוק, שמיר, בזיליקום, רוזמרין, ג'ינג'ר, כורכום, ליים
-- חלב וביצים: חלב, ביצים, גבינה צהובה, גבינה לבנה, קוטג', שמנת, שמנת מתוקה, שמנת חמוצה, יוגורט, לבן (dairy), חמאה, שוקו, מעדן, פודינג, גבינת שמנת, מסקרפונה, ריקוטה, מוצרלה, פרמז'ן, גבינת עיזים, בולגרית, לאבנה, טופו, חלב סויה, חלב אורז, חלב שקדים, חלב שיבולת שועל, חלב קוקוס, שמנת קוקוס
+- מוצרי חלב: חלב, ביצים, גבינה צהובה, גבינה לבנה, קוטג', שמנת, שמנת מתוקה, שמנת חמוצה, יוגורט, לבן (dairy), חמאה, שוקו, מעדן, פודינג, גבינת שמנת, מסקרפונה, ריקוטה, מוצרלה, פרמז'ן, גבינת עיזים, בולגרית, לאבנה, טופו, חלב סויה, חלב אורז, חלב שקדים, חלב שיבולת שועל, חלב קוקוס, שמנת קוקוס
 - בשר ודגים: עוף, בקר, טחון, בשר טחון, שניצל, נקניקיות, נקניק, סלמון, טונה, דגים, שוקיים, כנפיים, סטייק, קבב, המבורגר, כבש, הודו, בייקון, פסטרמה, סושי, נתחי חזה, פילה, קציצות, אנטריקוט, צלעות
 - מאפים: לחם, לחם לבן, לחם מלא, לחם שיפון, לחם אחיד, פיתות, לחמניות, חלה, באגט, טורטיה, עוגיות, עוגה, קרואסון, מאפינס, לחמניות המבורגר, לחם פרוס, מלאווח, ג'חנון, לאפה, פוקצ'ה
 - מזווה: אורז, פסטה, שמן זית, שמן קנולה, שמן, חומוס, טחינה, רסק עגבניות, קטשופ, חרדל, מלח, פלפל שחור, סוכר, סוכר חום, סוכר דמררה, קמח, קמח לבן, קמח מלא, קמח לא תופח, תבלינים, שימורים, חמאת בוטנים, דבש, ריבה, קורנפלקס, גרנולה, אגוזים, פקאנים, שקדים, אגוזי מלך, חומץ, חומץ בלסמי, רוטב סויה, רוטב צ'ילי, פפריקה, כמון, כורכום, קינמון, זעתר, סומק, שומשום, אבקת אפיה, סודה לשתייה (baking soda), וניל, תמצית וניל, שוקולד מריר, שוקולד לבן, קקאו, קוסקוס, בורגול, קטניות, עדשים, חומוס יבש, פירורי לחם, סולת, ג'ריש, קוואקר, שיבולת שועל, מייפל, סילאן, עגבניות מיובשות, זיתים, חמוצים, מלפפון חמוץ, טונה בשימורים, תירס בשימורים, רוטב פסטו
@@ -710,17 +710,17 @@ CATEGORY DISAMBIGUATION — common mistakes:
 - NOT valid categories: "בשר", "חמוצים", "מוצרי חלב", "ירקות" — use the exact names above
 
 CRITICAL — Hebrew "לבן" disambiguation:
-- "לבן" alone = dairy product (חלב וביצים)
+- "לבן" alone = dairy product (מוצרי חלב)
 - "בצל לבן" = white onion → פירות וירקות (NOT dairy!)
 - "קמח לבן" = white flour → מזווה (NOT dairy!)
 - "לחם לבן" = white bread → מאפים (NOT dairy!)
-- "גבינה לבנה" = white cheese → חלב וביצים (dairy, correct)
+- "גבינה לבנה" = white cheese → מוצרי חלב (dairy, correct)
 - Rule: when "לבן/לבנה" follows a non-dairy noun, it means "white" (color), NOT the dairy product.
 
 ${ctx.familyPatterns ? `FAMILY PATTERNS (learned for this household):\n${ctx.familyPatterns}\n` : ""}COMPOUND PRODUCT NAMES — keep as ONE item, do NOT split:
-- "חלב אורז" = rice milk (ONE item in חלב וביצים)
-- "חלב שקדים" = almond milk (ONE item in חלב וביצים)
-- "חלב סויה" = soy milk (ONE item in חלב וביצים)
+- "חלב אורז" = rice milk (ONE item in מוצרי חלב)
+- "חלב שקדים" = almond milk (ONE item in מוצרי חלב)
+- "חלב סויה" = soy milk (ONE item in מוצרי חלב)
 - "שמן זית" = olive oil (ONE item in מזווה)
 - "חמאת בוטנים" = peanut butter (ONE item in מזווה)
 - "נייר טואלט" = toilet paper (ONE item in ניקוי ובית)
@@ -734,7 +734,7 @@ Strip the preposition (מ/מה/ב) from the store name.
 
 Known Israeli stores and their category behavior:
 - 🛒 General supermarkets (use standard product categories, NOT store name): שופרסל, פוליצר, רמי לוי, יוחננוף, חצי חינם, קשת טעמים, טיב טעם, מגה, ויקטורי, אושר עד, שוק
-  → "משופרסל חלב ולחם" → category: חלב וביצים / מאפים (standard categories, not "שופרסל")
+  → "משופרסל חלב ולחם" → category: מוצרי חלב / מאפים (standard categories, not "שופרסל")
   → Supermarket names are just WHERE to buy, not a meaningful grouping
 - 💊 Pharmacy/drugstore (category: "סופר פארם" or store name): סופר פארם, בי, פארם גרופ, Super-Pharm
   → "מסופר פארם, שמפו וסבון" → category: "סופר פארם" for both
@@ -743,7 +743,7 @@ Known Israeli stores and their category behavior:
 - 🏪 Other specific stores (category: store name): מכולת, מחסני חשמל, איקאה, ACE, הום סנטר, etc.
   → "מאיקאה, מדף ומנורה" → category: "איקאה" for both
 
-Items without a store context: use standard categories (פירות וירקות, חלב וביצים, etc.)
+Items without a store context: use standard categories (פירות וירקות, מוצרי חלב, etc.)
 
 SHOPPING ITEM CLEANUP — strip these from item names:
 - Greetings: "היי שלי", "שלום", "בוקר טוב" → NOT items, ignore them
@@ -785,12 +785,12 @@ ISRAEL WEEK: Sunday (ראשון) is the FIRST work day, NOT weekend. Weekend in 
 
 EXAMPLES:
 [אמא]: "בוקר טוב!" → {"intent":"ignore","confidence":0.99,"entities":{"raw_text":"בוקר טוב!"}}
-[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"חלב וביצים"}],"raw_text":"חלב"}}
-[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"חלב וביצים"}],"raw_text":"חלב אורז"}}
+[אבא]: "חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"חלב"}}
+[אמא]: "חלב אורז" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב אורז","category":"מוצרי חלב"}],"raw_text":"חלב אורז"}}
 [אבא]: "נייר טואלט וסבון כלים" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"נייר טואלט","category":"ניקוי ובית"},{"name":"סבון כלים","category":"ניקוי ובית"}],"raw_text":"נייר טואלט וסבון כלים"}}
-[אמא]: "תוסיפי חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"חלב וביצים"}],"raw_text":"תוסיפי חלב"}}
+[אמא]: "תוסיפי חלב" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב"}}
 [אבא]: "תכניסי לרשימה מלפפונים במלח גודל קטן" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"מלפפונים במלח גודל קטן","category":"מזווה"}],"raw_text":"תכניסי לרשימה מלפפונים במלח גודל קטן"}}
-[אמא]: "תוסיפי חלב שיבולת שועל נטול סוכר" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב שיבולת שועל נטול סוכר","category":"חלב וביצים"}],"raw_text":"תוסיפי חלב שיבולת שועל נטול סוכר"}}
+[אמא]: "תוסיפי חלב שיבולת שועל נטול סוכר" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חלב שיבולת שועל נטול סוכר","category":"מוצרי חלב"}],"raw_text":"תוסיפי חלב שיבולת שועל נטול סוכר"}}
 [אסנת]: "אננס" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"אננס","category":"פירות וירקות"}],"raw_text":"אננס"}}
 [אמא]: "קוטג תנובה" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"קוטג תנובה","category":"מוצרי חלב"}],"raw_text":"קוטג תנובה"}}
 [אבא]: "חלב תנובה 3%" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"חלב תנובה 3%","category":"מוצרי חלב"}],"raw_text":"חלב תנובה 3%"}}
@@ -800,7 +800,7 @@ EXAMPLES:
 [אסנת]: "זיתים מגולענים רק אם מחיר טוב\nקמח" → {"intent":"add_shopping","confidence":0.90,"entities":{"items":[{"name":"זיתים מגולענים (רק אם מחיר טוב)","category":"מזווה"},{"name":"קמח","category":"מזווה"}],"raw_text":"זיתים מגולענים רק אם מחיר טוב\nקמח"}}
 [אסנת]: "ג'ריש 2 ק\"ג\n2 סולת" → {"intent":"add_shopping","confidence":0.92,"entities":{"items":[{"name":"ג'ריש","qty":"2 ק\"ג","category":"מזווה"},{"name":"סולת","qty":"2","category":"מזווה"}],"raw_text":"ג'ריש 2 ק\"ג\n2 סולת"}}
 [אסנת]: "חומוס\nחבילה של נקניקיות\nמרגז 1" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"חומוס","category":"מזווה"},{"name":"נקניקיות","qty":"חבילה","category":"בשר ודגים"},{"name":"מרגז","qty":"1","category":"בשר ודגים"}],"raw_text":"חומוס\nחבילה של נקניקיות\nמרגז 1"}}
-[אסנת]: "קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"קורנפלור","category":"מזווה"},{"name":"פודינג וניל 1 ק\"ג אוסם (אם יש)","category":"חלב וביצים"}],"raw_text":"קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם"}}
+[אסנת]: "קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"קורנפלור","category":"מזווה"},{"name":"פודינג וניל 1 ק\"ג אוסם (אם יש)","category":"מוצרי חלב"}],"raw_text":"קורנפלור\nאם יש פודינג וניל 1 ק\"ג אוסם"}}
 [אמא]: "נועה חוג 5" → {"intent":"add_task","confidence":0.90,"entities":{"person":"נועה","title":"חוג","time_raw":"5","raw_text":"נועה חוג 5"}}
 [אבא]: "לסדר את הארון בסלון" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לסדר את הארון בסלון","raw_text":"לסדר את הארון בסלון"}}
 [אמא]: "להחליף נורה בחדר של נועה" → {"intent":"add_task","confidence":0.88,"entities":{"title":"להחליף נורה בחדר של נועה","raw_text":"להחליף נורה בחדר של נועה"}}
@@ -838,7 +838,7 @@ EXAMPLES:
 [אמא]: "אוף" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"אוף"}}
 [אבא]: "לא" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"לא"}}
 [אסנת]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור ופודינג וניל לרשימה\"]\n🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"🤦🏼‍♀️🤦🏼‍♀️🤦🏼‍♀️"}}
-[אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"חלב וביצים"},{"name":"קפה טחון","category":"משקאות"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"מאפים"},{"name":"חומוס","category":"מזווה"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
+[אמא]: "גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס" → {"intent":"add_shopping","confidence":0.95,"entities":{"items":[{"name":"גזר","category":"פירות וירקות"},{"name":"מלפפון","category":"פירות וירקות"},{"name":"בצל","category":"פירות וירקות"},{"name":"שום","category":"פירות וירקות"},{"name":"תפוחים","category":"פירות וירקות"},{"name":"יוגורט","category":"מוצרי חלב"},{"name":"קפה טחון","category":"משקאות"},{"name":"תפוח אדמה","category":"פירות וירקות"},{"name":"לחמניות","category":"מאפים"},{"name":"חומוס","category":"מזווה"}],"raw_text":"גזר, מלפפון, בצל, שום, תפוחים, יוגורט, קפה טחון, תפוח אדמה, לחמניות, חומוס"}}
 [אמא]: "תזכירי לי ב-4 לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לאסוף את הילדים","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 לאסוף את הילדים"}}
 [אבא]: "תזכירי אותי לשלם ארנונה" → {"intent":"add_reminder","confidence":0.88,"addressed_to_bot":true,"entities":{"reminder_text":"לשלם ארנונה","raw_text":"תזכירי אותי לשלם ארנונה"}}
 [אבא]: "בעוד שעה תזכירי לקחת את הכביסה" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לקחת את הכביסה","time_raw":"בעוד שעה","raw_text":"בעוד שעה תזכירי לקחת את הכביסה"}}
@@ -1843,7 +1843,7 @@ Respond ONLY as this JSON — no other text:
   ]
 }
 
-${isHe ? 'Shopping categories (Hebrew): פירות וירקות (כל ירק ופרי), חלב וביצים (כולל טופו, גבינות, יוגורט, חלב צמחי), בשר ודגים, מאפים (לחם, פיתות, עוגות), מזווה (אורז, פסטה, שמן, חומוס, טחינה, תבלינים, אפייה, שימורים), מוצרים קפואים, משקאות, ניקוי ובית (סבון, נייר טואלט, שקיות זבל, סוללות, נרות), מוצרים מחנות הטבע, טיפוח (שמפו, קרם, משחת שיניים), אחר (רק אם שום קטגוריה אחרת לא מתאימה)' : 'Shopping categories: Produce, Dairy & Eggs (incl. tofu, yogurt, plant milk), Meat & Fish, Bakery, Pantry (rice, pasta, oil, spices, baking, canned), Frozen, Drinks, Household (cleaning, paper, batteries, candles), Health Food, Personal Care, Other (only if nothing else fits)'}
+${isHe ? 'Shopping categories (Hebrew): פירות וירקות (כל ירק ופרי), מוצרי חלב (כולל ביצים, טופו, גבינות, יוגורט, חלב צמחי), בשר ודגים, מאפים (לחם, פיתות, עוגות), מזווה (אורז, פסטה, שמן, חומוס, טחינה, תבלינים, אפייה, שימורים), מוצרים קפואים, משקאות, ניקוי ובית (סבון, נייר טואלט, שקיות זבל, סוללות, נרות), מוצרים מחנות הטבע, טיפוח (שמפו, קרם, משחת שיניים), אחר (רק אם שום קטגוריה אחרת לא מתאימה)' : 'Shopping categories: Produce, Dairy Products (incl. eggs, tofu, yogurt, plant milk), Meat & Fish, Bakery, Pantry (rice, pasta, oil, spices, baking, canned), Frozen, Drinks, Household (cleaning, paper, batteries, candles), Health Food, Personal Care, Other (only if nothing else fits)'}
 
 Generate 4-char alphanumeric IDs for new items.`.trim();
 }
@@ -3196,7 +3196,7 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Never repeat same phrasing. Every reply sounds fresh and different.
 
 CAPABILITIES YOU CAN DEMONSTRATE:
-- Shopping lists: user says items → you categorize with emoji headers (🥬 פירות וירקות, 🥛 חלב וביצים, 🥩 בשר ודגים, 🍞 מאפים, 🥫 מזווה, 🧊 מוצרים קפואים, 🍺 משקאות, 🧴 ניקוי ובית, 🌿 מוצרים מחנות הטבע, 🧴 טיפוח, 🛒 אחר). ONLY use these categories — never invent new ones. When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
+- Shopping lists: user says items → you categorize with emoji headers (🥦 פירות וירקות, 🥛 מוצרי חלב, 🥩 בשר ודגים, 🍞 מאפים, 🥫 מזווה, 🧊 מוצרים קפואים, 🥤 משקאות, 🧽 ניקוי ובית, 🌱 מוצרים מחנות הטבע, 🛒 אחר). ONLY use these categories — never invent new ones. When user mentions a STORE ("מאדונית התבלינים, קפה ומלח אפור"), use the store name as the category for those items.
 - Tasks: user says chore → you say "רשמתי! ✅" with task text
 - Rotations/turns: after the FIRST task about chores, offer ONCE: "אם יש ילדים בבית — אני מעולה בתורות 😉". Do NOT offer rotations again if "rotation" already appears in TRIED. One offer is enough.
   - If user engages: ask what rotation + who participates → create it
@@ -3214,7 +3214,7 @@ CAPABILITIES YOU CAN DEMONSTRATE:
 FORMATTING (WhatsApp RTL):
 - NEVER use bullet characters (•, ☐, -, *) for lists — they stretch left in Hebrew RTL and look broken.
 - For shopping lists: emoji category header on its own line, then items below it one per line WITHOUT any prefix. Example:
-  🥛 חלב וביצים
+  🥛 מוצרי חלב
   חלב
   ביצים
   🍞 מאפים
@@ -4049,10 +4049,10 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       "אני קולטת מצטרפים חדשים בהדרגה, כדי שאוכל לתת שירות מעולה לכולם!\n\n" +
       "השאירו פרטים ברשימת ההמתנה ואעדכן אתכם ברגע שיגיע תורכם: sheli.ai/waitlist\n\n" +
       "איך זה עובד? פשוט כותבים או מקליטים:\n" +
-      "• \"תזכירי לי מחר ב-9:00 להתקשר לאמא\"\n" +
-      "• \"תוסיפי לקניות חלב, לחם וביצים\"\n" +
-      "• \"תור ביום שלישי ב-10:00 אצל הרופא\"\n" +
-      "• או מעבירים אליי הודעת ווטסאפ עם פרטים על אירוע\n\n" +
+      "\"תזכירי לי מחר ב-9:00 להתקשר לאמא\"\n" +
+      "\"תוסיפי לקניות חלב, לחם וביצים\"\n" +
+      "\"תור ביום שלישי ב-10:00 אצל הרופא\"\n" +
+      "או מעבירים אליי הודעת ווטסאפ עם פרטים על אירוע\n\n" +
       "נתראה בקרוב 🙌";
 
     await sendAndLog(prov, { groupId: message.groupId, text: waitlistBody }, {

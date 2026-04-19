@@ -5,7 +5,7 @@ import {
   CalendarFeatureIcon,
   ChoresFeatureIcon,
   ReminderFeatureIcon,
-  LearningFeatureIcon,
+  ForwardFeatureIcon,
   ExpenseFeatureIcon,
   FamilyGroupIcon,
   KidsIcon,
@@ -47,7 +47,7 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
       { Icon: ChoresFeatureIcon, title: "ניהול משימות ומטלות - גם לילדים!", subtitle: "תור מי לפנות מדיח? ומי אוסף מהחוג? מושלם להורים עסוקים" },
       { Icon: ExpenseFeatureIcon, title: "מעקב הוצאות", subtitle: "\u0022שילמתי 85 על פיצה\u0022 — ושלי רושמת. עוקבת אחרי הוצאות ומעדכנת אתכם כשתרצו" },
-      { Icon: LearningFeatureIcon, title: "שלי לומדת להכיר אתכם", subtitle: "ככל שתשתמשו בה יותר, שלי תכיר אתכם טוב יותר. היא תזכור איך קוראים לכלב שלכם, מתי היומולדת של אמא ושביום שלישי תמיד נגמר החלב" },
+      { Icon: ForwardFeatureIcon, title: "העברה אליי בלחיצה", subtitle: "לחצו \u0022העבר\u0022 על כל הודעה עם תאריך, רשימה או פרטי אירוע - ואני אוסיף אוטומטית. בלי להקליד מחדש" },
     ],
     familyTitle: "שלי לכל המשפחה",
     familyItems: [
@@ -100,7 +100,7 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
       { Icon: ChoresFeatureIcon, title: "Tasks & chores \u2014 for kids too!", subtitle: "Whose turn to empty the dishwasher? Who picks up from practice? Perfect for busy parents" },
       { Icon: ExpenseFeatureIcon, title: "Expense tracking", subtitle: "\u0022I paid 85 for pizza\u0022 — and Sheli logs it. Tracks expenses and updates you when you want" },
-      { Icon: LearningFeatureIcon, title: "Sheli learns to know you", subtitle: "The more you use her, the better she knows you. She'll remember your dog's name, when mom's birthday is, and that you always run out of milk on Tuesdays" },
+      { Icon: ForwardFeatureIcon, title: "Forward it to Sheli", subtitle: "Tap \u0022Forward\u0022 on any message with a date, list, or event details — I'll add it automatically. No retyping" },
     ],
     familyTitle: "Sheli for the whole family",
     familyItems: [
