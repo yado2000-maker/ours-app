@@ -259,11 +259,19 @@ def insert_message(household_id: str, phone: str, sender_name: str, text: str,
 # ─── Action materialization ─────────────────────────────────────────────────
 
 def materialize_actions(household_id: str, cls: dict, text: str, ts_iso: str,
-                        user_name: str) -> list[str]:
+                        user_name: str, *,
+                        group_id: str | None = None,
+                        created_by_phone: str | None = None) -> list[str]:
     """Create real CMS rows for an actionable classification.
     Returns list of table names written to (for logging).
     Conservative: only acts on high-confidence (>=0.6) actionable intents.
     Deduped by content + household so re-runs are safe.
+
+    `group_id` is REQUIRED to materialise reminders (reminder_queue.group_id
+    is NOT NULL). Caller passes "{phone}@s.whatsapp.net" for 1:1 chats or
+    the real group JID for groups. If absent, reminder materialisation is
+    silently skipped — message is already in whatsapp_messages, so the
+    recovery planner can still craft a reply.
     """
     intent = cls.get("intent")
     conf = float(cls.get("confidence") or 0)
@@ -344,6 +352,17 @@ def materialize_actions(household_id: str, cls: dict, text: str, ts_iso: str,
         return touched
 
     if intent == "add_reminder":
+        # Schema reality (reminder_queue): id (uuid default), household_id,
+        # group_id (NOT NULL), message_text, send_at, sent (bool, default false),
+        # sent_at, reminder_type CHECK IN ('event','briefing','summary','nudge','user'),
+        # reference_id, created_at, created_by_phone, created_by_name.
+        # The previous body used the historical names scheduled_for / status / fired_at
+        # which never matched production columns — every chat-import reminder failed
+        # silently with a 400 and the user lost the asked-for nudge (Bug 2, 2026-04-20).
+        if not group_id:
+            # Without a group_id we cannot satisfy NOT NULL. Skip cleanly so
+            # whatsapp_messages still inserts and recovery planner can run.
+            return []
         reminder_text = (entities.get("text") or text).strip()[:500]
         send_at = entities.get("time_iso") or ts_iso
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -351,21 +370,24 @@ def materialize_actions(household_id: str, cls: dict, text: str, ts_iso: str,
         existing = sb_get("reminder_queue", {
             "household_id": f"eq.{household_id}",
             "message_text": f"eq.{reminder_text}",
-            "scheduled_for": f"eq.{send_at}",
+            "send_at": f"eq.{send_at}",
             "select": "id", "limit": "1",
         })
         if existing:
             return []
         row: dict[str, Any] = {
-            "id": rand_id("rm"),
             "household_id": household_id,
+            "group_id": group_id,
             "message_text": reminder_text,
-            "scheduled_for": send_at,
-            "status": "fired" if is_past else "pending",
+            "send_at": send_at,
+            "sent": is_past,  # past reminders ship as already-sent so cron skips them
+            "reminder_type": "user",
             "created_at": ts_iso,
+            "created_by_phone": created_by_phone,
+            "created_by_name": user_name,
         }
         if is_past:
-            row["fired_at"] = send_at
+            row["sent_at"] = send_at
         sb_post("reminder_queue", row)
         touched.append("reminder_queue")
         return touched
@@ -776,7 +798,11 @@ def process_group_file(path: Path, entry: dict, dry_run: bool = False) -> dict:
             # likely didn't already handle it live). Keeps the group tidy.
             if state == "needs_recovery":
                 try:
-                    touched = materialize_actions(hh_id, cls, text, ts_iso, sender)
+                    touched = materialize_actions(
+                        hh_id, cls, text, ts_iso, sender,
+                        group_id=group_id,
+                        created_by_phone=phone,
+                    )
                     for t in touched:
                         actions_created[t] = actions_created.get(t, 0) + 1
                 except Exception as mat_err:
@@ -881,7 +907,11 @@ def process_file(path: Path, manifest_entry: dict | None = None,
                 inserted_in += 1
                 classifications.append({"text": text, "cls": cls, "ts_iso": ts_iso})
                 try:
-                    touched = materialize_actions(hh_id, cls, text, ts_iso, display_name)
+                    touched = materialize_actions(
+                        hh_id, cls, text, ts_iso, display_name,
+                        group_id=f"{phone}@s.whatsapp.net",
+                        created_by_phone=phone,
+                    )
                     for t in touched:
                         actions_created[t] = actions_created.get(t, 0) + 1
                 except Exception as mat_err:
