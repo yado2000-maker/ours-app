@@ -63,7 +63,7 @@ const CONTENT = {
     ],
     faqTitle: "שאלות נפוצות",
     faq: [
-      { q: "איך שלי עובדת?", a: "שלי היא פיתוח ישראלי המבוסס על בינה מלאכותית - בעצם היא עוזרת חכמה בווטסאפ שמבינה עברית רגילה. כתבו \u0022חלב\u0022 והיא תוסיף לרשימה, \u0022תזכירי לי...\u0022 והיא תזכיר בזמן. שלי עובדת בצ\u0027אט אישי ובקבוצות, לבד או עם כל מי שגר בבית. היא לומדת את הסגנון שלכם עם הזמן: כינויים, מוצרים קבועים, הרגלים." },
+      { q: "איך שלי עובדת?", a: "שלי היא פיתוח ישראלי שמארגן לכם את הבית דרך ווטסאפ - רשימות קניות, תזכורות, מטלות, יומן והוצאות, הכל במקום אחד. כתבו \u0022חלב\u0022 והיא תוסיף לרשימה, \u0022תזכירי לי...\u0022 והיא תזכיר בזמן. שלי עובדת בצ\u0027אט אישי ובקבוצות, לבד או עם כל מי שגר בבית. היא זוכרת את הסגנון שלכם עם הזמן: כינויים, מוצרים קבועים, הרגלים." },
       { q: "אפליקציה לצפייה נוחה בכל הרשימות שלכם", a: "רשימת הקניות, המטלות, התזכורות, התקציב ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה - אין יותר נוח מזה!" },
       { q: "כמה זה עולה?", a: "חינם לגמרי עד 40 פעולות בחודש, כל חודש!\nצריכים יותר? פרימיום ללא הגבלה ב-9.90 \u20AA לחודש בלבד." },
       { q: "מה עם הפרטיות?", a: "שלי שומרת למשך 30 יום את הודעות הטקסט ואת ההודעות הקוליות הקצרות שתשלחו אליה. היא לא שומרת תמונות או וידאו. לאחר 30 יום, כל המידע נמחק אלא אם תבקשו אחרת משלי. המידע שלכם שמור ומאובטח ורק אתם רואים אותו. אף אחד אחר לא - כולל אותנו." },
@@ -116,7 +116,7 @@ const CONTENT = {
     ],
     faqTitle: "FAQ",
     faq: [
-      { q: "How does Sheli work?", a: "Sheli is an AI-powered smart assistant on WhatsApp that understands natural language. Say \u0022milk\u0022 and it's on the list, say \u0022remind me...\u0022 and she'll remind you on time. Sheli works in private chat and in groups, alone or with everyone in your home. She learns your style over time: nicknames, regular products, routines." },
+      { q: "How does Sheli work?", a: "Sheli is a family task coordination helper on WhatsApp — shopping lists, reminders, chores, calendar and expenses, all in one place. Say \u0022milk\u0022 and it's on the list, say \u0022remind me...\u0022 and she'll remind you on time. Sheli works in private chat and in groups, alone or with everyone in your home. She remembers your style over time: nicknames, regular products, routines." },
       { q: "An app for easy viewing of all your lists", a: "Your shopping list, tasks, reminders, budget and calendar sync in real time, from both WhatsApp and the app \u2014 it doesn't get easier than this!" },
       { q: "How much does it cost?", a: "40 actions per month for free, every month!\nNeed more? Unlimited Premium for just $2.70/month." },
       { q: "What about privacy?", a: "Sheli stores text messages and short voice messages you send her for 30 days. She doesn't store photos or videos. After 30 days, all data is deleted unless you ask Sheli otherwise. Your data is secure and only you can see it. Nobody else \u2014 including us." },
