@@ -174,7 +174,15 @@ export default function WaitlistPage() {
         {c.langToggle}
       </button>
 
-      <section className="landing-hero" style={{ maxWidth: 480, margin: "0 auto", width: "100%" }}>
+      <section
+        className="landing-hero"
+        style={{
+          maxWidth: 480,
+          margin: "0 auto",
+          width: "100%",
+          paddingBottom: "calc(80px + env(safe-area-inset-bottom))",
+        }}
+      >
         <h1 className="landing-wordmark">sheli</h1>
         <h2 className="landing-section-title" style={{ marginTop: 24 }}>
           {c.title}
