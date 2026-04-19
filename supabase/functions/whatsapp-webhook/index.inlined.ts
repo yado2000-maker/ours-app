@@ -1514,6 +1514,13 @@ function cleanReminderFromReply(reply: string): string {
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
     .replace(/<!--\s*REMINDER[^>]*>/g, "")
+    // Catch-all (2026-04-19): strip any remaining HTML-comment metadata block
+    // Sonnet may have invented by analogy — e.g. <!--EVENT:{...}-->, <!--TASK:...-->,
+    // <!--SHOPPING:...-->. Real consumable blocks (REMINDER / MEMORY / PENDING_ACTION)
+    // are extracted + stripped BEFORE this function runs in their respective paths,
+    // so this catch-all only removes stray Sonnet hallucinations, preventing them
+    // from leaking to the user's WhatsApp chat.
+    .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
