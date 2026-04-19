@@ -38,8 +38,8 @@ const CONTENT = {
     errorAlreadyIn: "המספר כבר רשום ברשימת ההמתנה 🧡",
     errorGeneric: "משהו השתבש. נסו שוב?",
     langToggle: "EN",
-    learnMore: "רוצים לראות מה שלי יודעת לעשות?",
-    learnMoreCta: "גלו את שלי",
+    learnMore: "מה שלי יודעת לעשות?",
+    learnMoreCta: "בואו לראות",
   },
   en: {
     dir: "ltr",
@@ -71,8 +71,8 @@ const CONTENT = {
     errorAlreadyIn: "This number is already on the waitlist 🧡",
     errorGeneric: "Something went wrong. Try again?",
     langToggle: "עב",
-    learnMore: "Curious what Sheli can do?",
-    learnMoreCta: "Meet Sheli",
+    learnMore: "Curious what Sheli does?",
+    learnMoreCta: "Take a look",
   },
 };
 
@@ -174,7 +174,15 @@ export default function WaitlistPage() {
         {c.langToggle}
       </button>
 
-      <section className="landing-hero" style={{ maxWidth: 480, margin: "0 auto", width: "100%" }}>
+      <section
+        className="landing-hero"
+        style={{
+          maxWidth: 480,
+          margin: "0 auto",
+          width: "100%",
+          paddingBottom: "calc(80px + env(safe-area-inset-bottom))",
+        }}
+      >
         <h1 className="landing-wordmark">sheli</h1>
         <h2 className="landing-section-title" style={{ marginTop: 24 }}>
           {c.title}
