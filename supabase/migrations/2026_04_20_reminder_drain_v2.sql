@@ -33,17 +33,22 @@ VALUES ('reminders_paused', 'true')
 ON CONFLICT (key) DO NOTHING;
 
 -- 3. Helper: is the 24h customer-care window open for a given chat?
---    For 1:1 (group_id ends with @s.whatsapp.net) AND group chats (@g.us),
---    we check whether ANY non-bot phone has messaged that chat in the last 24h.
+--    IMPORTANT format quirk discovered 2026-04-20 post-apply: reminder_queue
+--    stores group_id as the full JID ("<phone>@s.whatsapp.net" for 1:1), but
+--    whatsapp_messages stores the BARE phone for 1:1 chats (no @-suffix).
+--    Exact equality would silently return false for every 1:1 reminder, so
+--    we normalize both sides via split_part(…,'@',1) before comparing.
+--    Groups (@g.us) agree on both sides, so the normalization is a no-op there.
 CREATE OR REPLACE FUNCTION public.il_window_open_for_chat(p_group_id TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 AS $$
+  WITH norm AS (SELECT split_part(p_group_id, '@', 1) AS bare)
   SELECT EXISTS (
     SELECT 1
-    FROM public.whatsapp_messages wm
-    WHERE wm.group_id     = p_group_id
+    FROM public.whatsapp_messages wm, norm
+    WHERE split_part(wm.group_id, '@', 1) = norm.bare
       AND wm.sender_phone IS NOT NULL
       AND wm.sender_phone <> '972555175553'              -- bot phone
       AND wm.created_at   > NOW() - INTERVAL '24 hours'
