@@ -15,8 +15,8 @@ const CONTENT = {
       "שלי קולטת מצטרפים חדשים בהדרגה כדי לתת שירות מעולה לכולם. השאירו פרטים ושלי תחזור אליכם ברגע שיגיע תורכם!",
     fieldFirstName: "שם פרטי",
     fieldLastName: "שם משפחה",
-    fieldPhone: "מספר טלפון",
-    fieldPhoneHint: "מחו״ל? הוסיפו + וקוד מדינה (+1 ארה״ב, +351 פורטוגל וכו׳)",
+    fieldPhone: "טלפון",
+    fieldPhoneHint: "גרים בחו״ל? הוסיפו + וקוד מדינה (+1 ארה״ב, +351 פורטוגל וכו׳)",
     fieldEmail: "אימייל",
     fieldInterest: "מה הכי מעניין אתכם?",
     interestOptions: [
@@ -316,6 +316,7 @@ export default function WaitlistPage() {
                     border: "1px solid #e5e5e5",
                     borderRadius: 10,
                     background: interest === opt.value ? "var(--coral-50, #FFF1ED)" : "transparent",
+                    fontSize: 14,
                   }}
                 >
                   <input
