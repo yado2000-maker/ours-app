@@ -71,8 +71,8 @@ const CONTENT = {
     errorAlreadyIn: "This number is already on the waitlist 🧡",
     errorGeneric: "Something went wrong. Try again?",
     langToggle: "עב",
-    learnMore: "What can Sheli do?",
-    learnMoreCta: "Come see",
+    learnMore: "Curious what Sheli does?",
+    learnMoreCta: "Take a look",
   },
 };
 
