@@ -38,6 +38,8 @@ const CONTENT = {
     errorAlreadyIn: "המספר כבר רשום ברשימת ההמתנה 🧡",
     errorGeneric: "משהו השתבש. נסו שוב?",
     langToggle: "EN",
+    learnMore: "רוצים לראות מה שלי יודעת לעשות?",
+    learnMoreCta: "גלו את שלי",
   },
   en: {
     dir: "ltr",
@@ -69,6 +71,8 @@ const CONTENT = {
     errorAlreadyIn: "This number is already on the waitlist 🧡",
     errorGeneric: "Something went wrong. Try again?",
     langToggle: "עב",
+    learnMore: "Curious what Sheli can do?",
+    learnMoreCta: "Meet Sheli",
   },
 };
 
@@ -176,12 +180,36 @@ export default function WaitlistPage() {
           {c.title}
         </h2>
         {status !== "done" && (
-          <p
-            className="landing-tagline"
-            style={{ fontWeight: 400, fontSize: 16, lineHeight: 1.6, marginTop: 8 }}
-          >
-            {c.subtitle}
-          </p>
+          <>
+            <p
+              className="landing-tagline"
+              style={{ fontWeight: 400, fontSize: 16, lineHeight: 1.6, marginTop: 8 }}
+            >
+              {c.subtitle}
+            </p>
+            <p
+              style={{
+                marginTop: 12,
+                fontSize: 14,
+                lineHeight: 1.5,
+                color: "var(--warm, #4A5858)",
+                textAlign: "center",
+              }}
+            >
+              {c.learnMore}{" "}
+              <a
+                href="/"
+                style={{
+                  color: "#2D8E6F",
+                  fontWeight: 600,
+                  textDecoration: "underline",
+                  textUnderlineOffset: "3px",
+                }}
+              >
+                {c.learnMoreCta}
+              </a>
+            </p>
+          </>
         )}
 
         {status === "done" ? (
