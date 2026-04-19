@@ -283,6 +283,7 @@ export default function AdminDashboard({ session, onBack }) {
   const [features, setFeatures] = useState(null);
   const [channelStats, setChannelStats] = useState(null);
   const [waitlistStats, setWaitlistStats] = useState(null);
+  const [waitlistError, setWaitlistError] = useState(null);
   const [period, setPeriod] = useState(7);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
@@ -311,7 +312,13 @@ export default function AdminDashboard({ session, onBack }) {
       if (funnelRes.error) throw new Error(`Funnel: ${funnelRes.error.message}`);
       if (featuresRes.error) throw new Error(`Features: ${featuresRes.error.message}`);
       if (chRes.error) throw new Error(`Channels: ${chRes.error.message}`);
-      if (wlRes.error) throw new Error(`Waitlist: ${wlRes.error.message}`);
+      // Waitlist is non-fatal — migration may not be applied yet. Degrade gracefully.
+      if (wlRes.error) {
+        console.warn("[AdminDashboard] waitlist RPC unavailable:", wlRes.error.message);
+        setWaitlistError(wlRes.error.message);
+      } else {
+        setWaitlistError(null);
+      }
 
       // Check for empty response (non-admin RLS)
       const ov = overviewRes.data;
@@ -1098,7 +1105,19 @@ export default function AdminDashboard({ session, onBack }) {
                 </div>
               </>
             );
-          })() : (
+          })() : waitlistError ? (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "24px 20px",
+            }}>
+              <p style={{ fontSize: 13, color: "var(--muted)", margin: 0 }}>
+                Waitlist analytics unavailable: <code style={{ fontSize: 12 }}>{waitlistError}</code>
+              </p>
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 0" }}>
+                Apply migration <code>2026_04_20_admin_waitlist_stats.sql</code> to enable.
+              </p>
+            </div>
+          ) : (
             <p style={{ fontSize: 13, color: "var(--muted)" }}>Loading waitlist…</p>
           )}
         </Section>
