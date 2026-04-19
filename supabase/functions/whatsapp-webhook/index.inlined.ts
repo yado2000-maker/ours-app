@@ -4134,6 +4134,40 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     return;
   }
 
+  // --- Admitted user's first post-admit ping: deterministic "I'm back" welcome ---
+  // Set by handleAdminCommand (/admit). Fires ONCE per admitted user.
+  // Honest reset: acknowledges the pre-admit conversation, invites a re-state
+  // of anything missing. Zero LLM cost. User's next ping flows through Sonnet
+  // normally — no first_message_intro, since this welcome replaces it.
+  if (convo.context?.needs_admit_welcome === true) {
+    const admitWelcomeText =
+      "היי! חזרתי אחרי שדרוג גדול לתשתית - חזקה מתמיד 💪\n\n" +
+      "יכול להיות שפספסתי כמה דברים שדיברנו עליהם קודם. אם משהו חסר - תגידו לי ואטפל. או פשוט תכתבו מה אתם צריכים:\n\n" +
+      "\"תוסיפי לקניות חלב וביצים\"\n" +
+      "\"תזכירי לי מחר ב-9 להתקשר לאמא\"\n" +
+      "\"פגישה ביום שלישי ב-10\"\n\n" +
+      "ואני אוסיף, אסדר, ואזכיר 💛";
+
+    await sendAndLog(prov, { groupId: message.groupId, text: admitWelcomeText }, {
+      householdId: convo.household_id || "unknown",
+      groupId: message.groupId,
+      inReplyTo: message.messageId,
+      replyType: "admit_welcome",
+    });
+
+    // Clear the flag so the welcome fires exactly once.
+    const ctxCleared = { ...(convo.context || {}) };
+    delete ctxCleared.needs_admit_welcome;
+    await supabase.from("onboarding_conversations").update({
+      context: ctxCleared,
+      message_count: (convo.message_count || 0) + 1,
+      updated_at: new Date().toISOString(),
+    }).eq("phone", phone);
+
+    console.log(`[1:1] Sent admit-welcome to ${phone} (had ${Object.keys(ctxCleared).length - Object.keys(ctxCleared).filter(k => k.startsWith("admit") || k === "name" || k === "gender").length} other context keys)`);
+    return;
+  }
+
   // --- Active conversation: send to Sonnet ---
   const userName = convo.context?.name || hebrewizeName(senderName) || "";
 
@@ -5002,12 +5036,17 @@ async function handleAdminCommand(
       return true;
     }
 
-    // Build context — preserve existing + merge admit metadata
+    // Build context — preserve existing + merge admit metadata.
+    // needs_admit_welcome triggers a one-time deterministic "I'm back"
+    // welcome on the user's next ping (see handleDirectMessage). This
+    // opens a clean restart without pretending Sheli remembers the
+    // pre-admit conversation — honest + low-friction + zero LLM cost.
     const existingContext = (existing?.context as Record<string, unknown>) || {};
     const newContext: Record<string, unknown> = {
       ...existingContext,
       admitted_manually: true,
       admitted_at: new Date().toISOString(),
+      needs_admit_welcome: true,
     };
     if (name) newContext.name = name;
 
