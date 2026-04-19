@@ -557,11 +557,20 @@ def build_test_cases():
         notes="Bare noun, no details — should ASK; reminder_queue must stay empty",
     ))
 
-    # ── Category 4: Events (3 tests) ──
+    # ── Category 4: Events (4 tests) ──
     cases.append(TestCase(
         "add_event_dinner", "Events",
         "יש לנו ארוחת ערב מחר ב-19",
         expected_intent="add_event",
+    ))
+    # Bug 1 (2026-04-20) regression — "תרשמי ב {date}" must materialise an events
+    # row even when Haiku initially classifies as 'ignore' and Sonnet rescues
+    # the EVENT block. The DB check is the bug, not the intent.
+    cases.append(TestCase(
+        "add_event_via_tirshmi_date", "Events",
+        "תרשמי ב 12.5 המקהלה של נעמי בהופעה בת״א וירושלים",
+        db_check={"table": "events", "column": "title", "value": "המקהלה של נעמי בהופעה בת״א וירושלים", "should_exist": True},
+        notes="Bug 1: Sonnet emitted EVENT block, rescue must save it",
     ))
     cases.append(TestCase(
         "update_event_time_only", "Events",

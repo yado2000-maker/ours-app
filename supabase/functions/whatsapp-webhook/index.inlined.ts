@@ -820,6 +820,11 @@ EXAMPLES:
 [אמא]: "רופא שיניים לנועה יום שלישי ב-15:00" → {"intent":"add_event","confidence":0.92,"entities":{"title":"רופא שיניים לנועה","time_raw":"יום שלישי ב-15:00","person":"נועה","raw_text":"רופא שיניים לנועה יום שלישי ב-15:00"}}
 [אבא]: "חוג גיטרה של יובל יום חמישי 17:00" → {"intent":"add_event","confidence":0.92,"entities":{"title":"חוג גיטרה","time_raw":"יום חמישי 17:00","person":"יובל","raw_text":"חוג גיטרה של יובל יום חמישי 17:00"}}
 [אמא]: "השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת אצל סבתא" → {"intent":"add_event","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"רופא שיניים","time_raw":"שלישי 15","raw_text":"השבוע:\nשלישי רופא שיניים 15\nחמישי חוג גיטרה 17\nשבת יום הולדת אצל סבתא"}}
+[אמא]: "תרשמי ב 12.5 המקהלה של נעמי בהופעה בת״א וירושלים" → {"intent":"add_event","confidence":0.92,"entities":{"title":"המקהלה של נעמי בהופעה בת״א וירושלים","time_raw":"12.5","raw_text":"תרשמי ב 12.5 המקהלה של נעמי בהופעה בת״א וירושלים"}}
+[אבא]: "תרשום ב 12/5 פגישה עם המורה" → {"intent":"add_event","confidence":0.92,"entities":{"title":"פגישה עם המורה","time_raw":"12/5","raw_text":"תרשום ב 12/5 פגישה עם המורה"}}
+[אמא]: "רשמי ביומן 18.5 חופש לילדים" → {"intent":"add_event","confidence":0.92,"entities":{"title":"חופש לילדים","time_raw":"18.5","raw_text":"רשמי ביומן 18.5 חופש לילדים"}}
+[אבא]: "שים ביומן 1.6 יום הולדת לדנה" → {"intent":"add_event","confidence":0.92,"entities":{"title":"יום הולדת לדנה","time_raw":"1.6","raw_text":"שים ביומן 1.6 יום הולדת לדנה"}}
+[אמא]: "תוסיפי ליומן 22/5 הצגה של נועה" → {"intent":"add_event","confidence":0.92,"entities":{"title":"הצגה של נועה","time_raw":"22/5","raw_text":"תוסיפי ליומן 22/5 הצגה של נועה"}}
 [אבא]: "תזכירי לי ב-4 להתקשר לרופא ובעוד שעה לאסוף את הילדים" → {"intent":"add_reminder","confidence":0.80,"needs_conversation_review":true,"entities":{"reminder_text":"להתקשר לרופא","time_raw":"ב-4","raw_text":"תזכירי לי ב-4 להתקשר לרופא ובעוד שעה לאסוף את הילדים"}}
 [יונתן]: "מה הסיסמא של הוויי פיי?" → {"intent":"info_request","confidence":0.95,"entities":{"raw_text":"מה הסיסמא של הוויי פיי?"}}
 [אמא]: "קניתי חלב וביצים" → {"intent":"complete_shopping","confidence":0.95,"entities":{"item_id":"s1a2","raw_text":"קניתי חלב וביצים"}}
@@ -1509,6 +1514,25 @@ function extractReminderFromReply(reply: string): { reminder_text: string; send_
   return all.length > 0 ? all[0] : null;
 }
 
+// EVENT block extractor — mirrors REMINDER. Sonnet emits <!--EVENT:{...}--> when
+// it recognises a calendar entry but Haiku missed the intent (e.g. "תרשמי ב 12.5 ...").
+// Without rescue, the catch-all HTML-comment strip in cleanReminderFromReply would
+// silently delete it and the user sees "רשמתי ✓" with nothing in the events table.
+function extractEventsFromReply(
+  reply: string,
+): { title: string; scheduled_for: string; assigned_to?: string }[] {
+  const events: { title: string; scheduled_for: string; assigned_to?: string }[] = [];
+  for (const m of reply.matchAll(/<!--\s*EVENT\s*:\s*(\{[^}]*\})/g)) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      if (parsed.title && parsed.scheduled_for) events.push(parsed);
+    } catch {
+      console.warn("[Event] Failed to parse EVENT block:", m[1]);
+    }
+  }
+  return events;
+}
+
 function cleanReminderFromReply(reply: string): string {
   return reply
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
@@ -1580,6 +1604,47 @@ async function rescueRemindersAndStrip(
     });
     if (error) console.error("[ReminderRescue] Insert error:", error);
     else console.log(`[ReminderRescue] Saved from direct_address path: "${reminderData.reminder_text}" @ ${reminderData.send_at}`);
+  }
+
+  // EVENT rescue (2026-04-20). Same shape as the REMINDER rescue above. Sonnet
+  // sometimes emits <!--EVENT:{...}--> when it recognises a calendar entry that
+  // Haiku missed (e.g. "תרשמי ב 12.5 המקהלה של נעמי"). Without saving here, the
+  // block is stripped by cleanReminderFromReply and the user sees "רשמתי ✓"
+  // with nothing in the events table. Dedup mirrors the actionable-path logic
+  // at ~line 2400: same household + same calendar date + isSameEvent() match.
+  const allEvents = extractEventsFromReply(reply);
+  for (const ev of allEvents) {
+    if (!ev.title || !ev.scheduled_for) continue;
+
+    // Defensive timezone normalization (mirrors actionable add_event path).
+    const hasOffset = /[+-]\d{2}:?\d{2}$|Z$/.test(ev.scheduled_for);
+    const scheduledFor = hasOffset ? ev.scheduled_for : `${ev.scheduled_for}+03:00`;
+    const datePrefix = scheduledFor.slice(0, 10);
+
+    const { data: existingEvents } = await supabase
+      .from("events")
+      .select("id, title, scheduled_for")
+      .eq("household_id", householdId)
+      .gte("scheduled_for", `${datePrefix}T00:00:00`)
+      .lte("scheduled_for", `${datePrefix}T23:59:59`);
+
+    const dup = (existingEvents || []).find((e: { title: string; scheduled_for: string }) =>
+      isSameEvent(e.title, ev.title, e.scheduled_for, scheduledFor)
+    );
+    if (dup) {
+      console.log(`[EventRescue] Skipped duplicate: "${ev.title}" @ ${scheduledFor} (existing id=${(dup as { id: string }).id})`);
+      continue;
+    }
+
+    const { error: evErr } = await supabase.from("events").insert({
+      id: uid4(),
+      household_id: householdId,
+      title: ev.title,
+      assigned_to: ev.assigned_to || null,
+      scheduled_for: scheduledFor,
+    });
+    if (evErr) console.error("[EventRescue] Insert error:", evErr);
+    else console.log(`[EventRescue] Saved from direct_address path: "${ev.title}" @ ${scheduledFor}`);
   }
 
   return cleanReminderFromReply(stripMemoryBlocks(reply));
@@ -3358,46 +3423,89 @@ async function ensureOnboardingHousehold(
   return hhId;
 }
 
-// Parse a time string like "17:00", "ב-5", "22:45" → ISO send_at timestamp
+// Compute Asia/Jerusalem's UTC offset (in ms) at a given UTC instant.
+// Uses Intl `shortOffset` so DST is honored automatically — IDT (UTC+3) summer,
+// IST (UTC+2) winter. The previous parseReminderTime hardcoded -3, which silently
+// misfired by an hour every winter and could flip dates near midnight IL.
+function ilOffsetMs(utcDate: Date): number {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Jerusalem",
+      timeZoneName: "shortOffset",
+    });
+    const off = fmt.formatToParts(utcDate).find((p) => p.type === "timeZoneName")?.value || "GMT+3";
+    const m = off.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+    if (!m) return 3 * 60 * 60 * 1000;
+    const sign = m[1] === "-" ? -1 : 1;
+    const hh = parseInt(m[2], 10);
+    const mm = m[3] ? parseInt(m[3], 10) : 0;
+    return sign * (hh * 60 + mm) * 60 * 1000;
+  } catch {
+    return 3 * 60 * 60 * 1000; // Fallback to IDT.
+  }
+}
+
+// Parse a time string like "17:00", "ב-5", "22:45" → ISO send_at timestamp.
+//
+// Bug 3 (2026-04-20) fix: previous implementation used the brittle
+// `new Date(toLocaleString("en-US", {timeZone:"Asia/Jerusalem"}))` round-trip
+// + hardcoded `-3` UTC conversion, which (a) miscalculated the offset every
+// winter (UTC+2 not +3) and (b) could drift the date by a day near midnight IL
+// when the server clock was UTC. Both classes of bug landed on real users.
+//
+// New approach:
+//   1. Derive today's IL calendar date deterministically via en-CA locale.
+//   2. Build the candidate moment as a UTC ms by Date.UTC(ilY,ilM,ilD,h,m).
+//   3. Convert IL wall-clock → real UTC by subtracting the *actual* IL offset
+//      at that instant (Intl-derived, DST-aware).
+//   4. If the resulting moment is in the past, bump IL date by one day and
+//      recompute the offset (cheap protection against a DST-transition night).
 function parseReminderTime(timeStr: string): string | null {
   if (!timeStr) return null;
 
-  const now = new Date();
-  const israelNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
-
-  // Try ISO format first (Sonnet may output full ISO)
+  // Try ISO format first — Sonnet may emit a fully-qualified ISO with offset; trust it.
   if (timeStr.includes("T") && timeStr.includes(":")) {
     const parsed = new Date(timeStr);
     if (!isNaN(parsed.getTime())) return parsed.toISOString();
   }
 
-  // Extract hours and minutes from various formats
+  // Extract HH or HH:MM from free-text time.
   const timeMatch = timeStr.match(/(\d{1,2})[:\u05D1\-]?(\d{2})?/);
   if (!timeMatch) return null;
-
   let hours = parseInt(timeMatch[1], 10);
   const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+  if (Number.isNaN(hours) || hours < 0 || hours > 23) return null;
+  if (Number.isNaN(minutes) || minutes < 0 || minutes > 59) return null;
 
-  // Assume PM for single-digit hours 1-6 (Israeli convention: "ב-5" = 17:00)
-  if (hours >= 1 && hours <= 6 && !timeStr.includes("בוקר") && !timeStr.includes("לילה")) {
+  // Israeli single-digit-hour PM convention ("ב-5" = 17:00). Skip if the user
+  // qualified with morning/night.
+  if (hours >= 1 && hours <= 6 && !/בוקר|לילה|morning|night/i.test(timeStr)) {
     hours += 12;
   }
 
-  // Build target date in Israel timezone
-  const target = new Date(israelNow);
-  target.setHours(hours, minutes, 0, 0);
+  // Today's IL calendar date (DST-safe; en-CA gives ISO-like format reliably).
+  const nowUtc = new Date();
+  const ilDateStr = nowUtc.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const [yStr, mStr, dStr] = ilDateStr.split("-");
+  const ilY = parseInt(yStr, 10);
+  const ilM = parseInt(mStr, 10);
+  const ilD = parseInt(dStr, 10);
+  if (!ilY || !ilM || !ilD) return null;
 
-  // If time already passed today → tomorrow
-  if (target <= israelNow) {
-    target.setDate(target.getDate() + 1);
+  // Build candidate UTC ms by treating IL wall-clock as if it were UTC, then
+  // subtracting the real IL offset at that instant.
+  const buildUtcMs = (dayOffset: number) => {
+    const naive = Date.UTC(ilY, ilM - 1, ilD + dayOffset, hours, minutes, 0, 0);
+    return naive - ilOffsetMs(new Date(naive));
+  };
+
+  let targetMs = buildUtcMs(0);
+  // If the moment is in the past (or within 60s of now), bump to tomorrow IL.
+  if (targetMs <= nowUtc.getTime() + 60 * 1000) {
+    targetMs = buildUtcMs(1);
   }
 
-  // Convert back to UTC by computing offset
-  const utcTarget = new Date(target.getTime());
-  // Israel is UTC+3 (or UTC+2 in winter, but April is summer time)
-  utcTarget.setHours(utcTarget.getHours() - 3);
-
-  return utcTarget.toISOString();
+  return new Date(targetMs).toISOString();
 }
 
 // Fallback extraction: parse shopping items from Hebrew free-text when Sonnet ACTIONS block is empty.
