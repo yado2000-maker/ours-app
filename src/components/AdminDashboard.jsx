@@ -282,6 +282,7 @@ export default function AdminDashboard({ session, onBack }) {
   const [funnel, setFunnel] = useState(null);
   const [features, setFeatures] = useState(null);
   const [channelStats, setChannelStats] = useState(null);
+  const [waitlistStats, setWaitlistStats] = useState(null);
   const [period, setPeriod] = useState(7);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
@@ -298,17 +299,19 @@ export default function AdminDashboard({ session, onBack }) {
     setError(null);
 
     try {
-      const [overviewRes, funnelRes, featuresRes, chRes] = await Promise.all([
+      const [overviewRes, funnelRes, featuresRes, chRes, wlRes] = await Promise.all([
         supabase.rpc("admin_dashboard_overview", { p_days: period }),
         supabase.rpc("admin_funnel_stats"),
         supabase.rpc("admin_feature_stats", { p_days: period }),
         supabase.rpc("admin_channel_stats", { p_days: period }),
+        supabase.rpc("admin_waitlist_stats", { p_days: period }),
       ]);
 
       if (overviewRes.error) throw new Error(`Overview: ${overviewRes.error.message}`);
       if (funnelRes.error) throw new Error(`Funnel: ${funnelRes.error.message}`);
       if (featuresRes.error) throw new Error(`Features: ${featuresRes.error.message}`);
       if (chRes.error) throw new Error(`Channels: ${chRes.error.message}`);
+      if (wlRes.error) throw new Error(`Waitlist: ${wlRes.error.message}`);
 
       // Check for empty response (non-admin RLS)
       const ov = overviewRes.data;
@@ -324,6 +327,7 @@ export default function AdminDashboard({ session, onBack }) {
       setFunnel(fn);
       setFeatures(ft);
       setChannelStats(chRes.data || null);
+      setWaitlistStats(wlRes.data || null);
       setLastRefresh(new Date());
     } catch (err) {
       console.error("[AdminDashboard] fetch error:", err);
@@ -984,7 +988,123 @@ export default function AdminDashboard({ session, onBack }) {
         </Section>
 
         {/* ══════════════════════════════════════════════
-            Section 7: Referrals
+            Section 7: Waitlist (recovery-period acquisition)
+        ══════════════════════════════════════════════ */}
+        <Section title="Waitlist" subtitle="Landing-page signups while outbound is paused">
+          {waitlistStats && waitlistStats.totals ? (() => {
+            const wl = waitlistStats;
+            const t = wl.totals || {};
+            const daily = wl.signups_by_day || [];
+            const dailyData = daily.map((d) => d.count || 0);
+            const dailyLabels = daily.map((d) => fmtDate(d.day));
+            const bySource = wl.by_source || {};
+            const byInterest = wl.by_interest || {};
+            const recent = wl.recent || [];
+            const consentPct = t.total_signups ? Math.round((t.with_consent / t.total_signups) * 100) : 0;
+            const activationPct = t.invited ? Math.round((t.activated / t.invited) * 100) : 0;
+            return (
+              <>
+                <div className="adm-grid4" style={{ marginBottom: 16 }}>
+                  <StatCard
+                    label="Total Signups"
+                    value={t.total_signups || 0}
+                    sub={t.first_signup ? `since ${fmtDate(t.first_signup)}` : "none yet"}
+                    color="var(--accent)"
+                  />
+                  <StatCard
+                    label={`Signups (${period}d)`}
+                    value={t.signups_in_period || 0}
+                    sub={t.latest_signup ? `last ${relativeTime(t.latest_signup)}` : "—"}
+                    color="var(--primary)"
+                  />
+                  <StatCard
+                    label="With Consent"
+                    value={t.with_consent || 0}
+                    sub={`${consentPct}% of total`}
+                    color="#5B8DEF"
+                  />
+                  <StatCard
+                    label="Invited → Activated"
+                    value={`${t.activated || 0} / ${t.invited || 0}`}
+                    sub={t.invited ? `${activationPct}% activation` : "not invited yet"}
+                    color="var(--warm)"
+                  />
+                </div>
+
+                {dailyData.some((v) => v > 0) && (
+                  <div style={{
+                    background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+                    padding: 20, marginBottom: 16,
+                  }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>
+                      Signups by day ({period}d)
+                    </h3>
+                    <Sparkline data={dailyData} height={120} color="var(--accent)" fillOpacity={0.12} labels={dailyLabels} />
+                  </div>
+                )}
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }} className="adm-grid-2">
+                  <div style={{
+                    background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+                  }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>By source</h3>
+                    <DataTable
+                      columns={[
+                        { key: "source", label: "Source", render: (r) => <span style={{ fontWeight: 600 }}>{r.source}</span> },
+                        { key: "count", label: "Signups" },
+                        { key: "pct", label: "%", render: (r) => pct(r.count, t.total_signups) },
+                      ]}
+                      rows={Object.entries(bySource)
+                        .map(([source, count]) => ({ source, count }))
+                        .sort((a, b) => b.count - a.count)}
+                      emptyMsg="No source data"
+                    />
+                  </div>
+                  <div style={{
+                    background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+                  }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>By interest</h3>
+                    <DataTable
+                      columns={[
+                        { key: "interest", label: "Interest", render: (r) => <span style={{ fontWeight: 600 }}>{r.interest}</span> },
+                        { key: "count", label: "Signups" },
+                        { key: "pct", label: "%", render: (r) => pct(r.count, t.total_signups) },
+                      ]}
+                      rows={Object.entries(byInterest)
+                        .map(([interest, count]) => ({ interest, count }))
+                        .sort((a, b) => b.count - a.count)}
+                      emptyMsg="No interest data"
+                    />
+                  </div>
+                </div>
+
+                <div style={{
+                  background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+                }}>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Recent signups</h3>
+                  <DataTable
+                    columns={[
+                      { key: "created_at", label: "When", render: (r) => relativeTime(r.created_at) },
+                      { key: "name", label: "Name", render: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || "—" },
+                      { key: "phone", label: "Phone" },
+                      { key: "email", label: "Email", render: (r) => r.email || "—" },
+                      { key: "interest", label: "Interest", render: (r) => r.interest || "—" },
+                      { key: "source", label: "Source", render: (r) => r.source || "—" },
+                      { key: "consent_given", label: "Consent", render: (r) => r.consent_given ? "✓" : "—" },
+                    ]}
+                    rows={recent}
+                    emptyMsg="No signups yet"
+                  />
+                </div>
+              </>
+            );
+          })() : (
+            <p style={{ fontSize: 13, color: "var(--muted)" }}>Loading waitlist…</p>
+          )}
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 8: Referrals
         ══════════════════════════════════════════════ */}
         <Section title="Referrals" subtitle="Growth">
           {(referrals.codes_generated || referrals.completed || referrals.total) ? (
