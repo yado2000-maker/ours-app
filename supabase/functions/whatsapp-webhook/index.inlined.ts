@@ -4017,12 +4017,15 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   }
 
   // --- New user: first message ever ---
-  // WhatsApp anti-spam (2026-04-17 ban): no immediate auto-welcome. Classify
-  // the first message: if actionable we bundle a one-line intro into the
-  // Sonnet reply (below). Otherwise we queue a welcome with jitter + rate cap
-  // (see supabase/migrations/2026_04_18_welcome_queue.sql).
+  // RECOVERY-PERIOD POLICY (2026-04-19, Phase 0 Task P0.2):
+  // During the Option 1 Cloud API migration, unknown 1:1 senders get an
+  // immediate in-window waitlist redirect instead of full onboarding.
+  // Reactive (direct response to user-initiated message) = anti-spam-safe.
+  // Drain-based welcome queue path is RETIRED — welcomes will return via
+  // Cloud API `welcome_direct` template once migration is live.
+  // Remove this branch after Cloud API cutover and restore full onboarding.
   if (!convo) {
-    // Check for referral code
+    // Check for referral code — still logged for post-waitlist credit.
     const referralMatch = text.match(/(?:שלום|שלי|shalom|hey|hi)\s+([A-Z0-9]{6})\b/i);
     let validReferralCode: string | null = null;
     if (referralMatch) {
@@ -4038,86 +4041,65 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       }
     }
 
-    // Classify first message to decide: bundle intro into action reply, or queue welcome.
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
-    const { today: ilToday, dayOfWeek: ilDayOfWeek } = getIlTodayAndDay();
-    const emptyCtx: ClassifierContext = {
-      members: [],
-      openTasks: [],
-      openShopping: [],
-      today: ilToday,
-      dayOfWeek: ilDayOfWeek,
-    };
-    const classification = text
-      ? await classifyIntent(text, senderName || "משתמש", emptyCtx, apiKey)
-      : fallbackIgnore("");
-    const ACTIONABLE_FIRST = new Set([
-      "add_shopping", "add_task", "add_reminder", "add_event", "add_expense",
-    ]);
-    const shouldBundle = ACTIONABLE_FIRST.has(classification.intent)
-      && (classification.confidence ?? 0) >= 0.6;
+    // Reactive waitlist redirect — sent in-window via sendAndLog.
+    // BOT_SILENT_MODE still gates this; pre-18:10 tonight the DB row is
+    // created but no message sends, which is intentional.
+    const waitlistBody =
+      "היי! אני שלי, העוזרת החכמה שלכם בווטסאפ 🧡\n\n" +
+      "אני בשדרוג קצר בימים האלה - חוזרת אליכם ברגע שאני מוכנה.\n\n" +
+      "השאירו פרטים ואעדכן אתכם מייד: sheli.ai/waitlist\n\n" +
+      "כשאחזור תוכלו לכתוב לי למשל:\n" +
+      "• \"תזכירי לי מחר ב-18:00 להתקשר לאמא\"\n" +
+      "• \"תוסיפי לקניות חלב, לחם וביצים\"\n" +
+      "• \"פגישה ביום שלישי ב-10:00 אצל הרופא\"\n" +
+      "• \"שילמתי 250 ש\"ח על חשמל\"\n\n" +
+      "נתראה בקרוב 🙌";
 
-    if (shouldBundle) {
-      // Path A — bundle: create convo as chatting, fall through to Sonnet with
-      // first_message_intro=true so Sonnet prepends a one-line "היי! אני שלי"
-      // intro to its action confirmation.
-      const insertRes = await supabase.from("onboarding_conversations").insert({
-        phone,
-        state: "chatting",
-        message_count: 0, // incremented to 1 in the chatting flow below
-        referral_code: validReferralCode,
-        context: {
-          name: senderName,
-          gender: detectGender(hebrewizeName(senderName)),
-          first_message_intro: true,
-        },
-        tried_capabilities: [],
-      }).select().single();
-      convo = insertRes.data;
-      console.log(`[1:1] New user ${phone} — actionable first msg (${classification.intent}@${classification.confidence?.toFixed(2)}), bundling intro`);
-      // fall through to chatting flow
-    } else {
-      // Path B — queue welcome. Reactive send is NOT safe at high velocity
-      // (ban on 2026-04-17 was triggered by ~50 similar welcomes in a short
-      // window, even though they were replies). Keep the 6-10/hr queue cap
-      // to spread them out. To reduce text-similarity signal, we generate
-      // a UNIQUE welcome body per user via Sonnet at queue time — drain uses
-      // body when present, falls back to the 3-variant SQL template if null.
-      //
-      // Priority + ordering is set in the SQL drain function:
-      //   welcomes drain BEFORE recovery (today's users > yesterday's backlog),
-      //   within welcomes, oldest queued_at first (closest to 24h window expiry).
-      const templateVariant = 1 + Math.floor(Math.random() * 3); // fallback variant
-      const displayName = hebrewizeName(senderName || "") || null;
+    await sendAndLog(prov, { groupId: message.groupId, text: waitlistBody }, {
+      householdId: "unknown",
+      groupId: message.groupId,
+      inReplyTo: message.messageId,
+      replyType: "waitlist_redirect",
+    });
 
-      // Generate unique welcome body (2-3s latency, user isn't waiting — queued).
-      // Null result → drain uses the shared template instead.
-      const customBody = await generateUniqueWelcome(displayName, text);
+    // Track the redirect so re-pings get short ack (handled below) and so
+    // referral code survives for credit when user returns via waitlist flow.
+    await supabase.from("onboarding_conversations").insert({
+      phone,
+      state: "waitlist_redirected",
+      message_count: 1,
+      referral_code: validReferralCode,
+      context: {
+        name: senderName,
+        gender: detectGender(hebrewizeName(senderName)),
+        first_message_text: text.slice(0, 200),
+        waitlist_redirected_at: new Date().toISOString(),
+      },
+      tried_capabilities: [],
+    });
 
-      const jitterSec = 30 + Math.floor(Math.random() * 61); // 30..90s jitter
-      const scheduledFor = new Date(Date.now() + jitterSec * 1000).toISOString();
+    console.log(`[1:1] New user ${phone} — waitlist redirect sent${validReferralCode ? ` (ref=${validReferralCode})` : ""}`);
+    return;
+  }
 
-      await supabase.from("outbound_queue").upsert({
-        phone_number: phone,
-        display_name: displayName,
-        scheduled_for: scheduledFor,
-        template_variant: templateVariant,
-        message_type: "welcome",
-        body: customBody, // null → drain renders template; non-null → drain sends this
-      }, { onConflict: "phone_number" });
-
-      await supabase.from("onboarding_conversations").insert({
-        phone,
-        state: "welcome_queued",
-        message_count: 1,
-        referral_code: validReferralCode,
-        context: { name: senderName, gender: detectGender(hebrewizeName(senderName)) },
-        tried_capabilities: [],
-      });
-
-      console.log(`[1:1] New user ${phone} — queued welcome (${customBody ? "custom-sonnet" : "template v" + templateVariant}, +${jitterSec}s)${validReferralCode ? ` (ref=${validReferralCode})` : ""}`);
-      return;
-    }
+  // --- Re-ping from already-redirected user: short ack, stay out of Sonnet ---
+  // Prevents running full Haiku + Sonnet on users who should be waiting on
+  // the waitlist. Removed along with the block above post-Cloud-API cutover.
+  if (convo.state === "waitlist_redirected") {
+    await sendAndLog(prov, {
+      groupId: message.groupId,
+      text: "שמרתי לך מקום ברשימה 🙌 אחזור אליך ברגע שהשדרוג יושלם: sheli.ai/waitlist",
+    }, {
+      householdId: "unknown",
+      groupId: message.groupId,
+      inReplyTo: message.messageId,
+      replyType: "waitlist_redirect_reping",
+    });
+    await supabase.from("onboarding_conversations").update({
+      message_count: (convo.message_count || 0) + 1,
+      updated_at: new Date().toISOString(),
+    }).eq("phone", phone);
+    return;
   }
 
   // --- Dormant user returning → reset to chatting naturally ---
