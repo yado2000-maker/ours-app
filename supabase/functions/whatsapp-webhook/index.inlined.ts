@@ -4072,8 +4072,38 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     supabase.from("whatsapp_member_mapping").select("household_id").eq("phone_number", phone).limit(1).single(),
     supabase.from("onboarding_conversations").select("*").eq("phone", phone).single(),
   ]);
-  const mapping = mappingRes.data;
+  let mapping = mappingRes.data;
   let convo = convoRes.data;
+
+  // Self-heal missing whatsapp_member_mapping (2026-04-20 bug fix).
+  // Observed live: Hila Oren + Dj Erez Eisenberg had full households_v2 + household_members
+  // rows but NO whatsapp_member_mapping rows. That caused:
+  //   (a) sendAndLog's audit insert to fall back to household_id='unknown' and FK-crash,
+  //   (b) group auto-link lookups to miss the household when the same user added Sheli to a group.
+  // Root cause for the original missing-insert is still TBD, but we can make the handler
+  // idempotently self-heal: if the onboarding_conversations row already points at a household
+  // but the mapping table doesn't, write the mapping now. ON CONFLICT DO NOTHING so this is
+  // safe to run on every message.
+  if (!mapping && convo?.household_id) {
+    const { error: healErr } = await supabase
+      .from("whatsapp_member_mapping")
+      .upsert(
+        {
+          household_id: convo.household_id,
+          phone_number: phone,
+          member_name: (convo.context as Record<string, unknown>)?.name || senderName || null,
+        },
+        { onConflict: "household_id,phone_number" },
+      );
+    if (healErr) {
+      console.error(`[1:1] self-heal mapping error for ${phone}:`, healErr.message);
+    } else {
+      console.log(`[1:1] Self-healed missing whatsapp_member_mapping for ${phone} → ${convo.household_id}`);
+      // Refresh the local reference so the rest of this message's processing
+      // sees the mapping as present.
+      mapping = { household_id: convo.household_id };
+    }
+  }
 
   // ─── Preferred name override (2026-04-15) ───
   // If the user explicitly asks to be called differently, store it in
