@@ -25,6 +25,7 @@ const CONTENT = {
       { value: "calendar", label: "יומן פגישות ולו\"ז" },
       { value: "other", label: "משהו אחר" },
     ],
+    fieldOtherDetail: "במה שלי יכולה לעזור לכם?",
     consentLabel: "אני מסכימ/ה שתחזרו אליי בווטסאפ או במייל כשיגיע תורי",
     submit: "שמרו לי מקום",
     submitting: "רגע אחד...",
@@ -54,6 +55,7 @@ const CONTENT = {
       { value: "calendar", label: "Calendar & appointments" },
       { value: "other", label: "Something else" },
     ],
+    fieldOtherDetail: "What can Sheli help you with?",
     consentLabel: "I agree to be contacted on WhatsApp or email when it's my turn",
     submit: "Save my spot",
     submitting: "One moment...",
@@ -78,7 +80,7 @@ function isValidPhone(phone) {
 }
 
 function isValidEmail(email) {
-  if (!email) return true; // optional
+  if (!email) return false; // required
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
@@ -89,6 +91,7 @@ export default function WaitlistPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [interest, setInterest] = useState("");
+  const [otherText, setOtherText] = useState("");
   const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState("idle");
   const [errorMsg, setErrorMsg] = useState("");
@@ -124,6 +127,7 @@ export default function WaitlistPage() {
       phone: normalizedPhone,
       email: email.trim() || null,
       interest: interest || null,
+      notes: interest === "other" && otherText.trim() ? otherText.trim().slice(0, 500) : null,
       source,
       referrer_url: document.referrer || null,
       user_agent: navigator.userAgent.slice(0, 200),
@@ -273,6 +277,7 @@ export default function WaitlistPage() {
               <input
                 type="email"
                 inputMode="email"
+                required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
@@ -329,6 +334,26 @@ export default function WaitlistPage() {
                   <span>{opt.label}</span>
                 </label>
               ))}
+              {interest === "other" && (
+                <input
+                  type="text"
+                  value={otherText}
+                  onChange={(e) => setOtherText(e.target.value)}
+                  placeholder={c.fieldOtherDetail}
+                  maxLength={500}
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: 14,
+                    border: "1px solid #ddd",
+                    borderRadius: 10,
+                    fontFamily: "inherit",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    minWidth: 0,
+                    marginTop: 4,
+                  }}
+                />
+              )}
             </fieldset>
 
             <label
