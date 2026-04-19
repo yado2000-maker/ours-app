@@ -23,9 +23,10 @@ const CONTENT = {
       { value: "shopping", label: "רשימת קניות משותפת" },
       { value: "reminders", label: "תזכורות" },
       { value: "calendar", label: "יומן פגישות ולו\"ז" },
-      { value: "other", label: "משהו אחר" },
+      { value: "other", label: "משהו אחר שהכי הייתי רוצה" },
     ],
-    fieldOtherDetail: "במה שלי יכולה לעזור לך?",
+    fieldOtherDetail: "במה שלי הכי תעזור לך?",
+    errorOtherRequired: "כתבו לי במה שלי הכי תעזור",
     consentLabel: "אני מסכימ/ה שתחזרו אליי בווטסאפ או במייל כשיגיע תורי",
     submit: "שמרו לי מקום",
     submitting: "רגע אחד...",
@@ -53,9 +54,10 @@ const CONTENT = {
       { value: "shopping", label: "Shared shopping list" },
       { value: "reminders", label: "Reminders" },
       { value: "calendar", label: "Calendar & appointments" },
-      { value: "other", label: "Something else" },
+      { value: "other", label: "Something else I'd most want" },
     ],
-    fieldOtherDetail: "What can Sheli help you with?",
+    fieldOtherDetail: "What would Sheli help you with the most?",
+    errorOtherRequired: "Tell me what Sheli would help you with most",
     consentLabel: "I agree to be contacted on WhatsApp or email when it's my turn",
     submit: "Save my spot",
     submitting: "One moment...",
@@ -109,6 +111,10 @@ export default function WaitlistPage() {
     }
     if (!isValidEmail(email.trim())) {
       setErrorMsg(c.errorInvalidEmail);
+      return;
+    }
+    if (interest === "other" && !otherText.trim()) {
+      setErrorMsg(c.errorOtherRequired);
       return;
     }
     if (!consent) {
@@ -337,6 +343,7 @@ export default function WaitlistPage() {
               {interest === "other" && (
                 <input
                   type="text"
+                  required
                   value={otherText}
                   onChange={(e) => setOtherText(e.target.value)}
                   placeholder={c.fieldOtherDetail}

@@ -43,10 +43,11 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
     body: "📅 בעוד {{delta}}: {{title}}",
   },
 
-  // welcome_direct — refined per Phase 0 P0.2 parallel update.
+  // welcome_direct — refined per Phase 0 P0.2 + 2026-04-19 copy review.
   // Includes 4 concrete usage examples (reminders lead — #1 first action for
-  // new users per FB launch data 2026-04-16), forward-to-task tip, and
-  // family-group CTA. Under 1024-char Meta utility template body limit.
+  // new users per FB launch data 2026-04-16), explicit forward-to-task tip,
+  // voice-message tip, and a family-group CTA that also suggests creating a
+  // new group. Under 1024-char Meta utility template body limit.
   welcome_direct: {
     metaName: "welcome_direct",
     category: "UTILITY",
@@ -60,8 +61,9 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
       "• \"תוסיפי לקניות חלב, לחם וביצים\"\n" +
       "• \"פגישה ביום שלישי ב-10:00 אצל הרופא\"\n" +
       "• \"שילמתי 250 ש\"ח על חשמל\"\n\n" +
-      "💡 אפשר גם להעביר אליי כל הודעת ווטסאפ ואוסיף למשימות.\n\n" +
-      "רוצים את כל המשפחה? הוסיפו אותי לווטסאפ המשפחתי ואסדר הכל לכולם",
+      "💡 אפשר לעשות אליי \"העבר\" לכל הודעת ווטסאפ אחרת - ואוסיף למשימות.\n\n" +
+      "🎤 ואפשר גם להקליט לי הודעה קולית.\n\n" +
+      "ואני הכי יעילה בתיאום בין בני הבית - הוסיפו אותי לווטסאפ המשפחתי שלכם או צרו קבוצה חדשה וצרפו אותי, ואסדר הכל לכולם ✨",
   },
 
   welcome_group: {
@@ -76,7 +78,8 @@ export const TEMPLATES: Record<TemplateId, TemplateDef> = {
       "• \"תזכירי לנו להוציא את הזבל ביום שלישי\"\n" +
       "• \"להוסיף לקניות חלב ולחם\"\n" +
       "• \"פגישה ביום חמישי ב-18:00 עם המורה\"\n\n" +
-      "💡 אפשר גם להעביר אליי כל הודעת ווטסאפ ואוסיף למשימות.\n\n" +
+      "💡 אפשר לעשות אליי \"העבר\" לכל הודעת ווטסאפ אחרת - ואוסיף למשימות.\n\n" +
+      "🎤 ואפשר גם להקליט לי הודעה קולית.\n\n" +
       "לצפייה ברשימות המלאות: sheli.ai",
   },
 
