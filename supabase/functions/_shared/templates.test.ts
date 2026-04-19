@@ -24,7 +24,7 @@ Deno.test("renderTemplate: event_fire substitutes delta and title", () => {
   assertEquals(out, "📅 בעוד שעה: פגישה עם רינה");
 });
 
-Deno.test("renderTemplate: welcome_direct includes firstName, examples, forward tip", () => {
+Deno.test("renderTemplate: welcome_direct includes firstName, examples, tips, CTA", () => {
   const out = renderTemplate("welcome_direct", { firstName: "דנה" });
   // Personal greeting with name
   assertEquals(out.startsWith("היי דנה!"), true);
@@ -35,10 +35,15 @@ Deno.test("renderTemplate: welcome_direct includes firstName, examples, forward 
   assertEquals(out.includes("תוסיפי לקניות חלב, לחם וביצים"), true);
   assertEquals(out.includes("פגישה ביום שלישי ב-10:00 אצל הרופא"), true);
   assertEquals(out.includes("שילמתי 250"), true);
-  // Forward-to-task tip line (flagship feature per design §5)
-  assertEquals(out.includes("💡 אפשר גם להעביר אליי"), true);
-  // Family-group CTA (per design §6.3 final line)
-  assertEquals(out.includes("רוצים את כל המשפחה?"), true);
+  // Forward-to-task tip (flagship feature per design §5; quoted "העבר" verb per 2026-04-19 copy review)
+  assertEquals(out.includes("💡 אפשר לעשות אליי \"העבר\""), true);
+  // Voice-message tip (per 2026-04-19 copy review)
+  assertEquals(out.includes("🎤"), true);
+  assertEquals(out.includes("להקליט לי הודעה קולית"), true);
+  // Family-group CTA — new version mentions creating a new group + sparkle
+  assertEquals(out.includes("תיאום בין בני הבית"), true);
+  assertEquals(out.includes("צרו קבוצה חדשה"), true);
+  assertEquals(out.includes("✨"), true);
 });
 
 Deno.test("renderTemplate: welcome_direct respects Meta 1024-char body limit", () => {
@@ -47,11 +52,15 @@ Deno.test("renderTemplate: welcome_direct respects Meta 1024-char body limit", (
   assertEquals(out.length < 1024, true, `welcome_direct rendered to ${out.length} chars`);
 });
 
-Deno.test("renderTemplate: welcome_group has no variables and includes examples", () => {
+Deno.test("renderTemplate: welcome_group has no variables and includes examples + tips", () => {
   const out = renderTemplate("welcome_group", {});
   assertEquals(out.startsWith("שלום לכולם!"), true);
   assertEquals(out.includes("תזכירי לנו"), true);
   assertEquals(out.includes("sheli.ai"), true);
+  // Forward + voice tips (2026-04-19 copy review, mirrored from welcome_direct)
+  assertEquals(out.includes("💡 אפשר לעשות אליי \"העבר\""), true);
+  assertEquals(out.includes("🎤"), true);
+  assertEquals(out.includes("להקליט לי הודעה קולית"), true);
 });
 
 Deno.test("renderTemplate: morning_briefing substitutes summary", () => {
