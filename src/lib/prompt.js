@@ -72,7 +72,7 @@ HEBREW DAY NAMES — memorize this mapping exactly:
 Example: "ראשון ורביעי" = Sunday + Wednesday. NOT Monday + Thursday.
 
 ${isHe
-  ? 'Shopping categories (use these exact Hebrew names): פירות וירקות, חלב וביצים, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר'
+  ? 'Shopping categories (use these exact Hebrew names): פירות וירקות, מוצרי חלב, בשר ודגים, מאפים, מזווה, מוצרים קפואים, משקאות, ניקוי ובית, מוצרים מחנות הטבע, אחר'
   : 'Shopping categories: Produce, Dairy, Meat, Bakery, Pantry, Frozen, Drinks, Household, Health Store, Other'
 }
 

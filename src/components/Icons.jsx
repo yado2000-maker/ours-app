@@ -665,6 +665,35 @@ export function LearningFeatureIcon({ size = 28 }) {
   );
 }
 
+/** Forward-to-task — corner-up-right arrow rising from an accent dot.
+ *  Dot = the original WhatsApp message; curve + arrow = captured and forwarded
+ *  into Sheli as a task. Used on the landing forward-to-task feature card. */
+export function ForwardFeatureIcon({ size = 28 }) {
+  const accent = 'var(--accent, #C4714A)';
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Curving line: bottom-left up, then right toward arrowhead */}
+      <path
+        d="M6 23v-9a4 4 0 0 1 4-4h12"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Arrowhead ">" pointing right at (22,10) */}
+      <path
+        d="M17 14L22 10L17 6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Accent dot at origin — the source message being forwarded */}
+      <circle cx="6" cy="23" r="1.8" fill={accent} opacity="0.8" />
+    </svg>
+  );
+}
+
 /** Two kids — chores & rotations for children */
 export function KidsIcon({ size = 28 }) {
   const accent = 'var(--accent, #C4714A)';
