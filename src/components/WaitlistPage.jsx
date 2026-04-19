@@ -16,6 +16,7 @@ const CONTENT = {
     fieldFirstName: "שם פרטי",
     fieldLastName: "שם משפחה",
     fieldPhone: "מספר טלפון",
+    fieldPhoneHint: "מחו״ל? הוסיפו + וקוד מדינה (+1 ארה״ב, +351 פורטוגל וכו׳)",
     fieldEmail: "אימייל",
     fieldInterest: "מה הכי מעניין אתכם?",
     interestOptions: [
@@ -44,6 +45,7 @@ const CONTENT = {
     fieldFirstName: "First name",
     fieldLastName: "Last name",
     fieldPhone: "Phone number",
+    fieldPhoneHint: "From abroad? Add + and country code (+1 US, +351 Portugal, etc.)",
     fieldEmail: "Email",
     fieldInterest: "What's most interesting to you?",
     interestOptions: [
@@ -261,6 +263,9 @@ export default function WaitlistPage() {
                   minWidth: 0,
                 }}
               />
+              <span style={{ fontSize: 12, color: "#888", lineHeight: 1.4 }}>
+                {c.fieldPhoneHint}
+              </span>
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
