@@ -5288,11 +5288,13 @@ Deno.serve(async (req: Request) => {
       console.log("[Webhook] Meta verification successful");
       return new Response(challenge, { status: 200 });
     }
+    logExit("verify-fail", {}, null, { mode, token_prefix: (token || "").slice(0, 4) });
     return new Response("Forbidden", { status: 403 });
   }
 
   // ── Only accept POST ──
   if (req.method !== "POST") {
+    logExit("non-post", {}, null, { method: req.method });
     return new Response("Method not allowed", { status: 405 });
   }
 
@@ -5301,6 +5303,7 @@ Deno.serve(async (req: Request) => {
     const isValid = await provider.verifyWebhook(req);
     if (!isValid) {
       console.warn("[Webhook] Invalid signature");
+      logExit("sig-invalid", {}, null, { has_auth: !!req.headers.get("authorization") });
       return new Response("Unauthorized", { status: 401 });
     }
 
@@ -5339,6 +5342,7 @@ Deno.serve(async (req: Request) => {
     if (!message) {
       // Not a parseable message (status update, receipt, etc.)
       // Sub-cause already logged inside parseIncoming (parseIncoming:DIAG).
+      logExit("parse-null", body);
       return new Response("OK", { status: 200 });
     }
 
@@ -5355,6 +5359,7 @@ Deno.serve(async (req: Request) => {
         .limit(1);
       if (existing && existing.length > 0) {
         console.log(`[Webhook] Duplicate message ${message.messageId}, skipping`);
+        logExit("dedup-hit", body, message, { existing_id: existing[0]?.id });
         return new Response("OK", { status: 200 });
       }
     }
@@ -5463,6 +5468,7 @@ Deno.serve(async (req: Request) => {
 
       if (!botMsg) {
         // Reaction to someone else's message — social noise, skip silently
+        logExit("reaction-non-sheli", body, message, { target_id: message.reactionTargetId });
         return new Response("OK", { status: 200 });
       }
 
@@ -5472,6 +5478,7 @@ Deno.serve(async (req: Request) => {
 
       if (!isConfirm && !isWrong) {
         // Unrecognized emoji on Sheli's message — skip
+        logExit("reaction-unknown-emoji", body, message, { emoji: message.reactionEmoji });
         return new Response("OK", { status: 200 });
       }
 
@@ -5575,6 +5582,7 @@ Deno.serve(async (req: Request) => {
       isIdentityProbeOrInjection(message.text)
     ) {
       console.log(`[Webhook] Identity probe from ${message.senderPhone} (${message.chatType}): "${message.text.slice(0, 80)}"`);
+      logExit("identity-deflect", body, message);
       await sendAndLog(provider, { groupId: message.groupId, text: pickDeflect() }, {
         householdId: "unknown",
         groupId: message.groupId,
@@ -5586,6 +5594,7 @@ Deno.serve(async (req: Request) => {
 
     // 3g. Route direct (1:1) messages to onboarding handler
     if (message.chatType === "direct") {
+      logExit("direct-handoff", body, message);
       await handleDirectMessage(message, provider);
       return new Response("OK", { status: 200 });
     }
