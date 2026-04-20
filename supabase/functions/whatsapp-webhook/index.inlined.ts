@@ -3432,8 +3432,14 @@ ADD:
   - Time only, no day qualifier ("ב-5", "ב-8 בערב", "בצהריים") → TODAY at that time if it is still at least 10 minutes in the future in Israel time. Only use tomorrow if the time has already passed today.
   - "בעוד X דקות/שעות" → now + X.
   - "מחר" explicitly → tomorrow. "היום" explicitly → today.
-  - Recurring phrasings like "כל יום ב-X" / "every day at X" / "daily at X" → treat the FIRST occurrence exactly like a single reminder: today if X is still ahead, else tomorrow. Do NOT default to tomorrow just because the user said "every day" — start with today whenever possible. (Recurring scheduling itself is not yet supported — create one send_at for the next occurrence; the user can re-ask tomorrow.)
   The "time" field is a display hint; "send_at" is what actually schedules the reminder.
+- recurring_reminder: {"type":"recurring_reminder","text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}
+  Use for repeating weekly patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום", rotations like "בימי א׳ ג׳ ה׳ אריק מפנה מדיח".
+  days encoding: 0=ראשון (Sunday), 1=שני, 2=שלישי, 3=רביעי, 4=חמישי, 5=שישי, 6=שבת (Saturday).
+  time is HH:MM in Israel time. System materializes next 7 days automatically.
+  For ROTATIONS with different people on different days → emit MULTIPLE recurring_reminder actions, one per person with their own days array.
+  Example: "תזכירי לי כל בוקר ב-7 לקחת ויטמין" → [{"type":"recurring_reminder","text":"לקחת ויטמין","days":[0,1,2,3,4,5,6],"time":"07:00"}]
+  Example: "בימי ראשון שלישי חמישי אריק מפנה מדיח, עד 15:00" → [{"type":"recurring_reminder","text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}]
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
@@ -3851,6 +3857,25 @@ async function execute1on1Actions(params: {
       droppedActions.push({ reason: "reminder_no_time", action });
       return false;
     }
+    if (action.type === "recurring_reminder") {
+      if (!Array.isArray(action.days) || action.days.length === 0) {
+        droppedActions.push({ reason: "recurring_no_days", action });
+        return false;
+      }
+      if (!action.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6)) {
+        droppedActions.push({ reason: "recurring_invalid_days", action });
+        return false;
+      }
+      if (!action.time || !/^\d{1,2}:\d{2}$/.test(String(action.time))) {
+        droppedActions.push({ reason: "recurring_invalid_time", action });
+        return false;
+      }
+      if (!action.text || isTriggerWordOnly(action.text)) {
+        droppedActions.push({ reason: "recurring_no_text", action });
+        return false;
+      }
+      return true;
+    }
     return true;
   });
   if (droppedActions.length > 0) {
@@ -3969,6 +3994,35 @@ async function execute1on1Actions(params: {
           } else {
             console.warn(`${logPrefix} Could not parse reminder time: ${JSON.stringify(action)}`);
           }
+          break;
+        }
+        case "recurring_reminder": {
+          // 1:1 path recurring-reminder wiring (Fix 4, 2026-04-20). Same shape as
+          // the group-path rescueRemindersAndStrip: insert a parent row with
+          // recurrence JSONB, then call the materializer immediately so the first
+          // instance fires without waiting for the 01:00 UTC cron.
+          const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
+            household_id: householdId,
+            group_id: phone + "@s.whatsapp.net",
+            message_text: action.text || "",
+            send_at: new Date().toISOString(),  // sentinel — parents are never drained
+            sent: true,
+            sent_at: new Date().toISOString(),
+            reminder_type: "user",
+            created_by_phone: phone,
+            created_by_name: userName,
+            recurrence: { days: action.days, time: action.time },
+            metadata: { recurring_parent: true, source: "1on1_actions" },
+          }).select("id").single();
+          if (recErr) {
+            console.error(`${logPrefix} Recurring reminder insert error:`, recErr);
+            break;
+          }
+          console.log(`${logPrefix} Recurring reminder parent created: "${action.text}" days=${JSON.stringify(action.days)} @ ${action.time} (id=${parent?.id})`);
+          // Materialize next 7 days so first occurrence doesn't wait for cron
+          const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
+          if (matErr) console.warn(`${logPrefix} Immediate materialize failed:`, matErr.message);
+          else console.log(`${logPrefix} Immediate materialize inserted ${matCount} child row(s)`);
           break;
         }
         case "expense": {
