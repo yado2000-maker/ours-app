@@ -1105,7 +1105,19 @@ When kids or teens troll, tease, or test you — play along! You're the cool old
 
 const SHARED_GROUNDING_RULES = `GROUNDING — MANDATORY:
 NEVER reference events, habits, mistakes, or scenarios that aren't explicitly in this conversation, the action results, or the family memories provided below. When roasting or joking back, use ONLY what the sender actually said or did. If you have nothing specific to reference, keep it generic and short. Do NOT invent stories, habits, or failures to sound witty.
-- If recent conversation history shows someone reacted negatively (reacted 😂/🤦/👎 to שלי) to your last message, acknowledge gracefully and ask for clarification. Don't repeat the same action.`;
+- If recent conversation history shows someone reacted negatively (reacted 😂/🤦/👎 to שלי) to your last message, acknowledge gracefully and ask for clarification. Don't repeat the same action.
+
+MEMORY HONESTY — MANDATORY (2026-04-20):
+You have access ONLY to the messages in your current conversation context + the family memories + items provided below. You CANNOT "search", "check backward", "look at older chats", "review the chat history", or retrieve anything that isn't already in this prompt. Pretending otherwise is the most damaging thing you can do — it makes you look dishonest AND unhelpful.
+
+Why the limit exists — SAY THIS when explaining, don't hide it: "אני לא שומרת הודעות מכיוון שהפרטיות שלכם חשובה לי" / "I don't save your messages because your privacy matters to me". Framing it as a privacy choice (which it is) turns a limit into a feature. Paraphrase with warmth — don't robot-repeat.
+
+When a user says "you knew this before", "check backward", "look at old messages", "we already set this up with you", "you had it saved", "תראי אחורה", "תזכרי", "כבר דיברנו על זה" OR refers to content you don't see in the current context:
+- NEVER say "בדקתי ולא מצאתי" / "לא רואה בהיסטוריה" / "אני לא מוצאת את זה" — you didn't check, because you can't.
+- NEVER blame "server replacement" / "החלפת שרתים" / "שדרוג" as a general excuse for missing info.
+- NEVER make up content to look cooperative.
+
+INSTEAD say honestly, weaving in the privacy reason: "אני לא שומרת הודעות (הפרטיות שלכם חשובה לי 💛) — תגידו לי שוב מה להוסיף/להזכיר ואסדר עכשיו." Variations are good — paraphrase with warmth, not performative apology. Take ownership of the limit, frame it as a privacy choice, offer to act on whatever they tell you now.`;
 
 const SHARED_APOLOGY_RULES = `APOLOGY STYLE — MANDATORY:
 When you make a mistake, misunderstand, or need to correct yourself:
@@ -1382,7 +1394,7 @@ REMINDERS: When intent is add_reminder:
   Default buffer: 1 hour earlier for hour-specific deadlines. Honor the user's word choice — "ב-X" and "לפני X" mean different things.
 - THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
 - CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
-- DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed. Recurring phrasings ("כל יום ב-X" / "every day at X" / "daily at X") follow the SAME rule for the first occurrence — today if still ahead, else tomorrow. Do NOT default to tomorrow just because the user said "every day". (Recurring scheduling itself is not yet supported — create one send_at for the next occurrence.)
+- DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed.
 - If no time specified at all, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
 - If time IS specified, append this EXACT format at the END of your reply (hidden from user):
   <!--REMINDER:{"reminder_text":"what to remind","send_at":"2026-04-08T16:00:00+03:00"}-->
@@ -1392,6 +1404,19 @@ REMINDERS: When intent is add_reminder:
   "תזכירי לאמא להביא חלב מחר ב-10" → reply "אזכיר לאמא להביא חלב מחר ב-10:00 ✓" + <!--REMINDER:{"reminder_text":"אמא — להביא חלב","send_at":"<tomorrow>T10:00:00+03:00"}-->
   "תזכירי לי לפני השעה 16 לעשות קניות" → reply "אזכיר לך ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"לעשות קניות","send_at":"<today>T15:00:00+03:00"}-->
   "תזכירי לאסנת לעשות רשימה לפני 16" (after earlier message mentioning "יום רביעי") → reply "אזכיר לאסנת לעשות רשימה יום רביעי ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"אסנת — לעשות רשימה","send_at":"<next Wednesday>T15:00:00+03:00"}-->
+
+RECURRING REMINDERS (2026-04-20 — first-class support):
+Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום ב-X", "כל סוף שבוע", weekly rotations ("בימי א׳ ג׳ ה׳ אריק, ב׳ ד׳ ו׳ עופרי"), daily chores, etc.
+- Days encoding: 0=ראשון (Sunday), 1=שני (Monday), 2=שלישי (Tuesday), 3=רביעי (Wednesday), 4=חמישי (Thursday), 5=שישי (Friday), 6=שבת (Saturday).
+- For ROTATIONS where different people are responsible on different days, create SEPARATE recurring reminders per person, each with their own days array.
+- Append this EXACT format at the END of your reply (hidden from user):
+  <!--RECURRING_REMINDER:{"reminder_text":"what to remind","days":[0,2,4],"time":"14:00"}-->
+- Your visible reply: short confirmation naming the days in Hebrew. "אזכיר כל יום ראשון, שלישי וחמישי ב-14:00 ✓"
+- Examples:
+  "תזכירי לי כל יום ראשון בבוקר להתקשר לאמא" → reply "אזכיר כל יום ראשון ב-8:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"להתקשר לאמא","days":[0],"time":"08:00"}-->
+  "בימי ראשון שלישי וחמישי אריק מפנה את המדיח, עד 15:00" → reply "רשמתי תזכורת קבועה לאריק בימי א׳ ג׳ ה׳ ב-14:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}-->
+  "כל יום ב-7 בבוקר ויטמין לילדים" → reply "אזכיר כל יום ב-7:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}-->
+- When user asks for BOTH weekday rotations (e.g. "אריק בימי א׳ ג׳ ה׳, עופרי בימי ב׳ ד׳ ו׳"), emit TWO RECURRING_REMINDER blocks, one per person.
 ${buildDayAnchor()}
 
 ${ctx.familyMemories ? `
@@ -1514,6 +1539,36 @@ function extractReminderFromReply(reply: string): { reminder_text: string; send_
   return all.length > 0 ? all[0] : null;
 }
 
+// RECURRING_REMINDER block extractor (Fix 4, 2026-04-20). Sonnet emits
+// <!--RECURRING_REMINDER:{"reminder_text":"...","days":[0,2,4],"time":"14:00"}-->
+// for repeating weekly patterns. Parent rows are inserted with recurrence JSONB;
+// the materialize_recurring_reminders() PG function fills the next 7 days of
+// child rows daily via pg_cron.
+function extractRecurringRemindersFromReply(reply: string): Array<{ reminder_text: string; days: number[]; time: string }> {
+  const out: Array<{ reminder_text: string; days: number[]; time: string }> = [];
+  for (const m of reply.matchAll(/<!--\s*RECURRING_REMINDER\s*:\s*(\{[^}]*\})\s*-*>/g)) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      if (
+        parsed.reminder_text && typeof parsed.reminder_text === "string" &&
+        Array.isArray(parsed.days) && parsed.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6) &&
+        typeof parsed.time === "string" && /^\d{1,2}:\d{2}$/.test(parsed.time)
+      ) {
+        out.push({
+          reminder_text: parsed.reminder_text,
+          days: parsed.days as number[],
+          time: parsed.time,
+        });
+      } else {
+        console.warn("[RecurringReminder] Invalid RECURRING_REMINDER block shape:", m[1]);
+      }
+    } catch {
+      console.warn("[RecurringReminder] Failed to parse RECURRING_REMINDER block:", m[1]);
+    }
+  }
+  return out;
+}
+
 // EVENT block extractor — mirrors REMINDER. Sonnet emits <!--EVENT:{...}--> when
 // it recognises a calendar entry but Haiku missed the intent (e.g. "תרשמי ב 12.5 ...").
 // Without rescue, the catch-all HTML-comment strip in cleanReminderFromReply would
@@ -1535,6 +1590,7 @@ function extractEventsFromReply(
 
 function cleanReminderFromReply(reply: string): string {
   return reply
+    .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
     .replace(/<!--\s*REMINDER[^>]*>/g, "")
@@ -1645,6 +1701,39 @@ async function rescueRemindersAndStrip(
     });
     if (evErr) console.error("[EventRescue] Insert error:", evErr);
     else console.log(`[EventRescue] Saved from direct_address path: "${ev.title}" @ ${scheduledFor}`);
+  }
+
+  // RECURRING_REMINDER rescue (Fix 4, 2026-04-20). Sonnet emits a block with
+  // {reminder_text, days:[0..6], time:"HH:MM"} for repeating weekly patterns.
+  // Insert a parent row: recurrence JSONB set, sent=true so it's ignored by drain,
+  // send_at = NOW() as a harmless sentinel. The materialize_recurring_reminders()
+  // PG function (scheduled daily at 01:00 UTC) reads parents and populates
+  // the next 7 days of child rows.
+  const recurring = extractRecurringRemindersFromReply(reply);
+  for (const r of recurring) {
+    const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
+      household_id: householdId,
+      group_id: message.groupId,
+      message_text: r.reminder_text,
+      send_at: new Date().toISOString(),  // sentinel — parents are never drained (sent=true)
+      sent: true,
+      sent_at: new Date().toISOString(),
+      reminder_type: "user",
+      created_by_phone: message.senderPhone,
+      created_by_name: message.senderName,
+      recurrence: { days: r.days, time: r.time },
+      metadata: { recurring_parent: true, source: "sonnet_rescue" },
+    }).select("id").single();
+    if (recErr) {
+      console.error("[RecurringReminderRescue] Insert error:", recErr);
+      continue;
+    }
+    console.log(`[RecurringReminderRescue] Parent row created: "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`);
+    // Immediately materialize the next 7 days so the first instance fires even before
+    // the daily cron picks it up. The PG function is idempotent per (parent_id, date).
+    const { data: count, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
+    if (matErr) console.warn("[RecurringReminderRescue] Immediate materialize failed:", matErr.message);
+    else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
   }
 
   return cleanReminderFromReply(stripMemoryBlocks(reply));
@@ -4716,7 +4805,54 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
     }
   }
 
-  // 4. Create new household if no match
+  // 4a. Synthetic-household auto-merge (webhook-gap-fix sibling, 2026-04-20).
+  // The 2026-04-18 ban-recovery `import_chat_exports.py` created synthetic households
+  // for every .txt-exported group with metadata {synthetic_group:true, awaiting_real_jid:true}.
+  // When the real WhatsApp group later adds Sheli, we want to merge the synthetic(s)
+  // (message history, items, members) into the real household INSTEAD of creating
+  // a fresh one. Duplicate synthetics (same name, created by separate importer runs)
+  // are folded into the oldest and deleted.
+  if (!householdId) {
+    const { data: synCandidates } = await supabase
+      .from("households_v2")
+      .select("id, name, created_at, metadata")
+      .in("name", [groupName, `${groupName} (recovered)`]);
+    const synthetics = (synCandidates || []).filter((h: any) =>
+      h?.metadata?.synthetic_group === true && h?.metadata?.awaiting_real_jid === true
+    );
+    if (synthetics.length > 0) {
+      // Keep oldest; merge the rest into it
+      synthetics.sort((a: any, b: any) => (a.created_at || "").localeCompare(b.created_at || ""));
+      const primary = synthetics[0];
+      householdId = primary.id;
+      console.log(`[GroupMgmt] Found ${synthetics.length} synthetic(s) for "${groupName}" — merging into ${householdId}`);
+
+      for (const extra of synthetics.slice(1)) {
+        await supabase.from("whatsapp_messages").update({ household_id: primary.id }).eq("household_id", extra.id);
+        await supabase.from("tasks").update({ household_id: primary.id }).eq("household_id", extra.id);
+        await supabase.from("shopping_items").update({ household_id: primary.id }).eq("household_id", extra.id);
+        await supabase.from("events").update({ household_id: primary.id }).eq("household_id", extra.id);
+        await supabase.from("reminder_queue").update({ household_id: primary.id }).eq("household_id", extra.id);
+        await supabase.from("whatsapp_config").delete().eq("household_id", extra.id);
+        await supabase.from("household_members").delete().eq("household_id", extra.id);
+        await supabase.from("households_v2").delete().eq("id", extra.id);
+      }
+
+      // Promote the primary from synthetic to real
+      const cleanMeta: Record<string, unknown> = { ...(primary.metadata || {}) };
+      delete cleanMeta.synthetic_group;
+      delete cleanMeta.awaiting_real_jid;
+      cleanMeta.merged_from_synthetic_at = new Date().toISOString();
+      cleanMeta.merged_synthetic_count = synthetics.length;
+      await supabase.from("households_v2").update({
+        name: groupName,
+        metadata: cleanMeta,
+      }).eq("id", primary.id);
+      console.log(`[GroupMgmt] Promoted synthetic ${primary.id} to real household (${groupName})`);
+    }
+  }
+
+  // 4b. Create new household if no match and no synthetic recovered either
   if (!householdId) {
     householdId = generateHouseholdId();
     const { error } = await supabase.from("households_v2").insert({
