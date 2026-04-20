@@ -4280,41 +4280,10 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     return;
   }
 
-  // --- Admitted user's first post-admit ping: deterministic "I'm back" welcome ---
-  // Set by handleAdminCommand (/admit). Fires ONCE per admitted user.
-  // Honest reset: acknowledges the pre-admit conversation, invites a re-state
-  // of anything missing. Zero LLM cost. User's next ping flows through Sonnet
-  // normally — no first_message_intro, since this welcome replaces it.
-  if (convo.context?.needs_admit_welcome === true) {
-    const admitWelcomeText =
-      "היי! חזרתי אחרי שדרוג גדול לתשתית - חזקה מתמיד 💪\n\n" +
-      "יכול להיות שפספסתי כמה דברים שדיברנו עליהם קודם. אם משהו חסר - תגידו לי ואטפל. או פשוט תכתבו מה אתם צריכים:\n\n" +
-      "\"תוסיפי לקניות חלב וביצים\"\n" +
-      "\"תזכירי לי מחר ב-9 להתקשר לאמא\"\n" +
-      "\"פגישה ביום שלישי ב-10\"\n\n" +
-      "ואני אוסיף, אסדר, ואזכיר 💛";
-
-    await sendAndLog(prov, { groupId: message.groupId, text: admitWelcomeText }, {
-      householdId: convo.household_id || "unknown",
-      groupId: message.groupId,
-      inReplyTo: message.messageId,
-      replyType: "admit_welcome",
-    });
-
-    // Clear the flag so the welcome fires exactly once.
-    const ctxCleared = { ...(convo.context || {}) };
-    delete ctxCleared.needs_admit_welcome;
-    await supabase.from("onboarding_conversations").update({
-      context: ctxCleared,
-      message_count: (convo.message_count || 0) + 1,
-      updated_at: new Date().toISOString(),
-    }).eq("phone", phone);
-
-    console.log(`[1:1] Sent admit-welcome to ${phone} (had ${Object.keys(ctxCleared).length - Object.keys(ctxCleared).filter(k => k.startsWith("admit") || k === "name" || k === "gender").length} other context keys)`);
-    return;
-  }
-
   // --- Active conversation: send to Sonnet ---
+  // (needs_admit_welcome, if set by /admit, is surfaced to Sonnet via contextBlock
+  //  below — Sheli replies normally and only mentions the server upgrade if the
+  //  user asks about missing items.)
   const userName = convo.context?.name || hebrewizeName(senderName) || "";
 
   // Load live items (empty for pre-household users — they haven't executed real actions yet)
@@ -4384,7 +4353,12 @@ FIRST MESSAGE BUNDLE — CRITICAL:
 - Do NOT mention groups, pricing, or the web app in this first reply.` : `
 FIRST MESSAGE: This is the user's first reply after your welcome. Brief warmth is fine, but focus on what they said.`)}
 ${ambiguousOptions && !nameAskedAlready ? `\nNAME SPELLING: The user's name "${userName}" could be spelled ${ambiguousOptions.join(" or ")} in Hebrew. In your FIRST reply, ask naturally which spelling they prefer. Example: "אגב, ${ambiguousOptions[0]} או ${ambiguousOptions[1]}? אני אוהבת לדייק 😊". After asking, include a name_correction action with their answer. This is a ONE-TIME question — do not ask again.` : ""}
-${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}`;
+${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
+${convo.context?.needs_admit_welcome === true ? `
+SERVER UPGRADE CONTEXT (internal — do NOT proactively mention):
+- Sheli's infrastructure was recently upgraded and some earlier items (shopping, tasks, reminders) from before the upgrade may not be in the current lists.
+- Reply normally to what the user says. Do NOT open with "חזרתי" / "שדרגתי" / any "I'm back" framing.
+- ONLY if the user asks about something missing (e.g. "איפה X שהוספתי?", "למה אין לי את ...?", "מחקת לי משהו?") — briefly acknowledge: "סליחה, החלפתי שרתים ליותר חזקים ויכול להיות שכמה דברים הלכו לאיבוד. תגיד/י לי מה היה ואני אוסיף שוב 💛". Otherwise act as usual.` : ""}`;
 
   try {
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
