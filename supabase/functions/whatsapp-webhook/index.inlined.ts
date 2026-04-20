@@ -5377,11 +5377,20 @@ Deno.serve(async (req: Request) => {
     // that Whapi later echoes back). This ordering lets the bot-self branch below
     // distinguish "automated bounce already-logged" from "manual operator reply
     // from WhatsApp Web" (which does NOT exist in DB yet).
+    //
+    // Tier A fix (2026-04-20, webhook-gap-fix H1): narrow the dedup predicate to
+    // matches <5 min old. The original broader check ate live history-sync replays
+    // after Whapi reconnect because the 2026-04-18 recovery backfill imported 309
+    // real Whapi message IDs into backlog_imported_user rows. Since sendAndLog →
+    // Whapi-echo bounces arrive within seconds, 5 min is a >60x safety margin
+    // over the real echo latency while releasing long-stale collisions.
     if (message.messageId) {
+      const dedupSince = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const { data: existing } = await supabase
         .from("whatsapp_messages")
-        .select("id")
+        .select("id, created_at")
         .eq("whatsapp_message_id", message.messageId)
+        .gte("created_at", dedupSince)
         .limit(1);
       if (existing && existing.length > 0) {
         console.log(`[Webhook] Duplicate message ${message.messageId}, skipping`);
