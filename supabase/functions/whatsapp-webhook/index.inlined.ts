@@ -5142,10 +5142,24 @@ async function handleAdminCommand(
   if (!text.startsWith("/")) return false;
 
   // /admit 972XXXXXXXX [name]
-  const admitMatch = text.match(/^\/admit\s+\+?(\d{9,15})(?:\s+(.+?))?\s*$/);
+  // Accept both normalized (972552582290) and WhatsApp display format (+972 55-258-2290)
+  // for easy copy-paste from WhatsApp. Strip +, spaces, and dashes before DB lookup.
+  const admitMatch = text.match(/^\/admit\s+(\+?[\d\s\-]+?\d)(?:\s+([^\d\s\-].*?))?\s*$/);
   if (admitMatch) {
-    const parsedPhone = admitMatch[1];
+    const parsedPhone = admitMatch[1].replace(/\D/g, "");
     const name = admitMatch[2]?.trim() || null;
+    if (parsedPhone.length < 9 || parsedPhone.length > 15) {
+      await sendAndLog(prov, {
+        groupId: message.groupId,
+        text: `❌ invalid phone length (${parsedPhone.length} digits) — expected 9-15`,
+      }, {
+        householdId: "operator",
+        groupId: message.groupId,
+        inReplyTo: message.messageId,
+        replyType: "admin_command_error",
+      });
+      return true;
+    }
 
     // Look up current state (don't regress properly-onboarded users)
     const { data: existing } = await supabase
