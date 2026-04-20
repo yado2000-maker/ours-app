@@ -4065,7 +4065,10 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   console.log(`[1:1] Direct message from ${phone}: "${text.slice(0, 50)}"`);
 
   // Skip non-text messages in 1:1 (voice is OK — already transcribed upstream)
-  if (!text && message.type !== "voice") return;
+  if (!text && message.type !== "voice") {
+    logExit("dm-non-text", null, message);
+    return;
+  }
 
   // --- Check group membership + conversation state in parallel ---
   const [mappingRes, convoRes] = await Promise.all([
@@ -4133,6 +4136,8 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
         await sendAndLog(prov, { groupId: message.groupId, text: reply }, {
           householdId: convo.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "onboarding_reply"
         });
+        await logMessage(message, "dm_rename", convo?.household_id || "unknown");
+        logExit("dm-rename", null, message, { new_name: newName });
         console.log(`[1:1] Set preferred_name="${newName}" for ${phone}`);
         return;
       }
@@ -4159,6 +4164,7 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
 
     // Handle as personal channel message
     await handlePersonalChannelMessage(message, mapping.household_id, prov);
+    logExit("dm-personal-handoff", null, message, { hh: mapping.household_id });
     return;
   }
 
@@ -4224,6 +4230,8 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       tried_capabilities: [],
     });
 
+    await logMessage(message, "dm_waitlist_new", "unknown");
+    logExit("dm-waitlist-new", null, message, { ref: validReferralCode });
     console.log(`[1:1] New user ${phone} — waitlist redirect sent${validReferralCode ? ` (ref=${validReferralCode})` : ""}`);
     return;
   }
@@ -4245,6 +4253,8 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       message_count: (convo.message_count || 0) + 1,
       updated_at: new Date().toISOString(),
     }).eq("phone", phone);
+    await logMessage(message, "dm_waitlist_reping", "unknown");
+    logExit("dm-waitlist-reping", null, message, { count: (convo.message_count || 0) + 1 });
     return;
   }
 
@@ -4277,6 +4287,8 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     }, {
       householdId: convo?.household_id || "unknown", groupId: message.groupId, inReplyTo: message.messageId, replyType: "onboarding_reply"
     });
+    await logMessage(message, "dm_joined_safety", convo?.household_id || "unknown");
+    logExit("dm-joined-safety", null, message, { state: convo.state });
     return;
   }
 
