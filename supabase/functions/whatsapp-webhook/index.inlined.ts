@@ -5248,6 +5248,33 @@ async function handleAdminCommand(
 
 const provider = createProvider();
 
+// ── Exit diagnostics (webhook-gap-fix 2026-04-20) ──
+// One log line per webhook exit site. Single grep '[Webhook:EXIT:' in the
+// Edge Function Dashboard logs reconstructs the full drop inventory for
+// cross-referencing with whatsapp_messages + Whapi /chats.
+function logExit(
+  code: string,
+  body: unknown,
+  message: { messageId?: string; senderPhone?: string; groupId?: string; chatType?: string; type?: string } | null = null,
+  extra: Record<string, unknown> = {},
+) {
+  try {
+    const b = body as Record<string, unknown>;
+    const m0 = (Array.isArray(b?.messages) ? (b.messages as any[])[0] : null) as Record<string, unknown> | null;
+    const row = {
+      code,
+      msg_id: message?.messageId ?? m0?.id ?? null,
+      from: message?.senderPhone ?? m0?.from ?? null,
+      chat: message?.groupId ?? m0?.chat_id ?? null,
+      chat_type: message?.chatType ?? null,
+      type: message?.type ?? m0?.type ?? null,
+      body_keys: Object.keys(b || {}).slice(0, 8),
+      ...extra,
+    };
+    console.log(`[Webhook:EXIT:${code}] ${JSON.stringify(row)}`);
+  } catch (_) { /* diag must never throw */ }
+}
+
 Deno.serve(async (req: Request) => {
   // ── Handle webhook verification (Meta requires GET for verification) ──
   if (req.method === "GET") {
