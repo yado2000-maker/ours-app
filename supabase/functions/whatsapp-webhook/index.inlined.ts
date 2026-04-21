@@ -915,6 +915,11 @@ EXAMPLES:
 [אבא]: "לקנות מתנה לסבתא?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
 [אמא]: "לעצור בדרך לקנות לחם?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לעצור בדרך לקנות לחם?"}}
 [אבא]: "לבשל משהו לארוחת ערב?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לבשל משהו לארוחת ערב?"}}
+// Counter-examples: SAME verbs WITHOUT "?" = real tasks. The "?" is decisive.
+[אבא]: "לקנות מתנה לסבתא" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לקנות מתנה לסבתא","raw_text":"לקנות מתנה לסבתא"}}
+[אמא]: "להביא חלב מהמכולת" → {"intent":"add_shopping","confidence":0.80,"entities":{"items":[{"name":"חלב","category":"מוצרי חלב"}],"raw_text":"להביא חלב מהמכולת"}}
+[אור]: "לאסוף את שושי בארבע" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לאסוף את שושי","time_raw":"בארבע","raw_text":"לאסוף את שושי בארבע"}}
+[אבא]: "לבשל ארוחת ערב" → {"intent":"add_task","confidence":0.85,"entities":{"title":"לבשל ארוחת ערב","raw_text":"לבשל ארוחת ערב"}}
 [אמא]: "תורמי לשטוף כלים היום?" → {"intent":"question","confidence":0.92,"entities":{"raw_text":"תורמי לשטוף כלים היום?"}}
 [אבא]: "של מי התור היום לכלים" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"של מי התור היום לכלים"}}
 [ילד]: "נכון שזה תורה ולא תורי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"נכון שזה תורה ולא תורי?"}}
@@ -932,9 +937,13 @@ EXAMPLES:
 [אבא]: "אולי מישהו יפתח חלון" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"אולי מישהו יפתח חלון"}}
 [נועה]: "מישהו יכול להביא לי מים?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"מישהו יכול להביא לי מים?"}}
 [אמא]: "לפנות את זה לזבל" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"לפנות את זה לזבל"}}
-[אמא]: "לנקות את הכיור" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"לנקות את הכיור"}}
+[אמא]: "לנקות את הכיור" → {"intent":"ignore","confidence":0.75,"entities":{"raw_text":"לנקות את הכיור"}}
 [אבא]: "תזרקי את זה" → {"intent":"ignore","confidence":0.92,"entities":{"raw_text":"תזרקי את זה"}}
 [אמא]: "תסדרו את זה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"תסדרו את זה"}}
+// Counter-examples: SAME cleanup verbs + TIME REFERENCE = scheduled task, not in-the-moment.
+[אמא]: "לנקות את המטבח ביום שישי" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לנקות את המטבח","time_raw":"יום שישי","raw_text":"לנקות את המטבח ביום שישי"}}
+[אבא]: "לסדר את הסלון לפני האורחים" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לסדר את הסלון לפני האורחים","raw_text":"לסדר את הסלון לפני האורחים"}}
+[אמא]: "לפנות את האשפה כל יום שני" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לפנות את האשפה","raw_text":"לפנות את האשפה כל יום שני"}}
 [אבא]: "איפה בנות?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה בנות?"}}
 [אמא]: "איפה אתם? מתי מגיעים?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה אתם? מתי מגיעים?"}}
 [אמא]: "מיני מחברת לנגה" → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"items":[{"name":"מיני מחברת לנגה","category":"אחר"}],"raw_text":"מיני מחברת לנגה"}}
