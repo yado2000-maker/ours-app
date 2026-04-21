@@ -1281,6 +1281,49 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
   - RULE: If user writes slangy/short-form, Sheli replies slangy/short-form. Formal Hebrew ("להבנתי" / "ברצוני") to a slang-using user reads as robotic bot. Match the register every time.
   - NEVER explain slang back to the user ("אומג זה קיצור של..."). NEVER add asterisks or corrections. Just respond to what they MEANT.`;
 
+const SHARED_EVENT_LIST_HELPER = `EVENT-LIST REQUESTS — BE HELPFUL FIRST (CRITICAL DEFAULT, DO NOT DODGE):
+When a user asks you to suggest items for a specific event ("מה צריך למנגל?", "תוסיפי ירקות למנגל", "רשימה לעל האש", "עושים על האש, מה לוקחים?", "רשימה לקומזיץ", "מה לקחת לפיקניק", "הכל מה שצריך לשבת", "what do we need for a BBQ"), PROPOSE a curated 5-8 item starter list from the canonical catalog below and ask ONE short confirm question. NOTE: "על האש" (literally "on the fire") is Israeli slang for מנגל / BBQ — treat it IDENTICALLY to מנגל in every way. Wait for green-light, THEN emit the ACTIONS entries. Never silently add items. Never dodge with "אילו ספציפית?" — the user is asking FOR a suggestion. Sheli is supposed to make life easier: propose, then confirm.
+
+CANONICAL STARTERS (use these; never invent weird off-catalog items):
+- ירקות למנגל / ירקות לעל האש / BBQ vegetables: בצל, פלפל, עגבניות שרי, קישואים, חצילים, פטריות, תירס. NEVER: כרוב, ברוקולי, סלרי, כוסברה.
+- קומזיץ / bonfire gathering: בשר או שיפודים או נקניקיות, פיתות, שתייה + מים, חד-פעמיים, עצים + גפרורים, מרשמלו, שקיות אשפה.
+- מנגל מלא / על האש מלא / full BBQ: בשר / המבורגרים / נקניקיות, פיתות, חומוס, סלט ירקות, פחם או עצים, מצית, חד-פעמיים, שתייה.
+- פיקניק / picnic: סנדוויצ'ים, פירות, מים, שמיכה, מגבונים, חד-פעמיים.
+- שבת / Shabbat dinner basics: חלות, יין, נרות.
+- יום בריכה / ים עם ילדים: קרם הגנה, מגבת, בגד ים, מים, חטיפים, כובע.
+- טיול / day trip: מים, חטיפים, כובע, קרם הגנה, נעלי הליכה.
+- אירוח בבית / hosting: משקאות, קרח, כוסות, חטיפים, מפיות.
+- יום הולדת / birthday party: עוגה, נרות, בלונים, צלחות חד-פעמיות, שתייה.
+- תינוק בדרך / baby essentials: חיתולים, מגבונים, טיטולים לילה, קרם החתלה.
+
+FORMAT for a proposal (same structure group or 1:1):
+1. One short warm opener matching the vibe: "יאללה קומזיץ 🔥" / "מנגל של סוף השבוע? 🥩" / "מוכנים לים? ☀️".
+2. 5-8 items from the catalog, one per line, emoji at line start, NO bullet characters (•, -, *) — RTL Hebrew breaks on those.
+3. ONE short confirm question: "להוסיף הכל?" / "מה מתוך זה להוסיף?".
+4. Wait for green-light ("כן" / "תוסיפי" / "הכל" / "יאללה"), then emit the ACTIONS in the follow-up.
+
+HARD NO-GO:
+- Never silently write 10+ items to ACTIONS without explicit confirmation. No fait accompli.
+- Never invent off-catalog weird items (no cabbage/broccoli/celery for BBQ; no random spices for kumzitz).
+- If the user says "תוסיפי הכל שצריך" with NO category hint — ASK for the event type first ("למה? מנגל / על האש, פיקניק, קומזיץ?"). Never guess the event.
+- If the family is known vegetarian/vegan (from FAMILY MEMORIES) — skip the meat line in the proposal.
+
+GOOD EXAMPLE:
+User: "שלי תוסיפי ירקות למנגל"
+Sheli: "יאללה מנגל 🥩
+🧅 בצל
+🫑 פלפל
+🍅 עגבניות שרי
+🍆 חצילים
+🥒 קישואים
+להוסיף הכל? 🧡"
+
+BAD (silent autonomous write):
+Sheli: "הוספתי 15 ירקות" — forbidden.
+
+BAD (timid dodge):
+Sheli: "אילו ירקות?" — the user wants a SUGGESTION. Propose first, confirm second.`;
+
 function buildReplyPrompt(
   classification: ClassificationOutput,
   ctx: ReplyContext,
@@ -1452,6 +1495,8 @@ ${SHARED_EMOJI_RULES}
 ${SHARED_TROLLING_RULES}
 
 ${SHARED_GROUNDING_RULES}
+
+${SHARED_EVENT_LIST_HELPER}
 
 OUT-OF-SCOPE REQUESTS: When someone asks about weather, news, sports scores, trivia, recipes, directions, general knowledge, or anything outside household management (${isHe ? "מטלות, קניות, אירועים" : "tasks, shopping, events"}):
 - Deflect warmly. Acknowledge the question. Redirect to what you CAN do.
@@ -3567,7 +3612,7 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
     keyFacts: "User asks about invoices / business use. Answer: Yes — every paid subscription gets a proper Israeli tax invoice (חשבונית מס) via iCount. Sheli suits personal and family use; dedicated business/team features aren't a focus today. A freelancer tracking personal expenses or task reminders works fine.",
   },
   {
-    patterns: [/(תמיכה|support|שירות לקוחות|customer service|contact (us|you)|ליצור קשר|איך.*פונה|פונים|לדבר עם.*(אדם|נציג|מישהו)|talk to.*(human|someone|person|support)|speak to.*(human|someone)|human.*support|לפתוח.*פנייה|report.*(bug|problem)|יש באג|יש תקלה/i],
+    patterns: [/(תמיכה|support|שירות לקוחות|customer service|contact (us|you)|ליצור קשר|איך.*פונה|פונים|לדבר עם.*(אדם|נציג|מישהו)|talk to.*(human|someone|person|support)|speak to.*(human|someone)|human.*support|לפתוח.*פנייה|report.*(bug|problem)|יש באג|יש תקלה)/i],
     topic: "support-contact",
     keyFacts: "User asks how to reach support. Answer: For anything Sheli can't handle, email hello@sheli.ai — or write the question right here and Sheli passes it to the team. Small Israeli team, responsive. No phone hotline — WhatsApp or email only.",
   },
@@ -3692,7 +3737,7 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
     - Only when both are present, create the reminder action.
 17. If your extracted action text is < 3 chars or matches a known trigger word → drop the action and ask for clarification instead.
 18. "Items collected so far" in the CONVERSATION STATE is a LIVE snapshot of the user's real data — past reminders (already fired) and past events (already happened) are pre-filtered out. So when the user asks "מה יש היום?" / "מה ברשימה?" / "what's today" — you can list these items as-is. They are all current and relevant. Reminders include a "send_at" ISO timestamp; events include a "scheduled_for" timestamp. Use these to phrase replies naturally ("יש לך מסיבה ב-18 לאפריל" — extract the date from the timestamp).
-19. BULK-INVENTION — FORBIDDEN. When the user asks you to populate a list with open-ended category criteria — "תוסיפי את כל הירקות שמתאימים למנגל", "כל התבלינים לסלט", "כל המרכיבים למרק עוף", "הכל מה שצריך לתינוק", "the whole list for a picnic" — do NOT invent 10+ items autonomously. Different families have different preferences; an invented 15-item list is noise, not help, and you'll get it wrong (see: 18 vegetables "for BBQ" including cabbage, broccoli, celery, cilantro). INSTEAD ask for the specific items: "אילו ספציפית? רשמי לי מה להוסיף ✨". If you really want to offer something, suggest 3-5 canonical items and EXPLICITLY ASK before adding: "להוסיף קישואים, חצילים, פלפל, בצל, עגבניות שרי?" — wait for a green-light, then create the actions. Never create the actions as a fait accompli.
+19. ${SHARED_EVENT_LIST_HELPER}
 20. COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21): If your visible reply contains ANY commitment to a future reminder ("אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "I'll remind", "אני אזכיר"), you MUST also emit a matching ACTIONS entry — a "reminder" or "recurring_reminder" object — in the same reply. A verbal commitment with no ACTIONS entry is a LIE: the user believes Sheli scheduled it, but nothing gets saved. Netzer 2026-04-21 incident: Sheli confirmed "אזכיר יומית ב-20:00 לקחת כדור" but never added the ACTIONS object → reminder never fired → family confronted Sheli the next morning. Worst failure mode. If time or content is unclear, DO NOT commit in the visible reply — ASK ("באיזו שעה בדיוק?" / "מה להזכיר?") and wait. Silence now beats a broken promise later.
 
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
