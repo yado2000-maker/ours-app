@@ -181,28 +181,32 @@ function renderShopping(items: ListItem[], label: Label): string {
     if (!orderedCats.includes(cat)) orderedCats.push(cat);
   }
 
-  // Large lists: category-count summary + link. Partial bullets per
-  // category would be arbitrary — counts give the user meaningful signal.
-  if (n > 10) {
-    const summaryLines = orderedCats.map((cat) => {
-      const emoji = SHOPPING_EMOJI[cat] || UNKNOWN_CATEGORY_EMOJI;
-      return `${emoji} ${cat} (${groups.get(cat)!.length})`;
-    });
-    return (
-      `יש לכם ${n} ${label.plural}:\n` +
-      summaryLines.join("\n") +
-      `\n\nהרשימה המלאה: sheli.ai${label.webPath}`
-    );
-  }
-
-  // Medium multi-category list (2-10): grouped, full items, no bullets.
+  // Always dump items, grouped by category, at any count. Previous n>10 cap
+  // (category counts only + web link) hid the exact symptom users need to see
+  // to clean stale items: Kaye family 2026-04-21 — Niv asked for the list,
+  // got "25 items" + category counts + link. He had no in-chat signal of WHICH
+  // items were already bought, so the list kept accumulating. Data is fetched
+  // deterministically from Postgres (no LLM → zero hallucination risk), so
+  // dumping all items is both safe and useful. ~100 items × ~20 chars ≈ 2KB,
+  // well under WhatsApp's 4096 char cap. Web link still appended when long.
+  //
+  // Per-category counts dropped 2026-04-21 — total count is already on the
+  // opener line, and the user can see the items below each category header.
+  // Redundant noise otherwise.
   const sections = orderedCats.map((cat) => {
     const emoji = SHOPPING_EMOJI[cat] || UNKNOWN_CATEGORY_EMOJI;
     const catItems = groups.get(cat)!;
     const itemLines = catItems.map((i) => i.title).join("\n");
-    return `${emoji} ${cat} (${catItems.length}):\n${itemLines}`;
+    return `${emoji} ${cat}:\n${itemLines}`;
   });
-  return `יש לכם ${n} ${label.plural}:\n\n${sections.join("\n\n")}`;
+  let out = `יש לכם ${n} ${label.plural}:\n\n${sections.join("\n\n")}`;
+  if (n > 10) {
+    // Two additions for long lists: (1) gentle cleanup nudge so users can
+    // clear stale entries by saying "קניתי X" — addresses the core Kaye
+    // complaint; (2) web link for users who prefer the checkbox UI.
+    out += `\n\nאם כבר קניתם משהו, כתבו לי ואני אמחק 🧡\nהרשימה המלאה: sheli.ai${label.webPath}`;
+  }
+  return out;
 }
 
 /**

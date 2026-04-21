@@ -120,9 +120,11 @@ Deno.test("shopping: n=5 multi-category grouped with emoji headers, no bullets",
     ],
   });
   assertEquals(out.includes("5 פריטים"), true);
-  assertEquals(out.includes("🥦 פירות וירקות (2)"), true);
-  assertEquals(out.includes("🥛 מוצרי חלב (2)"), true);
-  assertEquals(out.includes("🛒 אחר (1)"), true);
+  // Per-category counts dropped 2026-04-21 — total is already on opener line
+  assertEquals(out.includes("🥦 פירות וירקות"), true);
+  assertEquals(out.includes("🥛 מוצרי חלב"), true);
+  assertEquals(out.includes("🛒 אחר"), true);
+  assertEquals(out.includes("🥦 פירות וירקות (2)"), false, "per-category counts removed");
   assertEquals(out.includes("חלב"), true);
   assertEquals(out.includes("עגבניות"), true);
   assertEquals(out.includes("•"), false, "no bullet chars anywhere");
@@ -153,8 +155,10 @@ Deno.test("shopping: legacy 'חלב וביצים' category aliases to 'מוצר�
       { title: "עגבניות", category: "פירות וירקות" },
     ],
   });
-  // Both items bucket under the new canonical name
-  assertEquals(out.includes("🥛 מוצרי חלב (2)"), true);
+  // Both items bucket under the new canonical name — single header, both item lines present
+  assertEquals(out.includes("🥛 מוצרי חלב"), true);
+  assertEquals((out.match(/🥛 מוצרי חלב/g) || []).length, 1, "dairy header appears once (aliased)");
+  assertEquals(out.includes("חלב\nקוטג'") || out.includes("קוטג'\nחלב"), true, "both dairy items under one header");
   assertEquals(out.includes("חלב וביצים"), false, "legacy name not shown");
 });
 
@@ -173,7 +177,7 @@ Deno.test("shopping: unknown category gets 📦 fallback, appears after canonica
   assertEquals(dairyIdx < unknownIdx, true, "canonical before unknown in output");
 });
 
-Deno.test("shopping: n=15 multi-category shows counts summary + link (no items)", () => {
+Deno.test("shopping: n=15 multi-category shows full item names (not just counts) + cleanup nudge + link", () => {
   const items: ListItem[] = [
     ...Array.from({ length: 5 }, (_, i) => ({ title: `פרי ${i}`, category: "פירות וירקות" })),
     ...Array.from({ length: 3 }, (_, i) => ({ title: `מוצר חלב ${i}`, category: "מוצרי חלב" })),
@@ -182,13 +186,42 @@ Deno.test("shopping: n=15 multi-category shows counts summary + link (no items)"
   ];
   const out = renderList({ type: "shopping", items });
   assertEquals(out.includes("15 פריטים"), true);
-  assertEquals(out.includes("🥦 פירות וירקות (5)"), true);
-  assertEquals(out.includes("🥛 מוצרי חלב (3)"), true);
-  assertEquals(out.includes("🥩 בשר ודגים (2)"), true);
-  assertEquals(out.includes("🛒 אחר (5)"), true);
+  assertEquals(out.includes("🥦 פירות וירקות"), true);
+  assertEquals(out.includes("🥛 מוצרי חלב"), true);
+  assertEquals(out.includes("🥩 בשר ודגים"), true);
+  assertEquals(out.includes("🛒 אחר"), true);
+  // Kaye-family fix 2026-04-21: items MUST be shown even when n > 10, otherwise
+  // users can't identify stale entries to clear with "קניתי X".
+  assertEquals(out.includes("פרי 0"), true, "n>10: item names shown for cleanup visibility");
+  assertEquals(out.includes("מוצר חלב 1"), true);
+  assertEquals(out.includes("כללי 4"), true);
+  // Cleanup nudge + link both appended on long lists
+  assertEquals(out.includes("אם כבר קניתם"), true, "cleanup nudge present on long list");
+  assertEquals(out.includes("sheli.ai/shopping"), true, "web link still present");
+});
+
+Deno.test("shopping: n=11 boundary (just over) — shows items + nudge + link", () => {
+  const items: ListItem[] = [
+    ...Array.from({ length: 6 }, (_, i) => ({ title: `פרי ${i}`, category: "פירות וירקות" })),
+    ...Array.from({ length: 5 }, (_, i) => ({ title: `מוצר ${i}`, category: "מוצרי חלב" })),
+  ];
+  const out = renderList({ type: "shopping", items });
+  assertEquals(out.includes("11 פריטים"), true);
+  assertEquals(out.includes("פרי 0"), true, "all items visible at n=11");
+  assertEquals(out.includes("אם כבר קניתם"), true);
   assertEquals(out.includes("sheli.ai/shopping"), true);
-  // Individual item titles should NOT be in the summary
-  assertEquals(out.includes("פרי 0"), false, "large list → counts only, no items");
+});
+
+Deno.test("shopping: n=10 boundary (exactly) — shows items, NO nudge, NO link", () => {
+  const items: ListItem[] = [
+    ...Array.from({ length: 5 }, (_, i) => ({ title: `פרי ${i}`, category: "פירות וירקות" })),
+    ...Array.from({ length: 5 }, (_, i) => ({ title: `מוצר ${i}`, category: "מוצרי חלב" })),
+  ];
+  const out = renderList({ type: "shopping", items });
+  assertEquals(out.includes("10 פריטים"), true);
+  assertEquals(out.includes("פרי 0"), true);
+  assertEquals(out.includes("אם כבר קניתם"), false, "short list — no nudge noise");
+  assertEquals(out.includes("sheli.ai"), false, "short list — no link");
 });
 
 Deno.test("shopping: missing category defaults to 'אחר'", () => {
