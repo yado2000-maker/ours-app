@@ -695,7 +695,7 @@ HEBREW PATTERNS:
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
 - "מי [verb]?" = question (not add_task)
 - "מה ברשימה?" / "מה צריך לקנות?" = question (in 1:1 or group)
-- BARE INFINITIVE + "?" = question, NOT add_task. Hebrew bare-infinitive questions ("לאסוף את X?", "להביא Y?", "לקנות Z?", "לבשל W?") mean "should I/we X?" and need a YES/NO answer, not a new task. The trailing "?" is decisive — the SAME words without "?" can be a task ("לקנות מתנה" alone = add_task; "לקנות מתנה?" = question). If the message is ONLY an infinitive-phrase + optional object + "?", classify as question. Exception: if the message starts with an explicit reminder/shopping trigger ("תזכירי לי לקנות X?", "נוסיף חלב?") it keeps its original intent.
+- BARE INFINITIVE + "?" = IGNORE (not add_task, not question-to-answer). Hebrew bare-infinitive questions ("לאסוף את X?", "להביא Y?", "לקנות Z?", "לבשל W?", "לעצור ב-Y?") mean "should I/we [verb]?" — these are family DELIBERATIONS between humans. The speaker is asking a spouse/parent/child for input, NOT Sheli. Sheli has no basis to answer (she doesn't know their schedules, preferences, or external context). Classify as ignore at confidence 0.85. The trailing "?" is decisive — the SAME words WITHOUT "?" can be a task ("לקנות מתנה" = add_task; "לקנות מתנה?" = ignore). Exceptions — keep original intent when: (a) message is EXPLICITLY addressed to שלי/@שלי, (b) starts with an explicit trigger ("תזכירי לי לקנות X?" = add_reminder; "נוסיף חלב?" = add_shopping).
 - "אני [verb]" matching an open task = claim_task
 - Past tense matching open task ("שטפתי כלים") = complete_task
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
@@ -709,6 +709,8 @@ HEBREW PATTERNS:
 - BRINGING/ALREADY HAVE (= ignore, NOT shopping): "מביאה X", "מביא X", "הבאתי X", "לקחתי X", "יש לי X", "כבר קניתי X", "כבר יש X" = someone announcing they're BRINGING or ALREADY HAVE something. This is NOT a request to buy. Ignore it.
   "מביאה ג'חנונים" = ignore (she's bringing it). "צריך ג'חנונים" = add_shopping (she needs it).
 - LOCATION/WHEREABOUTS QUESTIONS (= ignore in groups): "איפה [person]?", "איפה הבנות?", "איפה אתם?", "מתי אתם מגיעים?", "הגעתם?" = family members asking EACH OTHER about location. Sheli has no location data — NEVER respond. Always ignore.
+- IN-THE-MOMENT COMMANDS (= ignore, NOT add_task): direct orders from one family member to another about something PHYSICALLY PRESENT in the moment — NOT planning-level tasks. Signals: (a) deictic "זה" / "את זה" / "this" / "that" / "here" pointing at something visible, (b) message is a quote-reply to a photo/image, (c) imperative about immediate cleanup/disposal with no time reference. Examples: "לפנות את זה לזבל" (empty THIS to trash) = ignore. "לנקות את זה" (clean THIS) = ignore. "תזרקי את זה" (throw this out) = ignore. "תסדרו את זה" (tidy this up) = ignore. "לשים את זה שם" (put this there) = ignore. Difference from planning tasks: "לקנות חלב" (abstract, no deictic) CAN be add_task; "לקחת את זה מהסופר" (pointing at something) = ignore. Rule of thumb: if the verb refers to a physical object the family can see RIGHT NOW (not next week, not an abstract chore), it's family social direction. Escape hatch: explicit שלי/@שלי tag = keep original intent.
+- INDIRECT FAMILY PLEAS (= ignore, NOT add_task, NOT add_reminder): "שמישהו [verb]", "מישהו יכול ל...", "אולי מישהו [verb]", "יש מישהו ש...", "someone please [verb]", "can someone [verb]" = one family member asking an UNNAMED person in the group for a favor. This is a social negotiation between humans, NOT a task for Sheli. Even when the verb sounds actionable (ידליק, יוריד, יביא, יפתח, יסגור, turn on/off, bring, pick up), Sheli STAYS OUT. Examples: "שמישהו ידליק לי את הדוד" (someone turn on the boiler for me) = ignore. "מישהו יכול להוריד את הכביסה?" = ignore. "אולי מישהו ייקח את הכלב?" = ignore. Escape hatch: reclassify as add_task ONLY if message ALSO tags שלי/@שלי or clearly addresses the bot (e.g. "שלי, תוסיפי למטלות שמישהו ידליק דוד"). When uncertain, confidence ≤0.55 with needs_conversation_review:true so Sonnet reevaluates with context. Never cross 0.70 as add_task.
 - LINK COMMENTARY: Messages that respond to/riff on a shared link (TikTok, YouTube, article, video) are social commentary = ignore. Signals: "ואני מוסיף:", "בדיוק!", "כל כך נכון", laughter after a link, opinions about shared content. These are NOT tasks or shopping items even if they sound actionable.
 - Hebrew time: "ב5" = 17:00, "בצהריים" = ~12:00, "אחרי הגן" = ~16:00, "לפני שבת" = Friday PM
 - "תזכירי", "תזכיר", "תזכרו", "remind" = add_reminder (NOT add_task, NOT add_event)
@@ -908,9 +910,11 @@ EXAMPLES:
 [אמא]: "מי בתור" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מי בתור"}}
 [אבא]: "מה נשאר ברשימה" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה נשאר ברשימה"}}
 [אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן"}}
-[אור]: "לאסוף את שושי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"לאסוף את שושי?"}}
-[אמא]: "להביא חלב מהמכולת?" → {"intent":"question","confidence":0.85,"entities":{"raw_text":"להביא חלב מהמכולת?"}}
-[אבא]: "לקנות מתנה לסבתא?" → {"intent":"question","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
+[אור]: "לאסוף את שושי?" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"לאסוף את שושי?"}}
+[אמא]: "להביא חלב מהמכולת?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"להביא חלב מהמכולת?"}}
+[אבא]: "לקנות מתנה לסבתא?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
+[אמא]: "לעצור בדרך לקנות לחם?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לעצור בדרך לקנות לחם?"}}
+[אבא]: "לבשל משהו לארוחת ערב?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לבשל משהו לארוחת ערב?"}}
 [אמא]: "תורמי לשטוף כלים היום?" → {"intent":"question","confidence":0.92,"entities":{"raw_text":"תורמי לשטוף כלים היום?"}}
 [אבא]: "של מי התור היום לכלים" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"של מי התור היום לכלים"}}
 [ילד]: "נכון שזה תורה ולא תורי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"נכון שזה תורה ולא תורי?"}}
@@ -923,6 +927,14 @@ EXAMPLES:
 [אבא]: "צריך לנהל את הכלים ככה שכל יום ילד אחר" → {"intent":"instruct_bot","confidence":0.88,"entities":{"raw_text":"צריך לנהל את הכלים ככה שכל יום ילד אחר"}}
 [אמא]: "מביאה ג'חנונים" → {"intent":"ignore","confidence":0.95,"entities":{"raw_text":"מביאה ג'חנונים"}}
 [אבא]: "הבאתי לחם" → {"intent":"ignore","confidence":0.95,"entities":{"raw_text":"הבאתי לחם"}}
+[אופיר]: "שמישהו ידליק לי את הדוד" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"שמישהו ידליק לי את הדוד"}}
+[אמא]: "מישהו יכול להוריד את הכביסה?" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"מישהו יכול להוריד את הכביסה?"}}
+[אבא]: "אולי מישהו יפתח חלון" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"אולי מישהו יפתח חלון"}}
+[נועה]: "מישהו יכול להביא לי מים?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"מישהו יכול להביא לי מים?"}}
+[אמא]: "לפנות את זה לזבל" → {"intent":"ignore","confidence":0.90,"entities":{"raw_text":"לפנות את זה לזבל"}}
+[אמא]: "לנקות את הכיור" → {"intent":"ignore","confidence":0.80,"entities":{"raw_text":"לנקות את הכיור"}}
+[אבא]: "תזרקי את זה" → {"intent":"ignore","confidence":0.92,"entities":{"raw_text":"תזרקי את זה"}}
+[אמא]: "תסדרו את זה" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"תסדרו את זה"}}
 [אבא]: "איפה בנות?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה בנות?"}}
 [אמא]: "איפה אתם? מתי מגיעים?" → {"intent":"ignore","confidence":0.95,"addressed_to_bot":false,"entities":{"raw_text":"איפה אתם? מתי מגיעים?"}}
 [אמא]: "מיני מחברת לנגה" → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"items":[{"name":"מיני מחברת לנגה","category":"אחר"}],"raw_text":"מיני מחברת לנגה"}}

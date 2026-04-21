@@ -639,6 +639,82 @@ def build_test_cases():
         expected_intent="ignore",
     ))
 
+    # ── Category 5b: Social Noise — Sheli stays out (9 tests, added 2026-04-22) ──
+    # Three patterns Sheli must NOT turn into tasks:
+    #   (a) INDIRECT PLEAS: "שמישהו [verb]" — asking unnamed family member for a favor
+    #   (b) BARE INFINITIVE DELIBERATIONS: "לעשות X?" — "should I/we X?" asked between humans
+    #   (c) IN-THE-MOMENT COMMANDS: deictic "את זה" — pointing at a physical thing now
+    # All three resolve to ignore unless שלי/@שלי is explicitly tagged.
+    cases.append(TestCase(
+        "indirect_plea_boiler", "SocialNoise",
+        "שמישהו ידליק לי את הדוד",
+        expected_intent="ignore",
+        notes="Indirect plea — mom/dad asking an unnamed family member. NOT a task for Sheli.",
+    ))
+    cases.append(TestCase(
+        "indirect_plea_laundry", "SocialNoise",
+        "מישהו יכול להוריד את הכביסה?",
+        expected_intent="ignore",
+        notes="Indirect plea with '?' — same pattern.",
+    ))
+    cases.append(TestCase(
+        "indirect_plea_window", "SocialNoise",
+        "אולי מישהו יפתח חלון",
+        expected_intent="ignore",
+        notes="Indirect plea variant ('אולי מישהו').",
+    ))
+    cases.append(TestCase(
+        "deliberation_shoshi", "SocialNoise",
+        "לאסוף את שושי?",
+        expected_intent="ignore",
+        notes="Bare-infinitive deliberation — 'should I pick up Shoshi?' Family decides, not Sheli.",
+    ))
+    cases.append(TestCase(
+        "deliberation_milk", "SocialNoise",
+        "להביא חלב מהמכולת?",
+        expected_intent="ignore",
+        notes="Bare-infinitive deliberation. Same words without '?' could be add_task.",
+    ))
+    cases.append(TestCase(
+        "deliberation_gift", "SocialNoise",
+        "לקנות מתנה לסבתא?",
+        expected_intent="ignore",
+        notes="Bare-infinitive deliberation — deciding together, not delegating to Sheli.",
+    ))
+    cases.append(TestCase(
+        "moment_command_trash", "SocialNoise",
+        "לפנות את זה לזבל",
+        expected_intent="ignore",
+        notes="In-the-moment command with deictic 'את זה' (THIS). Golan family 2026-04-21 incident.",
+    ))
+    cases.append(TestCase(
+        "moment_command_throw", "SocialNoise",
+        "תזרקי את זה",
+        expected_intent="ignore",
+        notes="Imperative with deictic 'את זה' — pointing at a physical thing right now.",
+    ))
+    cases.append(TestCase(
+        "moment_command_tidy", "SocialNoise",
+        "תסדרו את זה",
+        expected_intent="ignore",
+        notes="Imperative with deictic 'את זה'. Plural form (family-directed).",
+    ))
+    # Positive counter-examples — same verbs WITHOUT the social-noise signals
+    # should STILL classify as tasks/shopping. If these start failing, the rule
+    # over-generalized and the product loses its core value.
+    cases.append(TestCase(
+        "counter_buy_gift_no_q", "SocialNoise",
+        "לקנות מתנה לסבתא",
+        expected_intent="add_task",
+        notes="Counter-example — same words as deliberation_gift but NO '?'. Must still be add_task.",
+    ))
+    cases.append(TestCase(
+        "counter_clean_kitchen", "SocialNoise",
+        "לנקות את המטבח ביום שישי",
+        expected_intent="add_task",
+        notes="Counter-example — infinitive cleanup verb BUT with time reference (not in-the-moment).",
+    ))
+
     # ── Category 6: Bot Addressing / Name Detection (4 tests) ──
     cases.append(TestCase(
         "sheli_add_shopping", "Addressing",
