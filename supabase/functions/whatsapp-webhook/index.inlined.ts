@@ -1111,6 +1111,9 @@ const SHARED_GROUNDING_RULES = `GROUNDING — MANDATORY:
 NEVER reference events, habits, mistakes, or scenarios that aren't explicitly in this conversation, the action results, or the family memories provided below. When roasting or joking back, use ONLY what the sender actually said or did. If you have nothing specific to reference, keep it generic and short. Do NOT invent stories, habits, or failures to sound witty.
 - If recent conversation history shows someone reacted negatively (reacted 😂/🤦/👎 to שלי) to your last message, acknowledge gracefully and ask for clarification. Don't repeat the same action.
 
+CORRECTION PRIORITY — MANDATORY:
+When the user's LATEST message contains a NAME, DATE, or DETAIL that CONTRADICTS something in the stored tasks/events/shopping/memories OR in your earlier reply, TRUST THE USER'S LATEST MESSAGE. Do NOT quote the old/wrong detail back. Example: if the stored task says "לאסוף את שושי" but the user just said "אחותו שירה" — say "סימנתי שזה בוצע ✓" or use "שירה", NEVER "המטלה 'לאסוף את שושי' בוצעה". Quoting the contradicted detail back makes you look tone-deaf. When in doubt, refer to the item abstractly ("המטלה הזאת", "that one") instead of reciting the stored title.
+
 MEMORY HONESTY — MANDATORY (2026-04-20):
 You have access ONLY to the messages in your current conversation context + the family memories + items provided below. You CANNOT "search", "check backward", "look at older chats", "review the chat history", or retrieve anything that isn't already in this prompt. Pretending otherwise is the most damaging thing you can do — it makes you look dishonest AND unhelpful.
 
@@ -8073,35 +8076,38 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
       break;
     }
     case "add_task": {
+      // Fuzzy match mirrors the INSERT dedup path (isSameTask) — the exact-eq
+      // query used to miss when Haiku's entities.title differed from the
+      // stored row by a trailing "?", whitespace, or "את" normalization.
       const title = lastAction.entities.title || lastAction.entities.raw_text;
-      const { data: found } = await supabase
+      const { data: candidates } = await supabase
         .from("tasks")
-        .select("id, title")
+        .select("id, title, created_at")
         .eq("household_id", householdId)
-        .eq("title", title)
         .eq("done", false)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-      if (found) {
-        await supabase.from("tasks").delete().eq("id", found.id);
-        undone.push(`"${found.title}"`);
+        .limit(20);
+      const match = (candidates || []).find((row: { title: string }) => isSameTask(row.title, title));
+      if (match) {
+        await supabase.from("tasks").delete().eq("id", (match as { id: string }).id);
+        undone.push(`"${(match as { title: string }).title}"`);
       }
       break;
     }
     case "add_event": {
+      // Fuzzy title match (see add_task note). Events don't key on date here
+      // because we're undoing the MOST RECENT insert regardless of scheduled date.
       const title = lastAction.entities.title || lastAction.entities.raw_text;
-      const { data: found } = await supabase
+      const { data: candidates } = await supabase
         .from("events")
-        .select("id, title")
+        .select("id, title, created_at")
         .eq("household_id", householdId)
-        .eq("title", title)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-      if (found) {
-        await supabase.from("events").delete().eq("id", found.id);
-        undone.push(`"${found.title}"`);
+        .limit(20);
+      const match = (candidates || []).find((row: { title: string }) => isSameTask(row.title, title));
+      if (match) {
+        await supabase.from("events").delete().eq("id", (match as { id: string }).id);
+        undone.push(`"${(match as { title: string }).title}"`);
       }
       break;
     }
