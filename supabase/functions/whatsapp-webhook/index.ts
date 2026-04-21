@@ -452,11 +452,11 @@ async function maybeSendSoftWarning(groupId: string, householdId: string, usageC
 
   if ((warningsSent || 0) > 0) return; // Already sent this month
 
-  const remaining = 30 - usageCount;
+  const remaining = 40 - usageCount;
   const lang = language || "he";
   const warningMsg = lang === "he"
-    ? `נשארו לכם ${remaining} פעולות חינמיות החודש. רוצים להמשיך בלי הגבלה? 9.90 ₪ לחודש 🔗 sheli.ai/upgrade`
-    : `You have ${remaining} free actions left this month. Want unlimited? $2.70/month 🔗 sheli.ai/upgrade`;
+    ? `נשארו לכם ${remaining} פעולות חינמיות החודש. רוצים להמשיך בלי הגבלה? 14.90 ₪ לחודש או 149 ₪ לשנה 🔗 sheli.ai/upgrade`
+    : `You have ${remaining} free actions left this month. Want unlimited? 14.90 ILS/mo or 149 ILS/yr 🔗 sheli.ai/upgrade`;
 
   await provider.sendMessage({ groupId, text: warningMsg });
   await supabase.from("whatsapp_messages").insert({
@@ -654,8 +654,8 @@ async function sendUpgradePrompt(groupId: string, householdId: string, language?
     : `${stripeLink}?client_reference_id=${householdId}`;
 
   const upgradeMsg = lang === "he"
-    ? `היי ${getHouseholdNameCached(householdId) || "משפחה"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 9.90 ₪ לחודש.\n🔗 ${paymentUrl}`
-    : `Hey ${getHouseholdNameCached(householdId) || "family"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping — $2.70/month.\n🔗 ${paymentUrl}`;
+    ? `היי ${getHouseholdNameCached(householdId) || "משפחה"} 👋\nהשתמשתם ב-40 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 14.90 ₪ לחודש או 149 ₪ לשנה (חודשיים במתנה!).\n🔗 ${paymentUrl}`
+    : `Hey ${getHouseholdNameCached(householdId) || "family"} 👋\nYou've used your 40 free actions this month.\nUpgrade to Premium to keep me helping — 14.90 ILS/mo or 149 ILS/yr (2 months free!).\n🔗 ${paymentUrl}`;
 
   await provider.sendMessage({ groupId, text: upgradeMsg });
 }
@@ -792,7 +792,7 @@ function getOnboardingWaitingMessage(msgCount: number): string {
 const ONBOARDING_QA: Array<{ patterns: RegExp[]; answer: string }> = [
   {
     patterns: [/כמה.*עול|מחיר|עלות|תשלום|חינם|בחינם|פרימיום|premium|price|cost|free/i],
-    answer: "40 פעולות בחודש בחינם! אם תרצו להמשיך בלי הגבלה, Premium עולה 9.90 ₪ לחודש 😊\n\nאבל קודם כל, הוסיפו אותי לקבוצה ותראו איך זה עובד!",
+    answer: "40 פעולות בחודש בחינם! אם תרצו להמשיך בלי הגבלה, Premium עולה 14.90 ₪ לחודש או 149 ₪ לשנה (חודשיים במתנה!) 😊\n\nאבל קודם כל, הוסיפו אותי לקבוצה ותראו איך זה עובד!",
   },
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],

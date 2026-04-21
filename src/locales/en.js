@@ -93,7 +93,7 @@ const en = {
   menuPlanFree: "Free",
   menuPlanPremium: "Premium",
   menuPlanFamily: "Family+",
-  menuUpgrade: "Upgrade to Premium \u2014 9.90 \u20AA/month",
+  menuUpgrade: "Upgrade to Premium \u2014 14.90 \u20AA/month",
   menuUpgradeDesc: "Unlimited actions",
   menuSignOut: "Sign out",
   menuReset: "Delete all data and reset",

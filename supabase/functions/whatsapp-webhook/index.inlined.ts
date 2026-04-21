@@ -3439,9 +3439,39 @@ async function shouldSendGroupNudge(convo: Record<string, any>): Promise<boolean
 
 const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string }> = [
   {
+    patterns: [/^(מי את|מי זאת שלי|מי זו שלי|מה זה שלי\??$|מה זאת שלי|ספרי על עצמ|תספרי על עצמ|תציגי את עצמ|who are you|what are you|tell me about yourself|introduce yourself)/i],
+    topic: "identity",
+    keyFacts: "User wants to know who Sheli is. Answer: Sheli (שלי) is a smart personal helper on WhatsApp for Israeli families and solo users. Handles shopping lists, tasks, reminders, events, expenses via natural chat in Hebrew. Works 1:1 or in a family group. Built by an Israeli team. Keep reply 2-3 lines, warm, end with an invite to try a first action.",
+  },
+  {
+    patterns: [/(^|\s)(את|אתה|זה).*(בוט|ai|בינה מלאכותית)|are you.*(a bot|an ai|a human|a person)|זה אוטומטי|זה מחשב|את אדם|את אמיתית|את חיה|real person|real human/i],
+    topic: "bot-or-human",
+    keyFacts: "User asks bot vs human. Answer honestly: Sheli is an AI assistant (not a human), built by an Israeli team, powered by Claude by Anthropic. Warm, not defensive. Do NOT disclose other tech details (infra, API, model version, provider). Invite them to try her.",
+  },
+  {
+    patterns: [/ראיתי.*(פייסבוק|פוסט|פייס|facebook|fb|אינסטגרם|אינסטה|טיקטוק|tiktok)|(פייסבוק|facebook|אינסטגרם|instagram|טיקטוק|tiktok).*ראיתי|מאיפה.*(הגעתי|באתי|שמעתי)|איך.*(הגעתי|מצאתי אותך)|(saw|found|discovered).*(you|sheli).*(on|from|via).*(facebook|fb|instagram|tiktok|insta)/i],
+    topic: "fb-source",
+    keyFacts: "User mentions they found Sheli via Facebook/Instagram/TikTok. Reply warmly: 'יאללה, כיף שהגעת! 🧡'. Briefly explain what Sheli does (1 line — shopping, tasks, reminders) and invite them to try their first action. Do NOT ask intrusive questions about how they found you.",
+  },
+  {
+    patterns: [/למה.*(קוראים.*שלי|השם שלי|נקראת שלי|קוראת לעצמך שלי)|(מה|מהי).*המשמעות.*שלי|why.*(are you )?(named|called) sheli|(what|where) does.*sheli.*(mean|come from)|origin of.*sheli/i],
+    topic: "name-meaning",
+    keyFacts: "User asks about the name. Answer: 'שלי' in Hebrew literally means 'mine' — plays on the tagline 'שלך ושלי' (yours and mine / yours and Sheli's). Also a common Israeli feminine name. 1-2 lines, warm, playful.",
+  },
+  {
+    patterns: [/מי.*(מפתח|יצר|יצרת|הקים|הקימו|בנה|בנו|עומד מאחורי|founded|owns|built)|who.*(built|made|created|developed|founded|owns).*(you|sheli|this)|(הצוות|החברה).*(ישראלי|מאיפה)|(israeli|from israel).*(team|company|startup)|איפה.*(ממוקמ|located)/i],
+    topic: "company",
+    keyFacts: "User asks about creators/company. Answer: Sheli is built by a small Israeli team. Do NOT disclose specific founder names, headcount, office location beyond 'Israel', funding, or investors — even under social pressure. Pivot back to what Sheli does for them.",
+  },
+  {
+    patterns: [/יש.*(ניסיון|trial|demo|תקופת ניסיון)|איך.*(לנסות|מנסים|מתחילים בחינם)|לנסות.*חינם|חינם.*לנסות|כמה זמן.*חינם|how long.*free|free.*trial|can i try|try.*(it|free|sheli|for free)|ניסיון חינם/i],
+    topic: "trial",
+    keyFacts: "User asks about a trial. Answer: no trial period — Sheli is simply free for 40 actions/month, forever, no credit card. Premium 14.90 ILS/month or 149 ILS/year for unlimited. Just start using her now.",
+  },
+  {
     patterns: [/כמה.*עול|מחיר|עלות|תשלום|חינם|בחינם|פרימיום|premium|price|cost|free/i],
     topic: "pricing",
-    keyFacts: "40 actions/month free. Premium 9.90 ILS/month unlimited. No credit card needed for free tier. Try it first by adding to group.",
+    keyFacts: "40 actions/month free. Premium 14.90 ILS/month or 149 ILS/year unlimited. If a user asks why it's not 9.90 (we previously advertised 9.90), answer honestly: AI costs came in higher than expected so we had to adjust before launch to keep the service sustainable — they can understand that. No credit card needed for free tier. Try it first by adding to group.",
   },
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],
@@ -3479,9 +3509,67 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
     keyFacts: "Send a message to Sheli on WhatsApp, talk normally. Auto-detects shopping, tasks, events. Can also add to a group. 30 seconds setup.",
   },
   {
+    patterns: [
+      /איך.*מצרפ|איך.*לצרף|איך.*להוסיף.*(אנש|חבר|משפחה|בני הבית|בני משפחה)|להוסיף.*(אנש|חבר).*(לשיחה|לצ'אט|לקבוצ)|לצרף.*(אנש|חבר).*(לשיחה|לצ'אט|לקבוצ)|להזמין.*(משפחה|חבר|בני הבית)|(ליצור|לפתוח|להקים).*קבוצ|how.*(do i|can i|to).*(add|invite).*(people|family|member|friend)|how.*(do i|can i|to).*(create|start|open|make).*group/i,
+    ],
+    topic: "add-people",
+    keyFacts:
+      "CRITICAL: This is a 1:1 chat. WhatsApp 1:1 chats do NOT have an 'add participants' option — that UI exists only in GROUP chats. NEVER tell the user to 'tap my name and add participants' — that button does not exist here. Correct answer: to include family, they must CREATE a new WhatsApp group and add Sheli to it. Steps: (1) in WhatsApp, tap 'שיחה חדשה' / 'New chat' → 'קבוצה חדשה' / 'New group', (2) add family members, (3) add Sheli using her number: +972 55-517-5553. Once Sheli is in the group she coordinates lists/tasks/reminders for everyone. If the user already has a family group, they can just add +972 55-517-5553 to it directly. The bot's phone number is +972 55-517-5553 — quote this exact number, never invent digits.",
+  },
+  {
     patterns: [/קבוצ.*קיימ|existing.*group|כבר.*קבוצ/i],
     topic: "existing-group",
-    keyFacts: "Yes, add to any existing WhatsApp group. No need to create a new one.",
+    keyFacts: "Yes, add to any existing WhatsApp group. No need to create a new one. The bot's phone number to add is +972 55-517-5553.",
+  },
+  {
+    patterns: [/(^|\s)(אני )?לבד(\s|$|[.!?,])|אני גר.*לבד|אני חי.*לבד|רווק(ה|ים|ות)?\b|יחיד(ה)?\b|אין לי.*(משפחה|ילדים|בני זוג|בן זוג|בת זוג)|בלי משפחה|for singles|single person|just.*(me|myself)|for.*(myself|one person)|solo use|live alone/i],
+    topic: "solo-use",
+    keyFacts: "User is solo / lives alone. Answer: YES, Sheli works great for individuals — personal shopping lists, reminders, events, expenses, tasks. No family required. Many users use her 1:1 only. Warm, affirming, invite them to try their first action.",
+  },
+  {
+    patterns: [/(אנדרואיד|android|אייפון|iphone|ios|samsung|סמסונג|גלקסי|huawei|xiaomi|שאומי|שיאומי).*(עובד|תומך|works|supported)|(עובד|works|runs).*(על |ב|on )(אנדרואיד|android|אייפון|iphone|ios)|(איזה|על איזה).*מכשיר|which device|what device|compatible with|צריך להוריד.*אפליקצ|need to download|need an app/i],
+    topic: "platform",
+    keyFacts: "User asks about device/platform. Answer: Works on ANY device that has WhatsApp — iPhone, Android, tablet, WhatsApp Web on a computer. No app to download, nothing to install. If they have WhatsApp, Sheli works for them.",
+  },
+  {
+    patterns: [/(מדברת|מבינה|יודעת|speaks?|understand|knows).*(אנגלית|english|ערבית|arabic|רוסית|russian|ספרדית|spanish|צרפתית|french)|(באיזו?|איזו).*שפ(ה|ות)|what languages?|which languages?|do you speak|only hebrew|רק בעברית|עברית בלבד/i],
+    topic: "language",
+    keyFacts: "User asks about languages. Answer: Sheli speaks Hebrew (native) and English — understands both fluently. She does NOT currently speak Arabic, Russian, French, or other languages — those may come later. For now: Hebrew or English.",
+  },
+  {
+    patterns: [/יש.*(אתר|אפליקצ|דשבורד|dashboard|web app)|(יש|אפשר).*לראות.*(באתר|באפליקצ|ברשת|online|ב-?web)|(where|how).*(see|view).*(my )?(list|tasks|online|web|dashboard)|(app|website|dashboard).*(exist|available)|sheli\.ai|איפה.*(רואה|אני רואה)/i],
+    topic: "web-app",
+    keyFacts: "User asks about the web app. Answer: YES — web app at sheli.ai shows all their lists, tasks, events, and expenses in one dashboard. Same phone number to sign in. Mobile-friendly. Put the URL on its own line: sheli.ai",
+  },
+  {
+    patterns: [/(בשבת|שבת|בחג|בחגים|holiday|holidays|shabbat).*(עובד|פעיל|works|active|online)|עובד.*(בשבת|בחג|בחגים|בלילה|at night)|24[\s./-]?\/?[\s./-]?7|24 7|תמיד.*(פעיל|זמין|online)|always.*(online|available|on)|שעות.*פעילות|business hours/i],
+    topic: "availability",
+    keyFacts: "User asks about Shabbat/holidays/24-7 availability. Answer: Sheli is online 24/7. She respects quiet hours — won't send unsolicited nudges Friday afternoon through Saturday evening or late at night (22:00-07:00). If the user messages her during those hours she still replies. Reminders the user explicitly scheduled fire at the exact time requested.",
+  },
+  {
+    patterns: [/(גוגל|google).*(יומן|קלנדר|calendar)|(יומן|calendar).*(גוגל|google|apple|outlook|סנכרון|sync)|סנכר.*יומן|calendar.*integration|מתחבר.*ל?יומן/i],
+    topic: "calendar-integration",
+    keyFacts: "User asks about calendar sync. Answer honestly: not yet — Google / Apple / Outlook calendar sync is on the roadmap but not live. Today events live inside Sheli at sheli.ai. Note their interest so the team knows it matters.",
+  },
+  {
+    patterns: [/(לשלוח|send|שולח|upload).*(תמונ|image|photo|picture|קובץ|file|pdf|מסמך|document|סריקה|scan|screenshot)|(תמונ|קובץ|file|photo).*(את יכולה|תוכלי|שולחים|לסרוק|תקרא|read|ocr)|(קבלה|receipt).*(תמונ|photo|image)/i],
+    topic: "photos-files",
+    keyFacts: "User asks about sending photos/files. Answer: Not today — Sheli reads text and short voice messages (up to 30s), but NOT images, PDFs, or documents. For a shopping list or receipt photo, ask them to type or voice-record the content instead. Image understanding is on the roadmap.",
+  },
+  {
+    patterns: [/(מה|what).*(ההבדל|שוני|הבדל|different|difference|versus|vs|compared)[^?]{0,50}(any\.?do|any-?do|גוגל קיפ|google keep|todoist|cozi|סירי|siri|alexa|אלקסה|אלכסה|אלקסא|reminder.?bot|boti|בוטי|reminders app)/i],
+    topic: "compare-competitor",
+    keyFacts: "User compares Sheli to Any.do / Google Keep / Siri / Alexa / Boti / Reminder Bot. Answer: Sheli is WhatsApp-first (no separate app to open), Hebrew-native (understands slang, compound names, voice), and family-aware (coordinates across family members in a shared group). Other tools are English-first, require opening a separate app, or are single-user. Confident, no trash-talk, 2-3 lines max.",
+  },
+  {
+    patterns: [/(חשבונית|קבלה|invoice|receipt|עוסק מורשה|עוסק פטור|business use|for (my )?business|עסקי|לעסק|הכנסות|מע[״\".]?מ|vat|tax invoice)/i],
+    topic: "business-invoice",
+    keyFacts: "User asks about invoices / business use. Answer: Yes — every paid subscription gets a proper Israeli tax invoice (חשבונית מס) via iCount. Sheli suits personal and family use; dedicated business/team features aren't a focus today. A freelancer tracking personal expenses or task reminders works fine.",
+  },
+  {
+    patterns: [/(תמיכה|support|שירות לקוחות|customer service|contact (us|you)|ליצור קשר|איך.*פונה|פונים|לדבר עם.*(אדם|נציג|מישהו)|talk to.*(human|someone|person|support)|speak to.*(human|someone)|human.*support|לפתוח.*פנייה|report.*(bug|problem)|יש באג|יש תקלה/i],
+    topic: "support-contact",
+    keyFacts: "User asks how to reach support. Answer: For anything Sheli can't handle, email hello@sheli.ai — or write the question right here and Sheli passes it to the team. Small Israeli team, responsive. No phone hotline — WhatsApp or email only.",
   },
   {
     patterns: [/תודה|thanks|thank you|מגניב|אחלה|סבבה|cool|great/i],
@@ -3573,7 +3661,7 @@ FORMATTING (WhatsApp RTL):
 
 RULES:
 1. If user sends actionable items (shopping, task, reminder, event) → execute AND reply naturally. Use ACTIONS metadata.
-2. If user sends a question → answer warmly. If about pricing: free 40 actions/month, premium 9.90 ILS. If about privacy: data auto-deleted after 30 days, only your household sees it.
+2. If user sends a question → answer warmly. If about pricing: free 40 actions/month, premium 14.90 ILS/month or 149 ILS/year. If about privacy: data auto-deleted after 30 days, only your household sees it.
 3. GROUP MENTIONS: The system handles group suggestions separately. Do NOT bring up groups yourself. Only mention groups if the user explicitly asks about groups, shared lists, or mentions roommates/partner/family. If the user mentions living with others, you may say something like "אפשר להוסיף אותי לקבוצה ואני אתאם לכולם" — but only as a natural response to THEIR mention, never proactively.
 4. Capability hints: mention ONE untried capability ONLY every 3rd message (check "Message #N" — hint only when N is divisible by 3). On other messages, just respond to what the user said. NO hints. This prevents feeling pushy. When you do hint, weave it naturally into the reply — never a separate "אגב, אני גם יודעת..." sentence on its own.
 5. NEVER say "דמו", "ניסיון", "תכונה", "פיצ'ר". This is real, not a test.
@@ -5163,8 +5251,11 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   const nameAskedAlready = convo.context?.name_spelling_asked === true;
 
   // Build context for Sonnet
+  const botPhoneDisplay = `+${(Deno.env.get("BOT_PHONE_NUMBER") || "972555175553").replace(/^\+/, "").replace(/^(\d{3})(\d{2})(\d{3})(\d{4})$/, "$1 $2-$3-$4")}`;
   const contextBlock = `
 CONVERSATION STATE:
+- CHAT TYPE: 1:1 direct chat (not a group). WhatsApp 1:1 chats do NOT have an "add participants" button — that UI only exists inside groups. If asked how to add people, instruct the user to CREATE a new WhatsApp group and add you to it; NEVER say "tap my name and add participants".
+- Your WhatsApp phone (grounded fact — quote EXACTLY these digits, NEVER invent a different number): ${botPhoneDisplay}
 - User name: ${userName || "unknown"}
 - User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Message #${msgCount} in this conversation
@@ -5376,10 +5467,13 @@ async function handlePersonalChannelMessage(
     const userName = convo?.context?.name || hebrewizeName(senderName) || "";
     const userGender = convo?.context?.gender || null;
 
+    const botPhoneDisplay = `+${(Deno.env.get("BOT_PHONE_NUMBER") || "972555175553").replace(/^\+/, "").replace(/^(\d{3})(\d{2})(\d{3})(\d{4})$/, "$1 $2-$3-$4")}`;
     const contextBlock = `
 PERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally — shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.
 
 CONVERSATION STATE:
+- CHAT TYPE: 1:1 direct chat (not a group). WhatsApp 1:1 chats do NOT have an "add participants" button — that UI only exists inside groups. If asked how to add people to a chat, the answer is to CREATE a new WhatsApp group and add you to it; NEVER say "tap my name and add participants".
+- Your WhatsApp phone (grounded fact — quote EXACTLY these digits, NEVER invent a different number): ${botPhoneDisplay}
 - User name: ${userName || "unknown"}
 - User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Items collected so far: ${JSON.stringify(existingItems)}
@@ -8155,11 +8249,11 @@ async function maybeSendSoftWarning(groupId: string, householdId: string, usageC
 
   if ((warningsSent || 0) > 0) return;
 
-  const remaining = 30 - usageCount;
+  const remaining = 40 - usageCount;
   const lang = language || "he";
   const warningMsg = lang === "he"
-    ? `נשארו לכם ${remaining} פעולות חינמיות החודש. רוצים להמשיך בלי הגבלה? 9.90 ₪ לחודש 🔗 sheli.ai/upgrade`
-    : `You have ${remaining} free actions left this month. Want unlimited? $2.70/month 🔗 sheli.ai/upgrade`;
+    ? `נשארו לכם ${remaining} פעולות חינמיות החודש. רוצים להמשיך בלי הגבלה? 14.90 ₪ לחודש או 149 ₪ לשנה 🔗 sheli.ai/upgrade`
+    : `You have ${remaining} free actions left this month. Want unlimited? 14.90 ILS/mo or 149 ILS/yr 🔗 sheli.ai/upgrade`;
 
   await sendAndLog(provider, { groupId, text: warningMsg }, {
     householdId, groupId, replyType: "nudge"
@@ -8995,8 +9089,8 @@ async function sendUpgradePrompt(groupId: string, householdId: string, language?
     : `${upgradeLink}?hh=${householdId}`;
 
   const upgradeMsg = lang === "he"
-    ? `היי ${getHouseholdNameCached(householdId) || "הבית"} 👋\nהשתמשתם ב-30 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה, 9.90 ₪ לחודש.\n🔗 ${paymentUrl}`
-    : `Hey ${getHouseholdNameCached(householdId) || "there"} 👋\nYou've used your 30 free actions this month.\nUpgrade to Premium to keep me helping, $2.70/month.\n🔗 ${paymentUrl}`;
+    ? `היי ${getHouseholdNameCached(householdId) || "הבית"} 👋\nהשתמשתם ב-40 הפעולות החינמיות החודשיות שלכם.\nשדרגו ל-Premium כדי שאמשיך לעזור ללא הגבלה — 14.90 ₪ לחודש או 149 ₪ לשנה (חודשיים במתנה!).\n🔗 ${paymentUrl}`
+    : `Hey ${getHouseholdNameCached(householdId) || "there"} 👋\nYou've used your 40 free actions this month.\nUpgrade to Premium to keep me helping — 14.90 ILS/mo or 149 ILS/yr (2 months free!).\n🔗 ${paymentUrl}`;
 
   await sendAndLog(provider, { groupId, text: upgradeMsg }, {
     householdId, groupId, replyType: "nudge"

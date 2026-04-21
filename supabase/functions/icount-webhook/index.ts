@@ -101,13 +101,17 @@ function extractHouseholdId(payload: Record<string, unknown>): string | null {
   return null;
 }
 
-// ─── Determine plan from payment amount ───
+// ─── Determine plan + billing period from payment amount ───
+// 14.90 ILS / mo → premium monthly
+// 149.00 ILS / yr → premium annual
+// 24.90 ILS / mo → family_plus monthly
+// (legacy) 9.90 ILS / mo → premium monthly — honored for grandfathered charges
 
-function determinePlan(amount: number): string {
-  // 9.90 ILS = Premium, 24.90 ILS = Family+
-  if (amount <= 15) return "premium";
-  if (amount <= 30) return "family_plus";
-  return "premium"; // Default
+function determinePlan(amount: number): { plan: string; billingPeriod: "monthly" | "annual" } {
+  if (amount >= 140 && amount <= 160) return { plan: "premium", billingPeriod: "annual" };
+  if (amount >= 20 && amount < 40) return { plan: "family_plus", billingPeriod: "monthly" };
+  // Everything else in the single-digit / low-teens range → premium monthly
+  return { plan: "premium", billingPeriod: "monthly" };
 }
 
 // ─── Handle Payment Completed ───
@@ -150,11 +154,12 @@ async function handlePaymentCompleted(payload: Record<string, unknown>) {
     return;
   }
 
-  const plan = determinePlan(totalAmount);
+  const { plan, billingPeriod } = determinePlan(totalAmount);
 
-  console.log(`[iCount] Payment completed: household=${householdId}, plan=${plan}, amount=${totalAmount}, doc=${doctype}-${docnum}`);
+  console.log(`[iCount] Payment completed: household=${householdId}, plan=${plan}, period=${billingPeriod}, amount=${totalAmount}, doc=${doctype}-${docnum}`);
 
   // Upsert subscription (L13: include last_docnum for idempotency)
+  // NOTE: billingPeriod not persisted to `subscriptions` table yet — add column when needed.
   const { error } = await supabase.from("subscriptions").upsert({
     household_id: householdId,
     status: "active",
@@ -170,7 +175,9 @@ async function handlePaymentCompleted(payload: Record<string, unknown>) {
 
   // Send WhatsApp confirmation
   const msg = plan === "premium"
-    ? "🎉 תודה שהצטרפתם ל-Premium! מהיום אני עובדת ללא הגבלה. בואו נמשיך!"
+    ? (billingPeriod === "annual"
+        ? "🎉 תודה שהצטרפתם ל-Premium לשנה! מהיום אני עובדת ללא הגבלה. בואו נמשיך!"
+        : "🎉 תודה שהצטרפתם ל-Premium! מהיום אני עובדת ללא הגבלה. בואו נמשיך!")
     : "🎉 תודה שהצטרפתם ל-Family+! עד 3 קבוצות, ללא הגבלה. בואו נמשיך!";
 
   await sendWhatsAppMessage(householdId, msg);

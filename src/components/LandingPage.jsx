@@ -65,7 +65,7 @@ const CONTENT = {
     faq: [
       { q: "איך שלי עובדת?", a: "שלי היא פיתוח ישראלי שמארגן לכם את הבית דרך ווטסאפ - רשימות קניות, תזכורות, מטלות, יומן והוצאות, הכל במקום אחד. כתבו \u0022חלב\u0022 והיא תוסיף לרשימה, \u0022תזכירי לי...\u0022 והיא תזכיר בזמן. שלי עובדת בצ\u0027אט אישי ובקבוצות, לבד או עם כל מי שגר בבית. היא זוכרת את הסגנון שלכם עם הזמן: כינויים, מוצרים קבועים, הרגלים." },
       { q: "אפליקציה לצפייה נוחה בכל הרשימות שלכם", a: "רשימת הקניות, המטלות, התזכורות, התקציב ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה - אין יותר נוח מזה!" },
-      { q: "כמה זה עולה?", a: "חינם לגמרי עד 40 פעולות בחודש, כל חודש!\nצריכים יותר? פרימיום ללא הגבלה ב-9.90 \u20AA לחודש בלבד." },
+      { q: "כמה זה עולה?", a: "חינם לגמרי עד 40 פעולות בחודש, כל חודש!\nצריכים יותר? הצטרפו לשלי פרימיום ללא הגבלה ב-14.90 \u20AA לחודש בלבד\nאו 149 \u20AA לשלי פרימיום לשנה שלמה (חודשיים במתנה!)" },
       { q: "מה עם הפרטיות?", a: "שלי שומרת למשך 30 יום את הודעות הטקסט ואת ההודעות הקוליות הקצרות שתשלחו אליה. היא לא שומרת תמונות או וידאו. לאחר 30 יום, כל המידע נמחק אלא אם תבקשו אחרת משלי. המידע שלכם שמור ומאובטח ורק אתם רואים אותו. אף אחד אחר לא - כולל אותנו." },
       { q: "איך מתחילים? ואיך מפסיקים?", a: "שלחו הודעה לשלי בווטסאפ, היא מתחילה לעזור מיד. רוצים שכולם בבית ישתתפו? הוסיפו אותה לקבוצת ווטסאפ. רוצים להפסיק? פשוט תפסיקו לכתוב. כל המידע נמחק אוטומטית, בלי התחייבות." },
       { q: "למי שלי מתאימה?", a: "לכולם! גרים לבד? שלי מנהלת לכם קניות, תזכורות וסידורים. עם שותפים? הוסיפו אותה לקבוצת הדירה והיא תתאם מי קונה, מי מנקה, הכל. משפחה? שלי מנהלת את כל הבית." },
@@ -118,7 +118,7 @@ const CONTENT = {
     faq: [
       { q: "How does Sheli work?", a: "Sheli is a family task coordination helper on WhatsApp — shopping lists, reminders, chores, calendar and expenses, all in one place. Say \u0022milk\u0022 and it's on the list, say \u0022remind me...\u0022 and she'll remind you on time. Sheli works in private chat and in groups, alone or with everyone in your home. She remembers your style over time: nicknames, regular products, routines." },
       { q: "An app for easy viewing of all your lists", a: "Your shopping list, tasks, reminders, budget and calendar sync in real time, from both WhatsApp and the app \u2014 it doesn't get easier than this!" },
-      { q: "How much does it cost?", a: "40 actions per month for free, every month!\nNeed more? Unlimited Premium for just $2.70/month." },
+      { q: "How much does it cost?", a: "40 actions per month for free, every month!\nNeed more? Join Sheli Premium — unlimited for just 14.90 \u20AA/month\nor 149 \u20AA for a full year of Sheli Premium (2 months free!)" },
       { q: "What about privacy?", a: "Sheli stores text messages and short voice messages you send her for 30 days. She doesn't store photos or videos. After 30 days, all data is deleted unless you ask Sheli otherwise. Your data is secure and only you can see it. Nobody else \u2014 including us." },
       { q: "How do I start? And stop?", a: "Send Sheli a message on WhatsApp, she starts helping right away. Want everyone at home to join? Add her to a WhatsApp group. Want to stop? Just stop writing. All data is deleted automatically, no strings attached." },
       { q: "Who is Sheli for?", a: "Everyone! Living alone? Sheli manages your shopping, reminders and daily tasks. Roommates? Add her to the apartment group and she'll coordinate who buys, who cleans, everything. Family? Sheli manages the whole household." },

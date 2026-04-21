@@ -379,8 +379,8 @@ Loading → Welcome (lang + features + WhatsApp mock) → Auth (signin/signup/fo
 
 ## Key Business Decisions
 - **WhatsApp-first:** Bot in family group is primary interface, web app is dashboard
-- **Freemium:** 30 free actions/month, then upgrade prompt IN the WhatsApp group
-- **Pricing:** Free / Premium 9.90 ILS / Family+ 24.90 ILS
+- **Freemium:** 40 free actions/month (raised from 30 a few days before launch), then upgrade prompt IN the WhatsApp group. Soft-warning fires at 35.
+- **Pricing (launch 2026-04-23):** Free (40 actions/month) / Premium 14.90 ILS/month or 149 ILS/year (~17% saving) / Family+ 24.90 ILS (dark-launched). Raised from 9.90 → 14.90 pre-launch to avoid the "toy tax" psychological bucket and leave room to discount later. No grandfathering; if anyone asks why not 9.90, Sheli explains honestly that AI costs came in higher than expected. Pre-existing "30 vs 40 actions" copy bug (paywall said 30, landing/FAQ said 40) fixed in the same change.
 - **Israel-first:** Hebrew primary, expand to US via Facebook Messenger (free bot API)
 - **WhatsApp API:** Whapi.Cloud Sandbox (free, limited) → Meta Cloud API (apply for OBA, Phase 1)
 - **Billing provider:** iCount (icount.co.il) — 0.5% + ₪0.22/standing order charge, auto חשבונית מס. Terminal not yet activated.

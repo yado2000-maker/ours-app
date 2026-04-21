@@ -82,9 +82,18 @@ async function handleCheckoutCompleted(session: Record<string, unknown>) {
     return;
   }
 
-  // Determine plan from amount (9.90 ILS = Premium, 24.90 ILS = Family+)
+  // Determine plan from amount in agorot.
+  // 1490 = Premium monthly (14.90 ILS), 14900 = Premium annual (149 ILS), 2490 = Family+ monthly (24.90 ILS).
+  // Legacy: 990 (9.90 ILS) still resolves to premium for any grandfathered charges.
   const amountTotal = (session.amount_total as number) || 0;
-  const plan = amountTotal <= 1200 ? "premium" : "family_plus"; // 990 agorot = 9.90 ILS
+  let plan: "premium" | "family_plus" = "premium";
+  let billingPeriod: "monthly" | "annual" = "monthly";
+  if (amountTotal >= 14000 && amountTotal <= 16000) {
+    billingPeriod = "annual"; // ~149 ILS
+  } else if (amountTotal >= 2000 && amountTotal < 4000) {
+    plan = "family_plus"; // ~24.90 ILS
+  }
+  console.log(`[Stripe] Resolved amount=${amountTotal} → plan=${plan}, period=${billingPeriod}`);
 
   console.log(`[Stripe] Checkout completed: household=${householdId}, plan=${plan}, customer=${customerId}`);
 
