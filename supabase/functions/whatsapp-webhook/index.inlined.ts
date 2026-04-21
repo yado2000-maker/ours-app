@@ -1148,7 +1148,42 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
 - Construct state (סמיכות): ONLY the second noun gets ה. "שם המשתמש" NOT "השם המשתמש". "רשימת הקניות" NOT "הרשימת הקניות". "מספר הטלפון" NOT "המספר הטלפון".
 - Verb forms — common mistakes to avoid:
   - "תפסת אותי" NOT "נתפסת אותי" (you caught me — pa'al, not nif'al). When playfully caught/teased: "חח תפסת אותי!" or "אוקיי, תפסת אותי 🙈". "נתפסת" means "I got caught" (passive reflexive), which is wrong here.
-- NEVER correct the user's Hebrew gender forms. If they write "אני צריך" — they are male. If "אני צריכה" — female. Their verb form IS their gender. Do not add asterisks (*), do not "fix" their grammar, do not suggest alternative forms. Match THEIR gender in your reply.`;
+- NEVER correct the user's Hebrew gender forms. If they write "אני צריך" — they are male. If "אני צריכה" — female. Their verb form IS their gender. Do not add asterisks (*), do not "fix" their grammar, do not suggest alternative forms. Match THEIR gender in your reply.
+- GENDER LOCK — ABSOLUTE RULE FOR 1:1 CHATS:
+  - If gender is KNOWN (male or female), you MUST use that singular form in EVERY SINGLE reply. Not sometimes — every time. One reply masculine, next reply plural = BROKEN.
+  - FEMALE → את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת, בואי, תגידי לי, בשבילך, איתך. NEVER אתם / אתן / רוצים / תנסו / צריכים / צריכות.
+  - MALE → אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב, בוא, תגיד לי, בשבילך, איתך. NEVER אתם / רוצים / תנסו / צריכים.
+  - Plural (אתם / אתן / רוצים / תנסו) is ONLY for: (a) truly unknown gender, (b) addressing the whole household / group, (c) two-or-more people together. Plural to a single known person is WRONG and feels robotic, not "more personal".
+  - Do NOT drift to plural mid-conversation because it "feels warmer". It does the opposite — it breaks intimacy. A known woman gets singular feminine EVERY reply.
+  - BAD for a female user named נועה: "אתם רוצים שאזכיר לכם?" / "נסו להוסיף" / "צריכים עוד משהו?"
+  - GOOD for נועה: "את רוצה שאזכיר לך?" / "תנסי להוסיף" / "צריכה עוד משהו?"
+  - BAD for a male user named דני: "אתם רוצים?" / "צריכים משהו?"
+  - GOOD for דני: "אתה רוצה?" / "צריך משהו?"
+  - Singular pronouns לך / אותך / בשבילך / איתך are identical for both genders in unpointed Hebrew — use them freely, they're already personal.
+- PROPER SPELLING — כתיב מלא (unpointed Hebrew):
+  - Two-word phrases, NEVER one word: "אי אפשר" (not איאפשר), "כל כך" (not כלכך), "על ידי" (not עלידי), "בכל אופן" (not בכלאופן), "לא מעט" (not לאמעט).
+  - One-word forms, NEVER split: "בסדר" (not ב סדר), "הכל" (not ה כל), "לפעמים" (not ל פעמים).
+  - "אכפת לי" (no yud before כ), NOT "איכפת לי".
+  - "התכוונתי" when meaning "I meant", NOT "כיוונתי" (which means "I aimed/directed").
+  - Sheli's own apology = feminine: "אני מצטערת" / "סורי 🙈", NEVER "אני מצטער".
+  - Borrowed foreign sounds use apostrophe: צ'יפס, ג'ינס, ג'ירפה. Gershayim (") only for abbreviations: צה"ל, ארה"ב.
+  - Don't wrap Hebrew text in regular double-quotes ("). If you need quotes, use «» or no quotes.
+- PLURAL FALLBACK — when plural is actually CORRECT (don't over-correct):
+  - Addressing the whole household in a group chat: "יאללה חבר'ה, תזכרו לקנות חלב".
+  - Addressing multiple specific people: "תעדכנו אותי כשסיימתם".
+  - Truly unknown gender in 1:1 (name not recognized, no text signal yet): plural fallback until gender is detected.
+  - CTA-style imperatives in marketing copy / UI strings to unknown visitors: "הירשמו" / "התחברו" / "נסו".
+  - Hebrew has NO plural-for-respect (unlike French "vous"). Plural to one known person = distant, robotic, wrong.
+- NEVER insert Latin letters mid-Hebrew sentence. Hebrew reply stays Hebrew.
+  - Proper nouns that are Latin-native are OK: "WhatsApp", "Google", "API", "Claude", "iCount", URLs.
+  - NEVER transliterate a Hebrew word to Latin: write "טכנולוגיה" — NEVER "Technologia" / "technologia" / "giaI" or any Latin fragment.
+  - If a word feels hard to spell in Hebrew, use the closest Hebrew alternative (מערכת / כלים / תוכנה) — do NOT fall back to Latin letters.
+  - If you catch Latin characters appearing mid-reply (not a known proper noun from the whitelist above), STOP and rewrite in Hebrew before sending.
+- IDIOMATIC SENTENCE OPENERS — use the definite article when Hebrew expects it:
+  - "honestly / to be honest" = "האמת?" / "האמת היא ש..." — NEVER bare "אמת?" (which means literally "truth?" and sounds stilted).
+  - "the thing is" = "העניין הוא ש..." — NEVER bare "עניין".
+  - "the problem is" = "הבעיה היא ש..." — NEVER bare "בעיה".
+  - Rule of thumb: in Hebrew, abstract nouns used as sentence openers almost always take ה-. English "honestly, I don't know" maps to "האמת שאני לא יודעת" — not "אמת, אני לא יודעת".`;
 
 function buildReplyPrompt(
   classification: ClassificationOutput,
@@ -3039,10 +3074,21 @@ const MALE_NAMES = new Set([
   "יניב", "יעקב", "יצחק", "ישי", "לביא", "מושה", "משה", "מתן", "נדב",
   "נחום", "ערן", "פלג", "צחי", "קובי",
   "רועה", "רז", "שגיא", "שי", "שמואל", "תום", "תומר",
+  // More common Hebrew male names
+  "יוסף", "אלעד", "ברק", "יהושע", "רן", "אוריאל", "נתנאל", "רפאל",
+  "שלמה", "גדעון", "אבנר", "בנימין", "יאיר", "אברהם", "מרדכי", "שאול",
+  "שמעון", "ראובן", "זאב", "אורי", "עוז", "יהודה", "ליאון", "מיכאל",
+  "אלירן", "אביב", "דרור", "גלעד", "ישראל", "אוהד", "אופיר", "עופר",
+  "עמרי", "ספיר", "תמיר", "חנן", "נועם", "שקד", "אליעזר", "עמנואל",
+  "ארי", "רוי", "יוני", "יובל", "עידן",
   // English
   "david", "michael", "jonathan", "adam", "ben", "tom", "guy",
   "yaron", "dan", "omer", "omar", "ido", "nir", "eyal", "gur",
   "yakov", "jacob", "itai", "itay", "alon", "eran", "matan",
+  "yosef", "yossi", "elad", "barak", "ran", "refael", "shlomo",
+  "avner", "binyamin", "yair", "avraham", "shaul", "shimon",
+  "yehuda", "leon", "mikhael", "eliran", "aviv", "dror", "gilad",
+  "israel", "ohad", "ofir", "omri", "tamir", "hanan", "eliezer",
 ]);
 
 const FEMALE_NAMES = new Set([
@@ -3055,10 +3101,24 @@ const FEMALE_NAMES = new Set([
   "נטלי", "נעמה", "נעמי", "סיון", "ענבל", "ענת", "פנינה",
   "צופיה", "קרן", "רבקה", "רוית", "רותם", "רונית", "רחל", "שולמית",
   "שלומית", "שני", "שרה", "תאיר", "תהילה",
+  // More common Hebrew female names
+  "איילה", "אסתר", "גליה", "דליה", "יפה", "מרים", "עדנה",
+  "רינה", "שושנה", "תמי", "אביטל", "אילה", "אלינור",
+  "גלית", "דבורה", "הודיה", "זיוה", "חנה", "יהלי", "יסמין",
+  "כנרת", "ליה", "ליאל", "לירון", "מאי", "מורן", "נופר", "נטליה",
+  "סופיה", "סמדר", "עינת", "עפרה", "פסיה", "צילה", "ריטה",
+  "עלמה", "עדיה", "אופירה",
+  "אמילי", "תהל", "אריאלה", "דניאלה", "מיטל", "יפעת",
+  "סיוון", "חגית", "ורד", "חיה", "ענבר", "דורית", "שירלי", "ליהיא",
   // English
   "noa", "noah", "maya", "shira", "tamar", "michal", "lina", "mia", "lin",
   "yael", "neta", "dana", "hila", "noga", "natali", "natalie",
   "oriane", "orian", "liona", "maayan", "sarah", "rachel",
+  "ayala", "esther", "miriam", "edna", "rina", "shoshana", "tami",
+  "avital", "hodaya", "hannah", "hana", "yasmin", "yasmine",
+  "sophia", "sofia", "einat", "ofra", "rita", "alma", "emily",
+  "ariella", "daniella", "meital", "yifat", "sivan", "hagit",
+  "vered", "inbar", "dorit", "shirli", "shirley", "lihi",
 ]);
 
 // Names that are unisex — explicitly don't guess from name alone (detect from message text instead)
@@ -3347,11 +3407,13 @@ PERSONALITY: Like a witty, organized friend who happens to have superpowers.
 - Match their energy: trolling gets witty trolling back, warmth gets warmth
 - Keep replies under 300 characters. This is WhatsApp, not email.
 - Sheli speaks feminine first person always (הוספתי, not הוספנו).
-- GENDERED ADDRESS: Check the CONVERSATION STATE for "gender" field:
-  - "male" → use masculine: אתה, רוצה (no ה), תנסה, תכתוב, שלח, צריך
-  - "female" → use feminine: את, רוצה, תנסי, תכתבי, שלחי, צריכה
-  - null/unknown → use plural (gender-neutral): אתם, רוצים, נסו, כתבו, שלחו, צריכים
-  This is critical for natural Hebrew. Getting gender right makes Sheli feel like a real friend.
+- GENDERED ADDRESS — STRICT, NO DRIFT: Check the CONVERSATION STATE for "gender" field. This is a 1:1 chat — one human on the other side. Once gender is KNOWN, LOCK IT for every reply in this conversation. Do NOT switch to plural between replies.
+  - "male" → ALWAYS masculine singular: אתה, רוצה (no ה), תנסה, תכתוב, שלח, צריך, יודע, חושב, בוא, תגיד
+  - "female" → ALWAYS feminine singular: את, רוצה, תנסי, תכתבי, שלחי, צריכה, יודעת, חושבת, בואי, תגידי
+  - null/unknown → ONLY THEN fallback to plural: אתם, רוצים, נסו, כתבו, שלחו, צריכים
+  - Plural to a single known person (female or male) is WRONG. It does NOT sound "more personal" or "safer" — it breaks intimacy and sounds like a form letter. The human reads plural as "she's talking past me to a crowd".
+  - If you catch yourself writing "אתם / נסו / רוצים / צריכים" to a known female or male, STOP and rewrite in singular before sending.
+  - לך / אותך / בשבילך / איתך are gender-neutral in unpointed Hebrew — prefer them for personal touch, they work for both.
 - When wrong — apologize with humor: "חח סורי! 🙈" not "סליחה, אני מצטערת"
 - Emoji-only messages → return matching emoji. No text unless it adds warmth.
 - Never repeat same phrasing. Every reply sounds fresh and different.
@@ -4481,7 +4543,7 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   const contextBlock = `
 CONVERSATION STATE:
 - User name: ${userName || "unknown"}
-- User gender: ${userGender || "unknown (use plural אתם)"}
+- User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Message #${msgCount} in this conversation
 - Items collected so far: ${JSON.stringify(existingItems)}
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
@@ -4510,10 +4572,40 @@ FIRST MESSAGE: This is the user's first reply after your welcome. Brief warmth i
 ${ambiguousOptions && !nameAskedAlready ? `\nNAME SPELLING: The user's name "${userName}" could be spelled ${ambiguousOptions.join(" or ")} in Hebrew. In your FIRST reply, ask naturally which spelling they prefer. Example: "אגב, ${ambiguousOptions[0]} או ${ambiguousOptions[1]}? אני אוהבת לדייק 😊". After asking, include a name_correction action with their answer. This is a ONE-TIME question — do not ask again.` : ""}
 ${qaMatch ? `\nTOPIC HINT: User is asking about "${qaMatch.topic}". Key facts: ${qaMatch.keyFacts}` : ""}
 ${convo.context?.needs_admit_welcome === true ? `
-SERVER UPGRADE CONTEXT (internal — do NOT proactively mention):
-- Sheli's infrastructure was recently upgraded and some earlier items (shopping, tasks, reminders) from before the upgrade may not be in the current lists.
-- Reply normally to what the user says. Do NOT open with "חזרתי" / "שדרגתי" / any "I'm back" framing.
-- ONLY if the user asks about something missing (e.g. "איפה X שהוספתי?", "למה אין לי את ...?", "מחקת לי משהו?") — briefly acknowledge: "סליחה, החלפתי שרתים ליותר חזקים ויכול להיות שכמה דברים הלכו לאיבוד. תגיד/י לי מה היה ואני אוסיף שוב 💛". Otherwise act as usual.` : ""}`;
+POST-ADMIT CONTEXT (internal — critical for tone):
+- The operator has JUST personally greeted this user on your behalf via WhatsApp Web.
+  You are NOT on first contact. This is turn 2, mid-conversation.
+- Do NOT open with "היי אני שלי" / "נעים מאד" / any self-introduction.
+- Do NOT proactively tour capabilities (only if asked — see pattern 3 below).${convo.context?.name ? `
+- User's name is "${convo.context.name}" — AUTHORITATIVE spelling confirmed by the operator. Use EXACTLY this spelling. Do NOT re-hebrewize, do NOT propose alternate spellings, do NOT emit a name_correction action.` : ""}${convo.context?.gender === "f" ? `
+- User is FEMALE — use feminine 2nd-person Hebrew throughout ("תוסיפי", "תזכרי", "את רוצה?"). Never slip into masculine forms.` : ""}${convo.context?.gender === "m" ? `
+- User is MALE — use masculine 2nd-person Hebrew throughout ("תוסיף", "תזכור", "אתה רוצה?"). Never slip into feminine forms.` : ""}
+
+TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
+
+1. GREETING-ONLY (user replies just "היי" / "hi" / "שלום" / "מה קורה" / emoji-only):
+   Match their energy, warm + brief, invite action. NO intro.
+   Example: "היי [name]! 💛 מה צריך?" (replace [name] with user's name if known) / "שלום! איך אפשר לעזור?"
+
+2. ACTIONABLE (shopping/task/reminder/event/expense):
+   Execute normally + brief warm ack. NO "שמחה לעזור", NO "נעים מאד".
+   Example: "מעולה, הוספתי חלב וביצים 🛒" / "סידור, תזכורת מחר ב-9 📞"
+
+3. CAPABILITIES QUESTION ("מה את יודעת?" / "במה את עוזרת?" / "מה את יכולה?" / "what can you do?"):
+   THIS is the one case where a short tour is appropriate. No intro, just the list:
+   "אני יכולה לעזור עם:
+   🛒 רשימות קניות (דוגמה: תוסיפי חלב)
+   ⏰ תזכורות (דוגמה: תזכירי לי מחר ב-9 להתקשר לאמא)
+   ✅ מטלות (דוגמה: תוסיפי מטלה לכבס)
+   📅 אירועים (דוגמה: פגישה ביום שלישי ב-10)
+   💸 הוצאות (דוגמה: שילמתי 200 על חשמל)
+   וגם אם תוסיפו אותי לוואטסאפ המשפחתי — אני אסדר הכל לכולם 🧡"
+
+4. MISSING-ITEM QUESTION ("איפה X?" / "למה אין לי...?" / "מחקת לי?"):
+   "סליחה, החלפתי שרתים ליותר חזקים ויכול להיות שכמה דברים הלכו לאיבוד.
+    תגידי לי מה היה ואני אוסיף שוב 💛"
+
+5. OTHERWISE: act as in any normal conversation with a known user.` : ""}`;
 
   try {
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -4666,7 +4758,7 @@ PERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${hous
 
 CONVERSATION STATE:
 - User name: ${userName || "unknown"}
-- User gender: ${userGender || "unknown (use plural אתם)"}
+- User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Items collected so far: ${JSON.stringify(existingItems)}
 
 ${buildDayAnchor()}
@@ -5331,13 +5423,32 @@ async function handleAdminCommand(
   const text = (message.text || "").trim();
   if (!text.startsWith("/")) return false;
 
-  // /admit 972XXXXXXXX [name]
+  // /admit 972XXXXXXXX [name] [m|f]
   // Accept both normalized (972552582290) and WhatsApp display format (+972 55-258-2290)
   // for easy copy-paste from WhatsApp. Strip +, spaces, and dashes before DB lookup.
-  const admitMatch = text.match(/^\/admit\s+(\+?[\d\s\-]+?\d)(?:\s+([^\d\s\-].*?))?\s*$/);
+  // Optional gender flag (m or f) accepted in ANY position relative to name —
+  // Hebrew/Latin RTL mixing can flip visual order; bidi marks are stripped.
+  const admitMatch = text.match(/^\/admit\s+(\+?[\d\s\-]+?\d)\s*(.*?)\s*$/s);
   if (admitMatch) {
     const parsedPhone = admitMatch[1].replace(/\D/g, "");
-    const name = admitMatch[2]?.trim() || null;
+
+    // Strip invisible bidi marks (LRM/RLM/embeds/overrides/isolates) that RTL
+    // keyboards inject when Hebrew and Latin letters are mixed.
+    const rest = admitMatch[2]
+      .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
+      .trim();
+
+    let name: string | null = null;
+    let gender: "m" | "f" | null = null;
+
+    // Tokenize by whitespace; find m/f at ANY position (before or after name).
+    const tokens = rest.split(/\s+/).filter(Boolean);
+    const genderIdx = tokens.findIndex((t) => /^[mf]$/i.test(t));
+    if (genderIdx >= 0) {
+      gender = tokens[genderIdx].toLowerCase() as "m" | "f";
+      tokens.splice(genderIdx, 1);
+    }
+    if (tokens.length > 0) name = tokens.join(" ");
     if (parsedPhone.length < 9 || parsedPhone.length > 15) {
       await sendAndLog(prov, {
         groupId: message.groupId,
@@ -5373,10 +5484,9 @@ async function handleAdminCommand(
     }
 
     // Build context — preserve existing + merge admit metadata.
-    // needs_admit_welcome triggers a one-time deterministic "I'm back"
-    // welcome on the user's next ping (see handleDirectMessage). This
-    // opens a clean restart without pretending Sheli remembers the
-    // pre-admit conversation — honest + low-friction + zero LLM cost.
+    // needs_admit_welcome is surfaced to Sonnet as a turn-2 mid-conversation
+    // context hint (operator has already greeted manually via WhatsApp Web).
+    // name + gender are authoritative spelling/form locks for Sheli's reply.
     const existingContext = (existing?.context as Record<string, unknown>) || {};
     const newContext: Record<string, unknown> = {
       ...existingContext,
@@ -5385,6 +5495,7 @@ async function handleAdminCommand(
       needs_admit_welcome: true,
     };
     if (name) newContext.name = name;
+    if (gender) newContext.gender = gender;
 
     const { error } = await supabase
       .from("onboarding_conversations")
@@ -5413,14 +5524,14 @@ async function handleAdminCommand(
     const wasExisting = existing ? ` (was state=${existing.state || "null"})` : " (new row)";
     await sendAndLog(prov, {
       groupId: message.groupId,
-      text: `✅ admitted ${parsedPhone}${name ? ` — ${name}` : ""}${wasExisting}\nנכנסים לפלואו הרגיל בפינג הבא`,
+      text: `✅ admitted ${parsedPhone}${name ? ` — ${name}` : ""}${gender ? ` (${gender})` : ""}${wasExisting}\nנכנסים לפלואו הרגיל בפינג הבא`,
     }, {
       householdId: "operator",
       groupId: message.groupId,
       inReplyTo: message.messageId,
       replyType: "admin_command_ok",
     });
-    console.log(`[admin /admit] ${parsedPhone}${name ? ` (${name})` : ""}${wasExisting}`);
+    console.log(`[admin /admit] ${parsedPhone}${name ? ` (${name})` : ""}${gender ? ` [${gender}]` : ""}${wasExisting}`);
     return true;
   }
 
@@ -5429,7 +5540,8 @@ async function handleAdminCommand(
     await sendAndLog(prov, {
       groupId: message.groupId,
       text: "Commands:\n" +
-        "/admit 972XXXXXXXXX [שם] — override waitlist redirect\n" +
+        "/admit 972XXXXXXXXX [שם] [m|f] — override waitlist redirect\n" +
+        "  (name + gender optional, any order; m/f picks Hebrew verb form)\n" +
         "  (refuses to downgrade chatting/personal/active/onboarded)\n" +
         "/help — this message",
     }, {
