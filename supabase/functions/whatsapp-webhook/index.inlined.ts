@@ -1511,6 +1511,9 @@ The expense query data is provided in the ACTION JUST TAKEN section. Format it n
 - Zero state: "עדיין לא רשמנו הוצאות ב[period]. ספרו לי כשמשלמים — 'שילמתי X על Y'."
 CRITICAL: NEVER fabricate totals. If query returned 0 or an error, say so honestly.
 
+COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21):
+If your visible reply contains ANY commitment phrase promising a future reminder — "אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "כל בוקר ב-", "בכל X ב-", "I'll remind", "I will remind", "אני אזכיר" — you MUST also emit a corresponding REMINDER or RECURRING_REMINDER metadata block below. A commitment in words without the metadata block is a LIE: the user reads "אזכיר יומית ב-20:00" and believes Sheli scheduled it, but nothing actually gets saved, the reminder never fires, and the user loses trust when they notice (see: Netzer 2026-04-21, pill reminder confirmed verbally 2026-04-20 but never emitted → missed firing → confronted next day). This is the WORST failure mode. If you cannot construct a valid block because time/content/days are unclear, DO NOT commit in the visible reply — ASK instead ("באיזו שעה בדיוק?" / "אילו ימים?") and wait for the answer.
+
 REMINDERS: When intent is add_reminder:
 - Parse the time expression into an ISO 8601 timestamp in Israel timezone (Asia/Jerusalem, currently UTC+3).
 - Time parsing rules:
@@ -1756,6 +1759,14 @@ function cleanReminderFromReply(reply: string): string {
  * Idempotent: safe to call on already-stripped replies (regex finds nothing).
  * Does NOT touch MEMORY capture (handled separately by the 4820 path; out of scope here).
  */
+// Commitment-phrase pattern for the COMMITMENT-EMISSION safety net.
+// Matches Sonnet replies that verbally promise a future reminder without
+// emitting a REMINDER/RECURRING_REMINDER/ACTIONS block. Post-rescue check
+// logs a clear WARN so these can be queried in production logs for triage.
+// Keep the pattern TIGHT — false positives pollute logs. Anchored commitment
+// verbs ("אזכיר"/"נזכיר"/"אזכור") + recurring-cadence phrases with a time.
+const COMMITMENT_PHRASE_REGEX = /(?:^|\s|\b)(?:אזכיר|נזכיר|אזכור|אני\s+אזכיר|אני\s+אזכור|I['\u2019]?ll\s+remind|I\s+will\s+remind)(?:\s|$|[.,!?])|(?:יומית|כל\s+יום|כל\s+ערב|כל\s+בוקר|בכל\s+יום|בכל\s+ערב|every\s+day|nightly|daily)\s+ב[-\s]?\d{1,2}/i;
+
 async function rescueRemindersAndStrip(
   reply: string,
   classification: ClassificationOutput,
@@ -1763,6 +1774,8 @@ async function rescueRemindersAndStrip(
   householdId: string,
 ): Promise<string> {
   if (!reply) return reply;
+
+  let rescueSaveCount = 0;
 
   const allReminders = extractRemindersFromReply(reply);
 
@@ -1790,7 +1803,10 @@ async function rescueRemindersAndStrip(
       created_by_name: message.senderName,
     });
     if (error) console.error("[ReminderRescue] Insert error:", error);
-    else console.log(`[ReminderRescue] Saved from direct_address path: "${reminderData.reminder_text}" @ ${reminderData.send_at}`);
+    else {
+      console.log(`[ReminderRescue] Saved from direct_address path: "${reminderData.reminder_text}" @ ${reminderData.send_at}`);
+      rescueSaveCount++;
+    }
   }
 
   // EVENT rescue (2026-04-20). Same shape as the REMINDER rescue above. Sonnet
@@ -1860,11 +1876,28 @@ async function rescueRemindersAndStrip(
       continue;
     }
     console.log(`[RecurringReminderRescue] Parent row created: "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`);
+    rescueSaveCount++;
     // Immediately materialize the next 7 days so the first instance fires even before
     // the daily cron picks it up. The PG function is idempotent per (parent_id, date).
     const { data: count, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
     if (matErr) console.warn("[RecurringReminderRescue] Immediate materialize failed:", matErr.message);
     else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
+  }
+
+  // COMMITMENT-EMISSION safety net (2026-04-21). If Sonnet's visible reply contains
+  // commitment language but no REMINDER/RECURRING_REMINDER/EVENT block was extracted
+  // and saved, log a WARN with the reply text. These are the cases where the user
+  // sees "אזכיר יומית ב-20:00" but nothing is actually scheduled — the single worst
+  // trust-breaker on the product. Query production logs for "[CommitmentWithoutEmission]"
+  // to find all occurrences and proactively repair affected households.
+  const allEventCount = extractEventsFromReply(reply).length;
+  const totalEmitted = rescueSaveCount + allEventCount;
+  if (totalEmitted === 0 && COMMITMENT_PHRASE_REGEX.test(reply)) {
+    console.warn(
+      `[CommitmentWithoutEmission] Reply contains commitment language but zero metadata blocks saved. ` +
+      `household=${householdId} sender=${message.senderPhone} msgId=${message.messageId} ` +
+      `reply=${JSON.stringify(reply.slice(0, 400))}`
+    );
   }
 
   return cleanReminderFromReply(stripMemoryBlocks(reply));
@@ -3572,6 +3605,7 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
 17. If your extracted action text is < 3 chars or matches a known trigger word → drop the action and ask for clarification instead.
 18. "Items collected so far" in the CONVERSATION STATE is a LIVE snapshot of the user's real data — past reminders (already fired) and past events (already happened) are pre-filtered out. So when the user asks "מה יש היום?" / "מה ברשימה?" / "what's today" — you can list these items as-is. They are all current and relevant. Reminders include a "send_at" ISO timestamp; events include a "scheduled_for" timestamp. Use these to phrase replies naturally ("יש לך מסיבה ב-18 לאפריל" — extract the date from the timestamp).
 19. BULK-INVENTION — FORBIDDEN. When the user asks you to populate a list with open-ended category criteria — "תוסיפי את כל הירקות שמתאימים למנגל", "כל התבלינים לסלט", "כל המרכיבים למרק עוף", "הכל מה שצריך לתינוק", "the whole list for a picnic" — do NOT invent 10+ items autonomously. Different families have different preferences; an invented 15-item list is noise, not help, and you'll get it wrong (see: 18 vegetables "for BBQ" including cabbage, broccoli, celery, cilantro). INSTEAD ask for the specific items: "אילו ספציפית? רשמי לי מה להוסיף ✨". If you really want to offer something, suggest 3-5 canonical items and EXPLICITLY ASK before adding: "להוסיף קישואים, חצילים, פלפל, בצל, עגבניות שרי?" — wait for a green-light, then create the actions. Never create the actions as a fait accompli.
+20. COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21): If your visible reply contains ANY commitment to a future reminder ("אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "I'll remind", "אני אזכיר"), you MUST also emit a matching ACTIONS entry — a "reminder" or "recurring_reminder" object — in the same reply. A verbal commitment with no ACTIONS entry is a LIE: the user believes Sheli scheduled it, but nothing gets saved. Netzer 2026-04-21 incident: Sheli confirmed "אזכיר יומית ב-20:00 לקחת כדור" but never added the ACTIONS object → reminder never fired → family confronted Sheli the next morning. Worst failure mode. If time or content is unclear, DO NOT commit in the visible reply — ASK ("באיזו שעה בדיוק?" / "מה להזכיר?") and wait. Silence now beats a broken promise later.
 
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
 <!--ACTIONS:[]-->
