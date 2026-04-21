@@ -5428,7 +5428,7 @@ async function handleAdminCommand(
   // for easy copy-paste from WhatsApp. Strip +, spaces, and dashes before DB lookup.
   // Optional gender flag (m or f) accepted in ANY position relative to name —
   // Hebrew/Latin RTL mixing can flip visual order; bidi marks are stripped.
-  const admitMatch = text.match(/^\/admit\s+(\+?[\d\s\-]+?\d)\s*(.*?)\s*$/s);
+  const admitMatch = text.match(/^\/admit\s+(\+?[\d\s\-]+\d)\s*(.*?)\s*$/s);
   if (admitMatch) {
     const parsedPhone = admitMatch[1].replace(/\D/g, "");
 
