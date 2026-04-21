@@ -677,6 +677,7 @@ HEBREW PATTERNS:
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
 - "מי [verb]?" = question (not add_task)
 - "מה ברשימה?" / "מה צריך לקנות?" = question (in 1:1 or group)
+- BARE INFINITIVE + "?" = question, NOT add_task. Hebrew bare-infinitive questions ("לאסוף את X?", "להביא Y?", "לקנות Z?", "לבשל W?") mean "should I/we X?" and need a YES/NO answer, not a new task. The trailing "?" is decisive — the SAME words without "?" can be a task ("לקנות מתנה" alone = add_task; "לקנות מתנה?" = question). If the message is ONLY an infinitive-phrase + optional object + "?", classify as question. Exception: if the message starts with an explicit reminder/shopping trigger ("תזכירי לי לקנות X?", "נוסיף חלב?") it keeps its original intent.
 - "אני [verb]" matching an open task = claim_task
 - Past tense matching open task ("שטפתי כלים") = complete_task
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
@@ -882,6 +883,9 @@ EXAMPLES:
 [אמא]: "מי בתור" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מי בתור"}}
 [אבא]: "מה נשאר ברשימה" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה נשאר ברשימה"}}
 [אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן"}}
+[אור]: "לאסוף את שושי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"לאסוף את שושי?"}}
+[אמא]: "להביא חלב מהמכולת?" → {"intent":"question","confidence":0.85,"entities":{"raw_text":"להביא חלב מהמכולת?"}}
+[אבא]: "לקנות מתנה לסבתא?" → {"intent":"question","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
 [אמא]: "תורמי לשטוף כלים היום?" → {"intent":"question","confidence":0.92,"entities":{"raw_text":"תורמי לשטוף כלים היום?"}}
 [אבא]: "של מי התור היום לכלים" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"של מי התור היום לכלים"}}
 [ילד]: "נכון שזה תורה ולא תורי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"נכון שזה תורה ולא תורי?"}}
@@ -1131,6 +1135,9 @@ When kids or teens troll, tease, or test you — play along! You're the cool old
 const SHARED_GROUNDING_RULES = `GROUNDING — MANDATORY:
 NEVER reference events, habits, mistakes, or scenarios that aren't explicitly in this conversation, the action results, or the family memories provided below. When roasting or joking back, use ONLY what the sender actually said or did. If you have nothing specific to reference, keep it generic and short. Do NOT invent stories, habits, or failures to sound witty.
 - If recent conversation history shows someone reacted negatively (reacted 😂/🤦/👎 to שלי) to your last message, acknowledge gracefully and ask for clarification. Don't repeat the same action.
+
+CORRECTION PRIORITY — MANDATORY:
+When the user's LATEST message contains a NAME, DATE, or DETAIL that CONTRADICTS something in the stored tasks/events/shopping/memories OR in your earlier reply, TRUST THE USER'S LATEST MESSAGE. Do NOT quote the old/wrong detail back. Example: if the stored task says "לאסוף את שושי" but the user just said "אחותו שירה" — say "סימנתי שזה בוצע ✓" or use "שירה", NEVER "המטלה 'לאסוף את שושי' בוצעה". Quoting the contradicted detail back makes you look tone-deaf. When in doubt, refer to the item abstractly ("המטלה הזאת", "that one") instead of reciting the stored title.
 
 MEMORY HONESTY — MANDATORY (2026-04-20):
 You have access ONLY to the messages in your current conversation context + the family memories + items provided below. You CANNOT "search", "check backward", "look at older chats", "review the chat history", or retrieve anything that isn't already in this prompt. Pretending otherwise is the most damaging thing you can do — it makes you look dishonest AND unhelpful.
@@ -5907,8 +5914,11 @@ async function claimAndProcessBatch(
 }
 
 // ─── Quick Undo Patterns (pre-classifier, no Haiku call needed) ───
-// Layer 1: Keyword undo — these words/phrases always mean "undo last action"
-const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב|תשכחי|ביטול|לא נכון|בעצם לא|אל תקנו|יש כבר|עזבי מזה|לא לא)(?:\s|$)/;
+// Layer 1: Keyword undo — these words/phrases always mean "undo last action".
+// Includes META-level phrases ("לא צריך להוסיף מטלה") which target the action
+// abstraction itself rather than a specific item — these bypass Layer 2's
+// item-name check because they don't reference an item.
+const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב|תשכחי|ביטול|לא נכון|בעצם לא|אל תקנו|יש כבר|עזבי מזה|לא לא|לא צריך להוסיף|לא צריך מטלה|לא צריך את זה|לא צריך בכלל|אין צורך במטלה|אין צורך להוסיף)(?:\s|$)/;
 // Layer 2: Negation + item name — "לא צריך חלב" only undoes if bot just added "חלב"
 const UNDO_NEGATIONS = /(?:לא צריך|אל תקנו|יש כבר|אין צורך|לא רוצה)/;
 
@@ -8625,35 +8635,38 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
       break;
     }
     case "add_task": {
+      // Fuzzy match mirrors the INSERT dedup path (isSameTask) — the exact-eq
+      // query used to miss when Haiku's entities.title differed from the
+      // stored row by a trailing "?", whitespace, or "את" normalization.
       const title = lastAction.entities.title || lastAction.entities.raw_text;
-      const { data: found } = await supabase
+      const { data: candidates } = await supabase
         .from("tasks")
-        .select("id, title")
+        .select("id, title, created_at")
         .eq("household_id", householdId)
-        .eq("title", title)
         .eq("done", false)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-      if (found) {
-        await supabase.from("tasks").delete().eq("id", found.id);
-        undone.push(`"${found.title}"`);
+        .limit(20);
+      const match = (candidates || []).find((row: { title: string }) => isSameTask(row.title, title));
+      if (match) {
+        await supabase.from("tasks").delete().eq("id", (match as { id: string }).id);
+        undone.push(`"${(match as { title: string }).title}"`);
       }
       break;
     }
     case "add_event": {
+      // Fuzzy title match (see add_task note). Events don't key on date here
+      // because we're undoing the MOST RECENT insert regardless of scheduled date.
       const title = lastAction.entities.title || lastAction.entities.raw_text;
-      const { data: found } = await supabase
+      const { data: candidates } = await supabase
         .from("events")
-        .select("id, title")
+        .select("id, title, created_at")
         .eq("household_id", householdId)
-        .eq("title", title)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-      if (found) {
-        await supabase.from("events").delete().eq("id", found.id);
-        undone.push(`"${found.title}"`);
+        .limit(20);
+      const match = (candidates || []).find((row: { title: string }) => isSameTask(row.title, title));
+      if (match) {
+        await supabase.from("events").delete().eq("id", (match as { id: string }).id);
+        undone.push(`"${(match as { title: string }).title}"`);
       }
       break;
     }
