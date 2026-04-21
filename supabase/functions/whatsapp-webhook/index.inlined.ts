@@ -98,7 +98,8 @@ interface ClassificationOutput {
     | "recall_memory"
     | "delete_memory"
     | "add_expense"
-    | "query_expense";
+    | "query_expense"
+    | "clear_list";
   confidence: number; // 0.0 - 1.0
   addressed_to_bot?: boolean; // true when user is talking TO Sheli (not possessive "my/mine")
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
@@ -147,6 +148,12 @@ interface ClassificationOutput {
     expense_query_period?: "this_month" | "last_month";
     expense_query_period_start?: string;
     expense_query_period_end?: string;
+    // clear_list (Kaye family 2026-04-21): bulk-clear shopping/tasks intent.
+    // target=null means ambiguous ("תמחקי את הרשימה") — executor asks which.
+    // Explicit targets ("רשימת הקניות" / "המטלות") execute without asking.
+    // Follow-up turn: when bot's last reply asked "איזו רשימה?", a bare
+    // "קניות"/"מטלות"/"הכל" reply resolves to the corresponding target.
+    clear_target?: "shopping" | "tasks" | "all" | null;
     raw_text: string;
   };
 }
@@ -188,7 +195,7 @@ interface ReplyResult {
 interface ClassifiedAction {
   // Patch D (Shira 2026-04-15): added complete_shopping_by_names + complete_tasks_all_open
   // for quote-reply completions where the executor resolves names/scopes to IDs via DB lookup.
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense";
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense" | "clear_list";
   data: Record<string, unknown>;
 }
 
@@ -627,6 +634,17 @@ INTENTS:
     RULE 1: "קניתי X ב-[amount]" = ALWAYS add_expense. Any item with a price is an expense report.
     RULE 2: "קניתי X" (no amount) = complete_shopping if X matches shopping list item, else ignore.
 - query_expense: Asking about household spending. Triggers: "כמה שילמנו", "כמה הוצאנו", "כמה עלה לנו", "תסכמי הוצאות", "סיכום הוצאות", "מה ההוצאות". Has a period (this_month/last_month) and optional category.
+- clear_list: User asks to bulk-erase all items of a list. Verbs: "תמחקי", "מחקי", "נקי", "תאפסי", "אפסי", "תנקי", "clear", "erase", "reset", "wipe", "start over", "התחלה מחדש". MUST specify or imply which list. Fill entities.clear_target:
+    target="shopping" when list is EXPLICIT shopping: "רשימת הקניות", "את הקניות", "shopping list", "the groceries"
+    target="tasks" when list is EXPLICIT tasks: "את המטלות", "רשימת המטלות", "task list", "the chores"
+    target="all" when user says "הכל" / "everything" / "all the lists" / "שתי הרשימות"
+    target=null when AMBIGUOUS: bare "תמחקי את הרשימה" / "נקי הכל" / "clear the list" — no list-type word. Executor will ask user which.
+  Triggers without a list word are still clear_list (target=null). Triggers with a list word → explicit target.
+  FOLLOW-UP TURN: if the conversation shows Sheli just asked "איזו רשימה?" / "which list?" and the user replies with a bare word, classify as clear_list with target resolved:
+    "קניות" / "shopping" / "groceries" → target="shopping"
+    "מטלות" / "tasks" / "chores" → target="tasks"
+    "הכל" / "שתיים" / "שניהם" / "both" / "all" / "everything" → target="all"
+  Do NOT confuse with complete_shopping (single item "קניתי חלב") or delete_memory ("תשכחי את זה") — clear_list is ALWAYS a wholesale list erase.
 
 MEMBERS: ${ctx.members.join(", ")}
 TODAY: ${ctx.today} (${ctx.dayOfWeek})
@@ -856,6 +874,13 @@ EXAMPLES:
 [אמא]: "קניתי חלב וביצים" → {"intent":"complete_shopping","confidence":0.95,"entities":{"item_id":"s1a2","raw_text":"קניתי חלב וביצים"}}
 [שירה]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור, בירה וצלופן לרשימה\"]\nזה כבר קנינו היום" → {"intent":"complete_shopping","confidence":0.92,"addressed_to_bot":true,"entities":{"items_from_quote":["קורנפלור","בירה","צלופן"],"raw_text":"זה כבר קנינו היום"}}
 [אמא]: "[הודעה מצוטטת: \"🛒 הוספתי חלב וביצים לרשימה\"]\nיש לנו בבית" → {"intent":"complete_shopping","confidence":0.90,"addressed_to_bot":true,"entities":{"items_from_quote":["חלב","ביצים"],"raw_text":"יש לנו בבית"}}
+[עדי]: "שלי תמחקי את כל הרשימה" → {"intent":"clear_list","confidence":0.90,"addressed_to_bot":true,"entities":{"clear_target":null,"raw_text":"שלי תמחקי את כל הרשימה"}}
+[עדי]: "תמחקי את רשימת הקניות" → {"intent":"clear_list","confidence":0.95,"addressed_to_bot":true,"entities":{"clear_target":"shopping","raw_text":"תמחקי את רשימת הקניות"}}
+[ניב]: "נקי את המטלות" → {"intent":"clear_list","confidence":0.92,"addressed_to_bot":true,"entities":{"clear_target":"tasks","raw_text":"נקי את המטלות"}}
+[אבא]: "תאפסי הכל רשימה חדשה" → {"intent":"clear_list","confidence":0.88,"addressed_to_bot":true,"entities":{"clear_target":"all","raw_text":"תאפסי הכל רשימה חדשה"}}
+[אמא]: "clear the shopping list" → {"intent":"clear_list","confidence":0.95,"addressed_to_bot":true,"entities":{"clear_target":"shopping","raw_text":"clear the shopping list"}}
+[עדי]: "[שלי: \"איזו רשימה למחוק? 🧡\n🛒 קניות (25 פריטים)\n✅ מטלות (3)\nאו הכל\"]\nקניות" → {"intent":"clear_list","confidence":0.90,"addressed_to_bot":true,"entities":{"clear_target":"shopping","raw_text":"קניות"}}
+[ניב]: "[שלי: \"איזו רשימה למחוק?\"]\nהכל" → {"intent":"clear_list","confidence":0.88,"addressed_to_bot":true,"entities":{"clear_target":"all","raw_text":"הכל"}}
 [שירה]: "[הודעה מצוטטת: \"המשימות: הזמנת גז, הכנת רוטב טרייקי\"]\nהושלם" → {"intent":"complete_task","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"הושלם","completion_scope":"all_in_quote"}}
 [שירה]: "המשימות הושלמו" → {"intent":"complete_task","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"המשימות הושלמו","completion_scope":"all_open"}}
 [שירה]: "[הודעה מצוטטת: \"🛒 הוספתי קורנפלור, בירה, צלופן, מלח לימון לרשימה\"]\nרק המלח לימון חסר" → {"intent":"complete_shopping","confidence":0.88,"addressed_to_bot":true,"entities":{"items_from_quote":["קורנפלור","בירה","צלופן"],"raw_text":"רק המלח לימון חסר"}}
@@ -1149,7 +1174,16 @@ When a user says "you knew this before", "check backward", "look at old messages
 - NEVER blame "server replacement" / "החלפת שרתים" / "שדרוג" as a general excuse for missing info.
 - NEVER make up content to look cooperative.
 
-INSTEAD say honestly, weaving in the privacy reason: "אני לא שומרת הודעות (הפרטיות שלכם חשובה לי 💛) — תגידו לי שוב מה להוסיף/להזכיר ואסדר עכשיו." Variations are good — paraphrase with warmth, not performative apology. Take ownership of the limit, frame it as a privacy choice, offer to act on whatever they tell you now.`;
+INSTEAD say honestly, weaving in the privacy reason: "אני לא שומרת הודעות (הפרטיות שלכם חשובה לי 💛) — תגידו לי שוב מה להוסיף/להזכיר ואסדר עכשיו." Variations are good — paraphrase with warmth, not performative apology. Take ownership of the limit, frame it as a privacy choice, offer to act on whatever they tell you now.
+
+ACTION HONESTY — MANDATORY (Kaye family 2026-04-21):
+NEVER claim to have erased, cleared, reset, emptied, deleted, or wiped a list unless an action result in this prompt confirms it. Specifically, phrases you MUST NOT emit without an executed clear action behind them:
+- "מחקתי הכל" / "מוחקת הכל" / "ניקיתי את הרשימה" / "רשימה חדשה מתחילה עכשיו" / "אפסתי"
+- "cleared everything" / "erased the list" / "starting fresh" / "wiped"
+
+If the user asks to clear a list ("תמחקי את הרשימה" / "נקי הכל" / "clear the list" / "start over") and you don't see a clear_list action result in the prompt: say honestly you're not sure which list, ask which one, and WAIT. Do not fake the action. Fabricating erasure is the single most damaging thing you can do to trust — users rely on their lists being real.
+
+Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".`;
 
 const SHARED_APOLOGY_RULES = `APOLOGY STYLE — MANDATORY:
 When you make a mistake, misunderstand, or need to correct yourself:
@@ -3070,6 +3104,58 @@ async function executeActions(
           break;
         }
 
+        case "clear_list": {
+          // Bulk-clear shopping and/or tasks. Kaye family 2026-04-21 bug: Sheli
+          // verbally claimed "מוחקת הכל" but no action executor existed, so DB
+          // was never touched. This path emits an explicit summary ("Clear-
+          // list-executed: ...") so the reply-generator grounds its response
+          // in what actually happened — no more fabricated erasure.
+          //
+          // When target=null the executor returns a disambiguation summary
+          // with per-list counts; caller wires this into the reply.
+          const { target } = action.data as { target: "shopping" | "tasks" | "all" | null };
+          if (target === null || target === undefined) {
+            const [shoppingCount, tasksCount] = await Promise.all([
+              supabase.from("shopping_items").select("id", { count: "exact", head: true })
+                .eq("household_id", householdId).eq("got", false),
+              supabase.from("tasks").select("id", { count: "exact", head: true })
+                .eq("household_id", householdId).eq("done", false),
+            ]);
+            const sN = shoppingCount.count || 0;
+            const tN = tasksCount.count || 0;
+            summary.push(`Clear-list-disambiguate: shopping=${sN} tasks=${tN}`);
+            break;
+          }
+          let shoppingCleared = 0;
+          let tasksCleared = 0;
+          if (target === "shopping" || target === "all") {
+            const { data: ids } = await supabase.from("shopping_items")
+              .select("id").eq("household_id", householdId).eq("got", false);
+            const shoppingIds = (ids || []).map((r: any) => r.id);
+            if (shoppingIds.length > 0) {
+              const { error } = await supabase.from("shopping_items")
+                .update({ got: true, got_by: senderName || null, got_at: new Date().toISOString() })
+                .in("id", shoppingIds).eq("household_id", householdId);
+              if (error) throw error;
+              shoppingCleared = shoppingIds.length;
+            }
+          }
+          if (target === "tasks" || target === "all") {
+            const { data: ids } = await supabase.from("tasks")
+              .select("id").eq("household_id", householdId).eq("done", false);
+            const taskIds = (ids || []).map((r: any) => r.id);
+            if (taskIds.length > 0) {
+              const { error } = await supabase.from("tasks")
+                .update({ done: true, completed_by: senderName || null, completed_at: new Date().toISOString() })
+                .in("id", taskIds).eq("household_id", householdId);
+              if (error) throw error;
+              tasksCleared = taskIds.length;
+            }
+          }
+          summary.push(`Clear-list-executed: target=${target} shopping=${shoppingCleared} tasks=${tasksCleared}`);
+          break;
+        }
+
         default:
           console.warn(`[ActionExecutor] Unknown action type: ${action.type}`);
       }
@@ -4699,23 +4785,28 @@ function lrRenderShopping(items: ListItem[], label: LrLabel): string {
     if (!orderedCats.includes(cat)) orderedCats.push(cat);
   }
 
-  if (n > 10) {
-    const summaryLines = orderedCats.map((cat) => {
-      const emoji = LR_SHOPPING_EMOJI[cat] || LR_UNKNOWN_CATEGORY_EMOJI;
-      return `${emoji} ${cat} (${groups.get(cat)!.length})`;
-    });
-    return `יש לכם ${n} ${label.plural}:\n${summaryLines.join("\n")}\n\nהרשימה המלאה: sheli.ai${label.webPath}`;
-  }
-
+  // Always dump items, grouped by category, at any count. Previous n>10 cap
+  // (category counts only + web link) hid the exact symptom users need to see
+  // to clean stale items: Kaye family 2026-04-21 — Niv asked for the list,
+  // got "25 items" + category counts + link. He had no in-chat signal of WHICH
+  // items were already bought, so the list kept accumulating. Data is fetched
+  // deterministically from Postgres (no LLM → zero hallucination risk), so
+  // dumping all items is both safe and useful. ~100 items × ~20 chars ≈ 2KB,
+  // well under WhatsApp's 4096 char cap. Web link still appended when long.
   const sections = orderedCats.map((cat) => {
     const emoji = LR_SHOPPING_EMOJI[cat] || LR_UNKNOWN_CATEGORY_EMOJI;
     const catItems = groups.get(cat)!;
     const itemLines = catItems.map((i) => i.title).join("\n");
-    // Per-category counts dropped 2026-04-21 — total count is already on the opener line,
-    // and the user can see the items below each category header. Redundant noise otherwise.
     return `${emoji} ${cat}:\n${itemLines}`;
   });
-  return `יש לכם ${n} ${label.plural}:\n\n${sections.join("\n\n")}`;
+  let out = `יש לכם ${n} ${label.plural}:\n\n${sections.join("\n\n")}`;
+  if (n > 10) {
+    // Two additions for long lists: (1) gentle cleanup nudge so users can
+    // clear stale entries by saying "קניתי X" — addresses the core Kaye
+    // complaint; (2) web link for users who prefer the checkbox UI.
+    out += `\n\nאם כבר קניתם משהו, כתבו לי ואני אמחק 🧡\nהרשימה המלאה: sheli.ai${label.webPath}`;
+  }
+  return out;
 }
 
 function detectListQuery(text: string): ListType | null {
@@ -7596,6 +7687,65 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // 11b. Kaye family 2026-04-21: clear_list short-circuits Sonnet. The reply
+    // is fully deterministic from the executor's summary — disambiguation ask
+    // when target was null, or a grounded confirmation showing the exact count
+    // cleared. Skipping Sonnet here is the load-bearing part of the fix: it's
+    // the ONLY way to guarantee Sheli can't say "מחקתי" without the DB having
+    // actually changed. Every clear_list reply must be traceable to a summary
+    // line from executeActions.
+    const clearListSummary = summary.find((s) => s.startsWith("Clear-list-"));
+    if (clearListSummary) {
+      let clearReply = "";
+      if (clearListSummary.startsWith("Clear-list-disambiguate:")) {
+        const shoppingMatch = clearListSummary.match(/shopping=(\d+)/);
+        const tasksMatch = clearListSummary.match(/tasks=(\d+)/);
+        const sN = shoppingMatch ? parseInt(shoppingMatch[1], 10) : 0;
+        const tN = tasksMatch ? parseInt(tasksMatch[1], 10) : 0;
+        if (sN === 0 && tN === 0) {
+          clearReply = "שתי הרשימות כבר ריקות 🧡";
+        } else {
+          const options: string[] = [];
+          if (sN > 0) options.push(`🛒 קניות (${sN} ${sN === 1 ? "פריט" : "פריטים"})`);
+          if (tN > 0) options.push(`✅ מטלות (${tN})`);
+          if (sN > 0 && tN > 0) options.push("או הכל");
+          clearReply = `איזו רשימה למחוק? 🧡\n${options.join("\n")}`;
+        }
+      } else if (clearListSummary.startsWith("Clear-list-executed:")) {
+        const targetMatch = clearListSummary.match(/target=(\w+)/);
+        const shoppingMatch = clearListSummary.match(/shopping=(\d+)/);
+        const tasksMatch = clearListSummary.match(/tasks=(\d+)/);
+        const target = targetMatch?.[1] || "shopping";
+        const sN = shoppingMatch ? parseInt(shoppingMatch[1], 10) : 0;
+        const tN = tasksMatch ? parseInt(tasksMatch[1], 10) : 0;
+        if (target === "shopping") {
+          clearReply = sN > 0
+            ? `מחקתי ${sN} ${sN === 1 ? "פריט" : "פריטים"} מרשימת הקניות. רשימה חדשה 🧡`
+            : "רשימת הקניות כבר ריקה 🧡";
+        } else if (target === "tasks") {
+          clearReply = tN > 0
+            ? `מחקתי ${tN} ${tN === 1 ? "מטלה" : "מטלות"}. רשימה חדשה 🧡`
+            : "רשימת המטלות כבר ריקה 🧡";
+        } else if (target === "all") {
+          if (sN === 0 && tN === 0) {
+            clearReply = "שתי הרשימות כבר היו ריקות 🧡";
+          } else {
+            const parts: string[] = [];
+            if (sN > 0) parts.push(`${sN} ${sN === 1 ? "פריט" : "פריטים"} מהקניות`);
+            if (tN > 0) parts.push(`${tN} ${tN === 1 ? "מטלה" : "מטלות"}`);
+            clearReply = `מחקתי ${parts.join(" + ")}. התחלה חדשה 🧡`;
+          }
+        }
+      }
+      if (clearReply) {
+        await sendAndLog(provider, { groupId: message.groupId, text: clearReply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clear_list_reply"
+        });
+        await logMessage(message, "haiku_actionable", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+    }
+
     // 12. Increment usage counter (only for actual new actions)
     await incrementUsage(householdId);
 
@@ -8811,6 +8961,18 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
           raw_text: e.raw_text,
         },
       });
+      break;
+    }
+
+    case "clear_list": {
+      // Kaye family 2026-04-21: always emit clear_list even when target is
+      // null/undefined. The executor's null-target branch returns a disambig-
+      // uation summary (list counts), not a DB mutation — caller catches that
+      // summary pattern and sends the "איזו רשימה?" reply. Emitting the action
+      // ensures the reply-generator is grounded in what actually happened
+      // (vs. Sonnet fabricating "מוחקת הכל!" with no DB change).
+      const target = e.clear_target === undefined ? null : e.clear_target;
+      actions.push({ type: "clear_list", data: { target } });
       break;
     }
     // query_expense is reply-only, no actions needed (handled in main routing)
