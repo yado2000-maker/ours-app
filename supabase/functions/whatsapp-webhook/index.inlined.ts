@@ -6384,12 +6384,47 @@ Deno.serve(async (req: Request) => {
       }
 
       console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}`);
-      const transcribed = await transcribeVoice(message.mediaUrl, message.mediaId);
-      if (!transcribed) {
+      const voiceResult = await transcribeVoice(message.mediaUrl, message.mediaId);
+
+      // Low-quality voice gate (2026-04-21). Rather than letting Sonnet invent
+      // an interpretation of a garbled Hebrew-mistranscription (Habib incident:
+      // blurred voice → Sonnet replied "break from shopping" out of nowhere),
+      // ask the user politely to repeat. Handles: wrong_language (Whisper
+      // detected Italian/Arabic from noisy Hebrew), unclear (Hebrew/English
+      // detected but avg_logprob below threshold = hallucination risk), and
+      // no_speech (mostly-silence audio).
+      if (voiceResult.quality !== "ok" && voiceResult.quality !== "failed") {
+        console.log(
+          `[Webhook] Low-quality voice: quality=${voiceResult.quality} ` +
+          `lang=${voiceResult.language} avgLogprob=${voiceResult.avgLogprob?.toFixed(2)} ` +
+          `noSpeech=${voiceResult.noSpeechProb?.toFixed(2)} text="${(voiceResult.text || "").slice(0, 80)}"`,
+        );
+        const chatTarget = message.groupId;
+        if (chatTarget) {
+          const politeRepeat = [
+            "אוי, ההודעה הקולית יצאה קצת לא ברורה 🙈 אפשר לחזור על זה לאט, או לכתוב בטקסט?",
+            "סורי, לא הצלחתי להבין את ההודעה הקולית 🙏 אפשר בבקשה לחזור עליה לאט?",
+            "חח קצת התבלבלתי עם הסאונד 🙈 אפשר לחזור על זה יותר ברור או בטקסט?",
+          ][Math.floor(Math.random() * 3)];
+          try {
+            await sendAndLog(provider, { groupId: chatTarget, text: politeRepeat }, {
+              householdId: "unknown",
+              groupId: chatTarget,
+              inReplyTo: message.messageId,
+              replyType: "voice_low_quality_reply",
+            });
+          } catch (e) { console.error("[LowQualityVoice] reply failed:", e); }
+        }
+        await logMessage(message, `voice_low_quality_${voiceResult.quality}`);
+        return new Response("OK", { status: 200 });
+      }
+
+      if (!voiceResult.text) {
         console.log(`[Webhook] Transcription failed for ${message.senderName}`);
         await logMessage(message, "voice_transcription_failed");
         return new Response("OK", { status: 200 });
       }
+      const transcribed = voiceResult.text;
 
       // Inject transcribed text — clean up voice artifacts before pipeline
       let cleanTranscript = transcribed
@@ -7668,16 +7703,39 @@ Deno.serve(async (req: Request) => {
 
 // ─── Helper Functions ───
 
-async function transcribeVoice(mediaUrl: string | undefined, mediaId: string | undefined): Promise<string | null> {
+// Voice transcription result carries quality signals so the caller can decide
+// whether to inject into the pipeline or ask the user to repeat. Quality states:
+//   ok              — transcript is trustworthy, inject as normal
+//   wrong_language  — Whisper detected a language other than Hebrew/English
+//                     (Italian/Arabic/etc. — usually a noisy Hebrew misheard)
+//   unclear         — Hebrew/English detected but confidence too low
+//                     (avg_logprob below threshold → hallucination risk)
+//   no_speech       — majority silence; user tapped record by accident
+//   failed          — download / API error
+// See 2026-04-21 Habib incident: blurred voice was confidently "transcribed"
+// by Whisper and then confidently "interpreted" by Sonnet into a generic
+// "break from shopping" reply. Both layers failed open. This gate is the fix.
+interface VoiceTranscription {
+  text: string | null;
+  quality: "ok" | "wrong_language" | "unclear" | "no_speech" | "failed";
+  language?: string;
+  avgLogprob?: number;
+  noSpeechProb?: number;
+}
+
+async function transcribeVoice(
+  mediaUrl: string | undefined,
+  mediaId: string | undefined,
+): Promise<VoiceTranscription> {
   const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || "";
   if (!GROQ_API_KEY) {
     console.error("[Voice] GROQ_API_KEY not set");
-    return null;
+    return { text: null, quality: "failed" };
   }
 
   if (!mediaUrl && !mediaId) {
     console.error("[Voice] No media URL or media ID available");
-    return null;
+    return { text: null, quality: "failed" };
   }
 
   try {
@@ -7687,7 +7745,7 @@ async function transcribeVoice(mediaUrl: string | undefined, mediaId: string | u
       const audioResponse = await fetch(mediaUrl);
       if (!audioResponse.ok) {
         console.error("[Voice] Failed to download audio from link:", audioResponse.status);
-        return null;
+        return { text: null, quality: "failed" };
       }
       audioBlob = await audioResponse.blob();
     } else {
@@ -7702,16 +7760,19 @@ async function transcribeVoice(mediaUrl: string | undefined, mediaId: string | u
       });
       if (!mediaResponse.ok) {
         console.error("[Voice] Whapi media download failed:", mediaResponse.status, await mediaResponse.text());
-        return null;
+        return { text: null, quality: "failed" };
       }
       audioBlob = await mediaResponse.blob();
     }
 
-    // 2. Build multipart form data for Groq Whisper API
+    // 2. Build multipart form data for Groq Whisper API.
+    // response_format=verbose_json returns language + per-segment confidence
+    // signals (avg_logprob, no_speech_prob) used by the quality gate below.
     // No language hint — Whisper auto-detects Hebrew, English, or mixed.
     const formData = new FormData();
     formData.append("file", audioBlob, "voice.ogg");
     formData.append("model", "whisper-large-v3");
+    formData.append("response_format", "verbose_json");
 
     // 3. Call Groq Whisper API (OpenAI-compatible endpoint)
     const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
@@ -7722,14 +7783,49 @@ async function transcribeVoice(mediaUrl: string | undefined, mediaId: string | u
 
     if (!response.ok) {
       console.error("[Voice] Groq API error:", response.status, await response.text());
-      return null;
+      return { text: null, quality: "failed" };
     }
 
     const result = await response.json();
-    return result.text?.trim() || null;
+    const text = result.text?.trim() || null;
+    if (!text) return { text: null, quality: "failed" };
+
+    // 4. Quality gate.
+    // (a) Language — Whisper language codes: ISO 639-1 (e.g. "he", "en", "iw"
+    //     is legacy Hebrew, "ar" Arabic, "it" Italian). Anything outside
+    //     Hebrew/English is rejected — Sheli's users are Hebrew-speaking
+    //     and the model confusing Hebrew-noise with Italian/Arabic is the
+    //     exact symptom we saw on 2026-04-21.
+    const language: string | undefined = result.language;
+    const hebrewOrEnglish = !language || ["he", "iw", "hebrew", "en", "english"].includes(language.toLowerCase());
+    if (!hebrewOrEnglish) {
+      return { text, quality: "wrong_language", language };
+    }
+
+    // (b) Confidence signals from verbose_json segments.
+    const segments: Array<{ avg_logprob?: number; no_speech_prob?: number }> = Array.isArray(result.segments) ? result.segments : [];
+    let avgLogprob = 0;
+    let maxNoSpeech = 0;
+    if (segments.length > 0) {
+      const logprobSum = segments.reduce((s, seg) => s + (typeof seg.avg_logprob === "number" ? seg.avg_logprob : 0), 0);
+      avgLogprob = logprobSum / segments.length;
+      maxNoSpeech = segments.reduce((m, seg) => Math.max(m, typeof seg.no_speech_prob === "number" ? seg.no_speech_prob : 0), 0);
+    }
+
+    // Thresholds tuned conservatively — Hebrew tends to score lower than
+    // English on Whisper, so we accept -1.2 (English cutoff is typically -1.0).
+    // no_speech_prob > 0.7 on any segment signals mostly-silence audio.
+    if (maxNoSpeech > 0.7) {
+      return { text, quality: "no_speech", language, avgLogprob, noSpeechProb: maxNoSpeech };
+    }
+    if (avgLogprob < -1.2) {
+      return { text, quality: "unclear", language, avgLogprob, noSpeechProb: maxNoSpeech };
+    }
+
+    return { text, quality: "ok", language, avgLogprob, noSpeechProb: maxNoSpeech };
   } catch (err) {
     console.error("[Voice] Transcription error:", err);
-    return null;
+    return { text: null, quality: "failed" };
   }
 }
 
