@@ -47,6 +47,7 @@ interface IncomingMessage {
   quotedText?: string;    // Text of the quoted/replied-to message (WhatsApp reply feature)
   reactionEmoji?: string;      // emoji used in reaction ("👍", "❤️", etc.)
   reactionTargetId?: string;   // whatsapp_message_id of the message being reacted to
+  forwarded?: boolean;    // true when user forwarded this message (WhatsApp forward feature) — used by forward-to-task
 }
 
 interface OutgoingMessage {
@@ -286,6 +287,18 @@ class WhapiProvider implements WhatsAppProvider {
       const reactionEmoji = isReactionAction ? (actionData?.emoji as string | undefined) || undefined : undefined;
       const reactionTargetId = isReactionAction ? (actionData?.target as string | undefined) || undefined : undefined;
 
+      // Extract forwarded flag — Whapi exposes this in 3 possible shapes depending on version:
+      //   - msg.forwarded: boolean
+      //   - msg.context.forwarded: boolean  (nested under quoted-message context)
+      //   - msg.forwarded_score: number >= 1 (WhatsApp's "forwarded many times" indicator)
+      // OR across all three so we don't miss the flag if Whapi changes payload schema.
+      const forwardedScore = (msg.forwarded_score as number | undefined) ?? 0;
+      const forwardedFlag = Boolean(
+        msg.forwarded === true
+        || msgContext?.forwarded === true
+        || forwardedScore >= 1,
+      );
+
       // DEBUG: Log raw reaction payload on first encounters to confirm field names
       if (type === "action" || type === "reaction") {
         console.log(`[WhapiProvider] Action/Reaction payload:`, JSON.stringify({ type, action: msg.action, reaction: msg.reaction }));
@@ -321,6 +334,7 @@ class WhapiProvider implements WhatsAppProvider {
         quotedText: quotedText || undefined,
         reactionEmoji: reactionEmoji || undefined,
         reactionTargetId: reactionTargetId || undefined,
+        forwarded: forwardedFlag || undefined,
       };
     } catch (err) {
       console.error("[WhapiProvider] Parse error:", err);
@@ -450,6 +464,15 @@ class MetaCloudProvider implements WhatsAppProvider {
       // For groups, the group_id is in the metadata
       const groupId = (msg as Record<string, unknown>).group_id as string || "";
 
+      // Meta Cloud API surfaces forwarded messages via context.forwarded or
+      // context.frequently_forwarded (WhatsApp Business Platform Webhooks
+      // reference). Accept either so forward-to-task works once we cut over.
+      const msgContext = msg.context as Record<string, unknown> | undefined;
+      const forwardedFlag = Boolean(
+        msgContext?.forwarded === true
+        || msgContext?.frequently_forwarded === true,
+      );
+
       return {
         messageId: id,
         groupId,
@@ -458,6 +481,8 @@ class MetaCloudProvider implements WhatsAppProvider {
         text,
         type: type as IncomingMessage["type"],
         timestamp,
+        chatType: groupId ? "group" : "direct",
+        forwarded: forwardedFlag || undefined,
       };
     } catch (err) {
       console.error("[MetaCloudProvider] Parse error:", err);
@@ -1195,7 +1220,43 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
   - "honestly / to be honest" = "האמת?" / "האמת היא ש..." — NEVER bare "אמת?" (which means literally "truth?" and sounds stilted).
   - "the thing is" = "העניין הוא ש..." — NEVER bare "עניין".
   - "the problem is" = "הבעיה היא ש..." — NEVER bare "בעיה".
-  - Rule of thumb: in Hebrew, abstract nouns used as sentence openers almost always take ה-. English "honestly, I don't know" maps to "האמת שאני לא יודעת" — not "אמת, אני לא יודעת".`;
+  - Rule of thumb: in Hebrew, abstract nouns used as sentence openers almost always take ה-. English "honestly, I don't know" maps to "האמת שאני לא יודעת" — not "אמת, אני לא יודעת".
+- SHELI'S OWN VERBS — FEMININE FIRST-PERSON, PAST AND PRESENT TENSE:
+  - PAST tense (already covered): הוספתי, סימנתי, בדקתי, שמרתי, רשמתי, סידרתי, הזכרתי, מצאתי, הבנתי, ידעתי, חשבתי.
+  - PRESENT tense (SHELI OFTEN DRIFTS MASCULINE HERE — LOCK IT DOWN):
+    - "I understand" = **מבינה** — NEVER "מבין". Past tense "הבנתי" is fine too.
+    - "I know" = **יודעת** — NEVER "יודע".
+    - "I think" = **חושבת** — NEVER "חושב".
+    - "I remember" = **זוכרת** — NEVER "זוכר".
+    - "I feel" = **מרגישה** — NEVER "מרגיש".
+    - "I hear" = **שומעת** — NEVER "שומע".
+    - "I see" = **רואה** (gender-invariant — safe both ways).
+    - "I need" = **צריכה** — NEVER "צריך" when Sheli is the subject.
+    - "I love / like" = **אוהבת** — NEVER "אוהב".
+    - "I search / look for" = **מחפשת** — NEVER "מחפש".
+    - "I'm checking" = **בודקת** — NEVER "בודק".
+    - "I'm sending" = **שולחת** — NEVER "שולח".
+    - Gender-invariant present forms (same both): רוצה, מנסה, מקווה, רואה — use freely.
+  - BAD (Sheli speaking about herself): "אני מבין", "אני לא יודע", "אני חושב ש...", "אני זוכר".
+  - GOOD: "אני מבינה", "אני לא יודעת", "אני חושבת ש...", "אני זוכרת".
+  - This rule applies to Sheli-as-subject ONLY. When addressing the user, match the USER's gender per GENDER LOCK above.
+- WHATSAPP HEBREW SLANG — RECOGNIZE, MATCH, NEVER "CORRECT":
+  Israelis text in slang. Sheli must recognize these forms and respond in kind — NEVER literal, NEVER "did you mean?", NEVER auto-respell in her reply to a different spelling than what the user used.
+  - **לול** = LOL (laughter). Treat as equivalent to חח/חחח. Match with חחח, לול, or 😂.
+  - **אומג / אומגד / אומייגד / אומייגאד** = OMG (surprise/shock). Respond with a matching reaction: "וואו 😱", "אומג", "רגע מה?!" — NOT confusion or "מה זה אומג?".
+  - **כפרעליך / כפרעלייך** = כפרה עליך/עלייך (endearment — "sweetie/darling", Moroccan-origin slang widely used across Israel). WARM, NEVER sarcastic. Reply warmly: "חח כפרה, תודה 💛".
+  - **סבבה / אחלה / וואלה / יאללה / בכיף / וואו / ואו** = standard casual connectors. Match the register.
+  - **חבל על הזמן** = "amazing / best" (POSITIVE superlative idiom). NOT literal "waste of time". If user says "החומוס שם חבל על הזמן" = they loved it.
+  - **סוף הדרך / סוף** = amazing / ultimate. Positive superlative.
+  - **חלאס / ח'לאס** = enough / stop (Arabic loan). Acceptable casual.
+  - **בלגן / בלאגן** = chaos. Accept either spelling; don't "fix" בלגן to בלאגן in replies.
+  - **בא לי / בא לך** = I want / you want (idiom, literally "it comes to me").
+  - **נו / נוו / נוווו** = urging / impatience. Match energy: "נו באמת", "נוו תגידי כבר".
+  - **יש!** / **יש** = yes! / score! Match: "יש! 🎉".
+  - **טמבל / טמבלה** = fool (often AFFECTIONATE between friends). Read the context — usually teasing, not insult.
+  - **חמודי / חמודה** = cutie. Warm address.
+  - RULE: If user writes slangy/short-form, Sheli replies slangy/short-form. Formal Hebrew ("להבנתי" / "ברצוני") to a slang-using user reads as robotic bot. Match the register every time.
+  - NEVER explain slang back to the user ("אומג זה קיצור של..."). NEVER add asterisks or corrections. Just respond to what they MEANT.`;
 
 function buildReplyPrompt(
   classification: ClassificationOutput,
@@ -4274,6 +4335,112 @@ Reply with ONLY the welcome text. No quotes, no labels, no metadata blocks.`;
   }
 }
 
+// ─── Forward-to-Task (Option 1 plan Task 11) ───
+//
+// When a user forwards a WhatsApp message to Sheli in 1:1, extract a task from
+// the text via a narrow Haiku prompt and create it directly, bypassing Sonnet.
+// The landing page promises this capability ("העברת הודעות חכמה בלחיצה") —
+// this is the code path that makes it real.
+//
+// Gated behind bot_settings.forward_enabled (default 'true'). Flip to 'false'
+// via SQL to disable without a deploy if accuracy is poor or we see misuse.
+
+const FORWARD_EXTRACTION_PROMPT = `Extract a task from this forwarded WhatsApp message. The user forwarded it to Sheli (a Hebrew task-management bot) to save it.
+
+Return ONLY this JSON shape (no prose, no code blocks, no markdown):
+{"title": "<short Hebrew task, max 60 chars>", "dueDate": "<ISO 8601 datetime or null>"}
+
+Rules:
+- title: core action / thing to remember. Keep it short and actionable (Hebrew).
+  - If the message is a list: summarize (e.g. "קניות מהסופר") or use the most prominent item.
+  - If it is a meeting / invite: include what + who/where (e.g. "פגישה עם רינה בקפה").
+  - If it is a "remember to X": use imperative form (e.g. "להתקשר לרופא").
+- dueDate: ONLY populate if an explicit date/time is in the forwarded text.
+  - "מחר בשעה 15:00" → tomorrow 15:00 Asia/Jerusalem
+  - "30.4 ב-14" → explicit Gregorian date 14:00 Asia/Jerusalem
+  - "יום ראשון" → next Sunday 09:00 Asia/Jerusalem (default morning)
+  - Vague "בקרוב" / no time clue → null
+- Current Israel time: __NOW_IL__
+- Output Hebrew. Never translate Hebrew to English.
+
+If the message has no actionable content (pure meme, joke, greeting, news link, promo ad) →
+  {"title": "", "dueDate": null}`;
+
+async function haikuExtractForwardTask(
+  body: string,
+): Promise<{ title: string; dueDate: string | null }> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  const fallback = { title: body.slice(0, 60).trim(), dueDate: null };
+  if (!apiKey) return fallback;
+
+  const nowIL = new Date().toLocaleString("he-IL", {
+    timeZone: "Asia/Jerusalem",
+    hour12: false,
+  });
+  const systemPrompt = FORWARD_EXTRACTION_PROMPT.replace("__NOW_IL__", nowIL);
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: HAIKU_MODEL,
+        max_tokens: 200,
+        system: systemPrompt,
+        messages: [{ role: "user", content: body.slice(0, 500) }],
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`[ForwardExtract] Haiku ${res.status}`);
+      return fallback;
+    }
+    const data = await res.json();
+    const rawText = (data.content?.[0]?.text || "").trim();
+    // Strip any markdown code fences Haiku sometimes adds despite instructions
+    const jsonText = rawText
+      .replace(/^```(?:json)?\s*/, "")
+      .replace(/\s*```$/, "");
+    try {
+      const parsed = JSON.parse(jsonText);
+      return {
+        title: String(parsed.title || "").slice(0, 60).trim(),
+        dueDate:
+          parsed.dueDate && typeof parsed.dueDate === "string"
+            ? parsed.dueDate
+            : null,
+      };
+    } catch {
+      console.warn(`[ForwardExtract] JSON parse failed, raw: ${rawText.slice(0, 100)}`);
+      return fallback;
+    }
+  } catch (err) {
+    console.warn(`[ForwardExtract] Fetch error:`, (err as Error).message);
+    return fallback;
+  }
+}
+
+// Kill switch — default ENABLED when row missing (opt-out, not opt-in).
+// To disable: UPDATE bot_settings SET value='false', updated_at=NOW(),
+//                                      updated_by='<ticket>'
+//                               WHERE key='forward_enabled';
+async function isForwardEnabled(): Promise<boolean> {
+  try {
+    const { data } = await supabase
+      .from("bot_settings")
+      .select("value")
+      .eq("key", "forward_enabled")
+      .maybeSingle();
+    if (!data) return true;
+    return String(data.value).toLowerCase() !== "false";
+  } catch {
+    return true;
+  }
+}
+
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
   const phone = message.senderPhone;
   const text = (message.text || "").trim();
@@ -4506,6 +4673,163 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     });
     await logMessage(message, "dm_joined_safety", convo?.household_id || "unknown");
     logExit("dm-joined-safety", null, message, { state: convo.state });
+    return;
+  }
+
+  // --- Forward-to-task short-circuit (Option 1 plan Task 11) ---
+  // When a user forwards a WhatsApp message to Sheli in 1:1, we bypass the
+  // normal Sonnet path and go through a narrow Haiku extraction that writes
+  // directly to `tasks` with source='forward'. This is the code behind the
+  // landing page's "העברת הודעות חכמה בלחיצה" card.
+  //
+  // Scoping decisions:
+  //   - 1:1 only (handleDirectMessage). Group forwards fall through to the
+  //     normal classifier — group forward ownership is ambiguous (whose task?).
+  //   - Voice messages carrying the forwarded flag are still processed here:
+  //     transcription happens upstream, so `text` is the transcribed content.
+  //   - Kill switch: bot_settings.forward_enabled='true' (default). Flip to
+  //     'false' to disable without a deploy if accuracy is poor.
+  //   - Media-only forwards (text empty, type=image/video/document): short
+  //     circuit reply asking for text. OCR is Phase 2.
+  if (message.forwarded === true && await isForwardEnabled()) {
+    // Media-only forward (no text body) → ask for text, don't burn a Haiku call
+    if (!text) {
+      const nameSuffix = convo.context?.name ? ` ${convo.context.name}` : "";
+      await sendAndLog(prov, {
+        groupId: message.groupId,
+        text: `אני עוד לא קוראת תמונות 🙈${nameSuffix} - שלחי לי את הפרטים כטקסט ואוסיף ✅`,
+      }, {
+        householdId: convo?.household_id || "unknown",
+        groupId: message.groupId,
+        inReplyTo: message.messageId,
+        replyType: "forward_no_text",
+      });
+      await logMessage(message, "forward_no_text", convo?.household_id || "unknown");
+      return;
+    }
+
+    const extraction = await haikuExtractForwardTask(text);
+
+    // Haiku judged the forward non-actionable (meme, joke, greeting, promo)
+    if (!extraction.title) {
+      await sendAndLog(prov, {
+        groupId: message.groupId,
+        text: `הודעה מעניינת 🙂 אבל לא ברור לי מה המטלה - תגידי לי במילים שלך מה צריך לזכור?`,
+      }, {
+        householdId: convo?.household_id || "unknown",
+        groupId: message.groupId,
+        inReplyTo: message.messageId,
+        replyType: "forward_not_actionable",
+      });
+      await logMessage(message, "forward_not_actionable", convo?.household_id || "unknown");
+      return;
+    }
+
+    // Ensure household exists (auto-creates for first-action 1:1 users)
+    const userName = convo.context?.name || hebrewizeName(senderName) || "";
+    const hhId = await ensureOnboardingHousehold(
+      phone,
+      convo as Record<string, unknown>,
+      userName,
+    );
+
+    // Route based on whether Haiku extracted a future datetime:
+    //   - Parseable future dueDate → reminder_queue (fires at that time)
+    //   - Otherwise                 → tasks (open-ended to-do)
+    // Past / unparseable / absent dueDate all fall to the task path.
+    let sendAt: Date | null = null;
+    if (extraction.dueDate) {
+      const d = new Date(extraction.dueDate);
+      if (!isNaN(d.getTime()) && d.getTime() > Date.now()) sendAt = d;
+    }
+
+    let confirmText = "";
+    let replyType = "";
+
+    if (sendAt) {
+      // REMINDER path (scheduled)
+      const { error: remErr } = await supabase.from("reminder_queue").insert({
+        household_id: hhId,
+        group_id: `${phone}@s.whatsapp.net`, // 1:1 reminder fires to the user
+        message_text: extraction.title,
+        send_at: sendAt.toISOString(),
+        reminder_type: "user",
+        created_by_phone: phone,
+        created_by_name: userName || null,
+        metadata: {
+          source: "forward",
+          source_message_id: message.messageId,
+        },
+      });
+      if (remErr) {
+        console.error(`[1:1][forward] Reminder insert failed:`, remErr.message);
+        await sendAndLog(prov, {
+          groupId: message.groupId,
+          text: `אופס 🙈 משהו השתבש בשמירה - נסי שוב?`,
+        }, {
+          householdId: hhId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "error_fallback",
+        });
+        return;
+      }
+      const dateStr = sendAt.toLocaleString("he-IL", {
+        timeZone: "Asia/Jerusalem",
+        day: "numeric",
+        month: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      confirmText = `תזכורת נשמרה: ${extraction.title} ⏰ ${dateStr} ✅`;
+      replyType = "forward_reminder_created";
+      console.log(`[1:1][forward] Created reminder for ${phone} (title="${extraction.title}", send_at=${sendAt.toISOString()})`);
+    } else {
+      // TASK path (no time / past time)
+      const taskId = "t_" + uid4() + uid4();
+      const { error: taskErr } = await supabase.from("tasks").insert({
+        id: taskId,
+        household_id: hhId,
+        title: extraction.title,
+        source: "forward",
+        source_message_id: message.messageId,
+      });
+      if (taskErr) {
+        console.error(`[1:1][forward] Task insert failed:`, taskErr.message);
+        await sendAndLog(prov, {
+          groupId: message.groupId,
+          text: `אופס 🙈 משהו השתבש בשמירה - נסי שוב?`,
+        }, {
+          householdId: hhId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "error_fallback",
+        });
+        return;
+      }
+      confirmText = `הוספתי: ${extraction.title} ✅`;
+      replyType = "forward_task_created";
+      console.log(`[1:1][forward] Created task ${taskId} for ${phone} (title="${extraction.title}")`);
+    }
+
+    await sendAndLog(prov, {
+      groupId: message.groupId,
+      text: confirmText,
+    }, {
+      householdId: hhId,
+      groupId: message.groupId,
+      inReplyTo: message.messageId,
+      replyType,
+    });
+    await logMessage(message, replyType, hhId);
+
+    // Update message count (consistent with other action paths in handleDirectMessage)
+    await supabase.from("onboarding_conversations").update({
+      updated_at: new Date().toISOString(),
+      message_count: (convo.message_count || 0) + 1,
+    }).eq("phone", phone);
+
     return;
   }
 
