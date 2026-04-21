@@ -2283,8 +2283,12 @@ function isSameProduct(a: string, b: string): boolean {
   const na = a.replace(REPEATED_LETTERS, "$1$1").trim();
   const nb = b.replace(REPEATED_LETTERS, "$1$1").trim();
   if (na === nb) return true;
-  // Substring match — handles "חלב" vs "חלב מלא"
-  if (na.length >= 2 && nb.length >= 2 && (na.includes(nb) || nb.includes(na))) return true;
+  // NO substring match — previously handled "חלב" vs "חלב מלא" as same, but every
+  // real-world case we hit is actually DISTINCT products: חלב vs חלב סויה (soy milk),
+  // פלפל vs פלפל אדום, יוגורט vs יוגורט תות, קפה vs קפה נמס. Substring dedup was
+  // silently LOSING distinct items, and line 2644's longer-name-wins rename was then
+  // overwriting the stored name — so a user's "חלב" added Sunday could morph into
+  // "חלב סויה" by Monday with no way to recover. Strict: exact or typo-fuzz only.
   // Fuzzy match for typos — only for items >= 5 chars (avoids false matches between
   // short distinct words like "תפוח" vs "תפוז" which differ by 1 char but mean
   // apple vs orange). At 5+ chars, single-char typos are almost always real typos
@@ -2634,28 +2638,21 @@ async function executeActions(
             });
 
             if (match) {
+              // Quantity update only — NEVER rename the stored item.
+              // Silent name-rename (previously: longer-name-wins) could morph
+              // "חלב" into "חלב סויה" the next time someone mentioned soy milk,
+              // destroying the original entry. With substring dedup now removed
+              // the rename path shouldn't trigger in practice, but the guard
+              // stays so any future fuzzy-match widening can't regress this.
               const incomingQty = item.qty || parsed.qty;
               const existingQty = match.qty;
-              const updates: Record<string, any> = {};
 
               if (incomingQty && incomingQty !== existingQty) {
-                updates.qty = incomingQty;
-              }
-              if (item.name.length > match.name.length) {
-                updates.name = item.name;
-              }
-
-              if (Object.keys(updates).length > 0) {
                 const { error: updateError } = await supabase.from("shopping_items")
-                  .update(updates)
+                  .update({ qty: incomingQty })
                   .eq("id", match.id);
                 if (updateError) throw updateError;
-                if (updates.qty) {
-                  summary.push(`Shopping-updated: "${match.name}" → qty ${updates.qty}`);
-                } else {
-                  // Name-only refinement (e.g. "חלב" → "חלב רגיל") — treat as exists
-                  summary.push(`Shopping-exists: "${updates.name || match.name}"`);
-                }
+                summary.push(`Shopping-updated: "${match.name}" → qty ${incomingQty}`);
               } else {
                 summary.push(`Shopping-exists: "${match.name}"`);
               }
@@ -3574,6 +3571,7 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
     - Only when both are present, create the reminder action.
 17. If your extracted action text is < 3 chars or matches a known trigger word → drop the action and ask for clarification instead.
 18. "Items collected so far" in the CONVERSATION STATE is a LIVE snapshot of the user's real data — past reminders (already fired) and past events (already happened) are pre-filtered out. So when the user asks "מה יש היום?" / "מה ברשימה?" / "what's today" — you can list these items as-is. They are all current and relevant. Reminders include a "send_at" ISO timestamp; events include a "scheduled_for" timestamp. Use these to phrase replies naturally ("יש לך מסיבה ב-18 לאפריל" — extract the date from the timestamp).
+19. BULK-INVENTION — FORBIDDEN. When the user asks you to populate a list with open-ended category criteria — "תוסיפי את כל הירקות שמתאימים למנגל", "כל התבלינים לסלט", "כל המרכיבים למרק עוף", "הכל מה שצריך לתינוק", "the whole list for a picnic" — do NOT invent 10+ items autonomously. Different families have different preferences; an invented 15-item list is noise, not help, and you'll get it wrong (see: 18 vegetables "for BBQ" including cabbage, broccoli, celery, cilantro). INSTEAD ask for the specific items: "אילו ספציפית? רשמי לי מה להוסיף ✨". If you really want to offer something, suggest 3-5 canonical items and EXPLICITLY ASK before adding: "להוסיף קישואים, חצילים, פלפל, בצל, עגבניות שרי?" — wait for a green-light, then create the actions. Never create the actions as a fait accompli.
 
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
 <!--ACTIONS:[]-->
@@ -4591,7 +4589,9 @@ function lrRenderShopping(items: ListItem[], label: LrLabel): string {
     const emoji = LR_SHOPPING_EMOJI[cat] || LR_UNKNOWN_CATEGORY_EMOJI;
     const catItems = groups.get(cat)!;
     const itemLines = catItems.map((i) => i.title).join("\n");
-    return `${emoji} ${cat} (${catItems.length}):\n${itemLines}`;
+    // Per-category counts dropped 2026-04-21 — total count is already on the opener line,
+    // and the user can see the items below each category header. Redundant noise otherwise.
+    return `${emoji} ${cat}:\n${itemLines}`;
   });
   return `יש לכם ${n} ${label.plural}:\n\n${sections.join("\n\n")}`;
 }
@@ -4601,7 +4601,20 @@ function detectListQuery(text: string): ListType | null {
   // Bare substring is correct because Hebrew inseparable prefixes (ה/ב/ל/מ/כ/ש)
   // fuse onto nouns ("בקניות", "הקניות", "לקניות" all match the substring).
   if (/מטלות|דברים\s+לעשות|\bto.?do\b/i.test(text)) return "task";
-  if (/קני(?:ות|יה)|רשימת?\s+קניות|\bshopping\b/i.test(text)) return "shopping";
+  // Shopping: original "קניות" patterns PLUS bare "רשימה" forms. "רשימה" alone
+  // is colloquially the shopping list in Hebrew WhatsApp groups — users say
+  // "רשימה" / "הרשימה" / "תציגי לי את הרשימה" / "מה ברשימה". Before this,
+  // those fell to Sonnet which flat-rendered 15+ item lists and skipped
+  // category grouping. Task/event/expense/reminder checks with their own
+  // distinctive vocabulary (מטלות / אירועים / הוצאות / תזכורות) still win
+  // when explicit — they're checked first or use unambiguous tokens.
+  if (
+    /קני(?:ות|יה)|רשימת?\s+קניות|\bshopping\b/i.test(text) ||
+    /(?:^|\s)ה?רשימה(?:\s|$|[?!.,])/i.test(text) ||
+    /תראי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה/i.test(text) ||
+    /תציגי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה/i.test(text) ||
+    /מה\s+(?:יש\s+)?ב?רשימה/i.test(text)
+  ) return "shopping";
   if (/אירועים|פגישות|ביומן|\bevents?\b|\bcalendar\b/i.test(text)) return "event";
   if (/הוצאות|כמה\s+(?:הוצאנו|שילמנו)|\bexpenses?\b/i.test(text)) return "expense";
   if (/תזכורות|\breminders?\b/i.test(text)) return "reminder";
