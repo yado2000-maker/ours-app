@@ -65,7 +65,7 @@ SB_HEADERS = {
 class TestCase:
     def __init__(self, name, category, message, expected_intent=None,
                  should_be_ignored=False, db_check=None, reply_pattern=None,
-                 setup=None, notes=""):
+                 setup=None, notes="", chat_id=None, forwarded=False):
         self.name = name
         self.category = category
         self.message = message
@@ -75,6 +75,12 @@ class TestCase:
         self.reply_pattern = reply_pattern  # regex to match in bot reply
         self.setup = setup  # function to run before test
         self.notes = notes
+        # Chat ID for the webhook payload. Default = group (Haiku classifier path).
+        # Pass TEST_DM_ID explicitly for 1:1 tests (Sonnet path, no Haiku classification).
+        self.chat_id = chat_id or TEST_GROUP_CHAT_ID
+        # WhatsApp forwarded flag — exercises the forward-to-task short-circuit
+        # in handleDirectMessage (1:1 only per product scope).
+        self.forwarded = forwarded
         self.result = None  # "pass" | "fail" | "error"
         self.detail = ""
 
@@ -120,28 +126,41 @@ def generate_msg_id(prefix="test"):
     """Generate unique message ID for each test."""
     return f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
-def send_webhook(text, msg_id=None, sender_phone=None, group_id=None, msg_type="text"):
+def send_webhook(text, msg_id=None, sender_phone=None, group_id=None, msg_type="text", forwarded=False):
     """Send a simulated Whapi webhook payload to the Edge Function.
     Default group_id is the TEST GROUP (Haiku classifier path).
-    Pass group_id=TEST_DM_ID explicitly for 1:1 tests."""
+    Pass group_id=TEST_DM_ID explicitly for 1:1 tests.
+    Pass forwarded=True to exercise the forward-to-task short-circuit."""
     if msg_id is None:
         msg_id = generate_msg_id()
-    payload = {
-        "messages": [{
-            "id": msg_id,
-            "from": sender_phone or TEST_PHONE,
-            "from_name": TEST_SENDER_NAME,
-            "chat_id": group_id or TEST_GROUP_CHAT_ID,
-            "type": msg_type,
-            "text": {"body": text},
-            "timestamp": int(time.time()),
-        }]
+    msg_body = {
+        "id": msg_id,
+        "from": sender_phone or TEST_PHONE,
+        "from_name": TEST_SENDER_NAME,
+        "chat_id": group_id or TEST_GROUP_CHAT_ID,
+        "type": msg_type,
+        "text": {"body": text},
+        "timestamp": int(time.time()),
     }
+    if forwarded:
+        # Matches Whapi's top-level `forwarded` payload shape. The parser
+        # also ORs against msg.context.forwarded and msg.forwarded_score>=1,
+        # so any single shape is sufficient for the test.
+        msg_body["forwarded"] = True
+    payload = {"messages": [msg_body]}
     try:
         r = requests.post(WEBHOOK_URL, json=payload, timeout=30)
         return r.status_code, r.text
     except Exception as e:
         return 0, str(e)
+
+def log_lookup_id(chat_id):
+    """Convert a Whapi chat_id to the group_id as stored in whatsapp_messages.
+    DMs are stored as the bare phone (no @s.whatsapp.net); groups keep @g.us intact.
+    See CLAUDE.md 'group_id format mismatch across tables'."""
+    if chat_id.endswith("@s.whatsapp.net"):
+        return chat_id.replace("@s.whatsapp.net", "")
+    return chat_id
 
 def poll_for_message(msg_id, timeout=20, poll_interval=2):
     """Poll whatsapp_messages for the CLASSIFIED message (not just the 'received' log).
@@ -899,6 +918,64 @@ def build_test_cases():
         notes="Verify bot reply is logged to whatsapp_messages with sender_phone=BOT_PHONE",
     ))
 
+    # ── Forward-to-Task (Option 1 Task 11) ──
+    # All forward tests go through the 1:1 path (DM chat_id) because the
+    # forward short-circuit only fires in handleDirectMessage. Group forwards
+    # fall through to the normal classifier (by design — see Task 11 commit).
+    #
+    # These cases bypass Haiku classification entirely (classification_data is
+    # null on 1:1), so expected_intent=None. We rely on reply_pattern + db_check.
+
+    cases.append(TestCase(
+        "forward_meeting_with_time", "Forward",
+        "פגישה מחר בשעה 15:00 עם רינה בקפה ארומה",
+        chat_id=TEST_DM_ID,
+        forwarded=True,
+        reply_pattern=r"תזכורת נשמרה|⏰",
+        db_check={"table": "reminder_queue", "column": "message_text", "value": "רינה"},
+        notes="Forward with explicit date+time → reminder_queue (not tasks)",
+    ))
+
+    cases.append(TestCase(
+        "forward_shopping_list_no_time", "Forward",
+        "חלב\nביצים\nלחם\nעגבניות\nגבינה צהובה",
+        chat_id=TEST_DM_ID,
+        forwarded=True,
+        reply_pattern=r"הוספתי.*✅",
+        db_check={"table": "tasks", "column": "source", "value": "forward"},
+        notes="Forward a list without time → tasks with source=forward",
+    ))
+
+    cases.append(TestCase(
+        "forward_reminder_to_call", "Forward",
+        "אל תשכחו להתקשר לרופא השבוע",
+        chat_id=TEST_DM_ID,
+        forwarded=True,
+        reply_pattern=r"הוספתי|תזכורת נשמרה",
+        db_check=None,  # accepts either task or reminder depending on Haiku's week-level resolution
+        notes="Forward 'remind to call doctor this week' → task OR reminder (Haiku's call)",
+    ))
+
+    cases.append(TestCase(
+        "forward_non_actionable_greeting", "Forward",
+        "בוקר טוב מרחוק, שיהיה לכם יום נפלא 🌞☕ שבת שלום!",
+        chat_id=TEST_DM_ID,
+        forwarded=True,
+        reply_pattern=r"הודעה מעניינת|לא ברור",
+        db_check=None,
+        notes="Forward of generic greeting/meme → polite decline, no DB write",
+    ))
+
+    cases.append(TestCase(
+        "forward_regression_non_forwarded_dm", "Forward",
+        "תוסיפי חלב לרשימה",
+        chat_id=TEST_DM_ID,
+        forwarded=False,  # NOT forwarded — must still reach normal Sonnet 1:1 path
+        reply_pattern=r"הוספתי|חלב",
+        db_check=None,  # Just verifies reply; DB state varies with Sonnet routing
+        notes="Regression: non-forwarded 1:1 still reaches Sonnet (forward branch didn't break normal flow)",
+    ))
+
     return cases
 
 # ─── Test Runner ───
@@ -933,8 +1010,13 @@ def run_test(tc):
 
     before_ts = time.time()
 
-    # Send webhook
-    status, body = send_webhook(tc.message, msg_id=msg_id)
+    # Send webhook — honors per-case chat_id + forwarded flag
+    status, body = send_webhook(
+        tc.message,
+        msg_id=msg_id,
+        group_id=tc.chat_id,
+        forwarded=tc.forwarded,
+    )
     if status != 200:
         tc.result = "error"
         tc.detail = f"Webhook returned {status}: {body[:200]}"
@@ -974,7 +1056,7 @@ def run_test(tc):
 
     # Check bot reply if pattern specified
     if tc.reply_pattern:
-        reply = poll_for_bot_reply(TEST_GROUP_CHAT_ID, before_ts, timeout=15)
+        reply = poll_for_bot_reply(log_lookup_id(tc.chat_id), before_ts, timeout=15)
         if not reply:
             tc.result = "fail"
             tc.detail = f"No bot reply found (expected pattern: {tc.reply_pattern})"
