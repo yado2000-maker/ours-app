@@ -4441,6 +4441,223 @@ async function isForwardEnabled(): Promise<boolean> {
   }
 }
 
+// ─── List Renderer (Option 1 plan Task 7 + Task 12 integration) ───
+//
+// Inlined from _shared/list-renderer.ts. This replaces Sonnet prose
+// generation for list queries ("מה יש לנו ברשימה?", "מה המטלות?") —
+// deterministic output, no hallucination risk, guaranteed-correct counts,
+// automatic web-link fallback for long lists.
+
+type ListType = "task" | "shopping" | "event" | "expense" | "reminder";
+
+interface ListItem {
+  title: string;
+  category?: string;   // shopping only — renderer groups by category when n>=2
+  dueDate?: string;
+  amount?: number;
+}
+
+// Canonical shopping category order + emoji. MUST stay in sync with
+// src/locales/he.js cats array (source of truth the web app uses for
+// grouping).
+const LR_SHOPPING_CATEGORIES: Array<[string, string]> = [
+  ["פירות וירקות",              "🥦"],
+  ["מוצרי חלב",                  "🥛"],
+  ["בשר ודגים",                  "🥩"],
+  ["מאפים",                      "🍞"],
+  ["מזווה",                      "🥫"],
+  ["מוצרים קפואים",              "🧊"],
+  ["משקאות",                     "🥤"],
+  ["ניקוי ובית",                 "🧽"],
+  ["מוצרים מחנות הטבע",          "🌱"],
+  ["אחר",                        "🛒"],
+];
+const LR_SHOPPING_EMOJI: Record<string, string> = Object.fromEntries(LR_SHOPPING_CATEGORIES);
+const LR_SHOPPING_CATEGORY_ORDER: string[] = LR_SHOPPING_CATEGORIES.map(([name]) => name);
+const LR_UNKNOWN_CATEGORY_EMOJI = "📦";
+const LR_CATEGORY_ALIASES: Record<string, string> = {
+  "חלב וביצים": "מוצרי חלב",
+};
+
+function lrNormalizeCategory(raw: string | undefined): string {
+  const c = (raw || "").trim() || "אחר";
+  return LR_CATEGORY_ALIASES[c] || c;
+}
+
+interface LrLabel {
+  singular: string;
+  plural: string;
+  webPath: string;
+}
+
+const LR_LABELS: Record<ListType, LrLabel> = {
+  task:     { singular: "מטלה אחת",               plural: "מטלות",                    webPath: "/tasks" },
+  shopping: { singular: "פריט אחד ברשימת קניות",   plural: "פריטים ברשימת קניות",      webPath: "/shopping" },
+  event:    { singular: "אירוע אחד",               plural: "אירועים",                  webPath: "/events" },
+  expense:  { singular: "הוצאה אחת",               plural: "הוצאות",                   webPath: "/expenses" },
+  reminder: { singular: "תזכורת אחת",              plural: "תזכורות",                  webPath: "/reminders" },
+};
+
+const LR_EMPTY_PLURAL: Record<ListType, string> = {
+  task:     "מטלות פתוחות",
+  shopping: "דברים ברשימת הקניות",
+  event:    "אירועים מתוכננים",
+  expense:  "הוצאות רשומות",
+  reminder: "תזכורות פתוחות",
+};
+
+function renderList(args: { type: ListType; items: ListItem[] }): string {
+  const { type, items } = args;
+  const label = LR_LABELS[type];
+  const n = items.length;
+
+  if (n === 0) return `אין ${LR_EMPTY_PLURAL[type]} כרגע 🧡`;
+
+  if (type === "expense") {
+    const countLabel = n === 1 ? label.singular : `${n} ${label.plural}`;
+    return `יש לכם ${countLabel}. לצפייה מלאה: sheli.ai${label.webPath}`;
+  }
+
+  if (n === 1) return `יש לכם ${label.singular}: ${items[0].title}.`;
+
+  if (type === "shopping") return lrRenderShopping(items, label);
+
+  return lrRenderFlat(items, n, label);
+}
+
+function lrRenderFlat(items: ListItem[], n: number, label: LrLabel): string {
+  if (n <= 5) {
+    const list = items.map((i) => i.title).join(", ");
+    return `יש לכם ${n} ${label.plural}: ${list}.`;
+  }
+  if (n <= 10) {
+    const lines = items.map((i) => i.title).join("\n");
+    return `הנה ${n} ה${label.plural} שלכם:\n${lines}`;
+  }
+  const top5 = items.slice(0, 5).map((i) => i.title).join("\n");
+  return `יש לכם ${n} ${label.plural}. הנה 5 הדחופות:\n${top5}\n\nהרשימה המלאה: sheli.ai${label.webPath}`;
+}
+
+function lrRenderShopping(items: ListItem[], label: LrLabel): string {
+  const n = items.length;
+  const groups = new Map<string, ListItem[]>();
+  for (const item of items) {
+    const cat = lrNormalizeCategory(item.category);
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat)!.push(item);
+  }
+  if (groups.size === 1) return lrRenderFlat(items, n, label);
+
+  const orderedCats: string[] = [];
+  for (const cat of LR_SHOPPING_CATEGORY_ORDER) {
+    if (groups.has(cat)) orderedCats.push(cat);
+  }
+  for (const cat of groups.keys()) {
+    if (!orderedCats.includes(cat)) orderedCats.push(cat);
+  }
+
+  if (n > 10) {
+    const summaryLines = orderedCats.map((cat) => {
+      const emoji = LR_SHOPPING_EMOJI[cat] || LR_UNKNOWN_CATEGORY_EMOJI;
+      return `${emoji} ${cat} (${groups.get(cat)!.length})`;
+    });
+    return `יש לכם ${n} ${label.plural}:\n${summaryLines.join("\n")}\n\nהרשימה המלאה: sheli.ai${label.webPath}`;
+  }
+
+  const sections = orderedCats.map((cat) => {
+    const emoji = LR_SHOPPING_EMOJI[cat] || LR_UNKNOWN_CATEGORY_EMOJI;
+    const catItems = groups.get(cat)!;
+    const itemLines = catItems.map((i) => i.title).join("\n");
+    return `${emoji} ${cat} (${catItems.length}):\n${itemLines}`;
+  });
+  return `יש לכם ${n} ${label.plural}:\n\n${sections.join("\n\n")}`;
+}
+
+function detectListQuery(text: string): ListType | null {
+  // IMPORTANT: no \b around Hebrew — JS regex \b is ASCII-only by default.
+  // Bare substring is correct because Hebrew inseparable prefixes (ה/ב/ל/מ/כ/ש)
+  // fuse onto nouns ("בקניות", "הקניות", "לקניות" all match the substring).
+  if (/מטלות|דברים\s+לעשות|\bto.?do\b/i.test(text)) return "task";
+  if (/קני(?:ות|יה)|רשימת?\s+קניות|\bshopping\b/i.test(text)) return "shopping";
+  if (/אירועים|פגישות|ביומן|\bevents?\b|\bcalendar\b/i.test(text)) return "event";
+  if (/הוצאות|כמה\s+(?:הוצאנו|שילמנו)|\bexpenses?\b/i.test(text)) return "expense";
+  if (/תזכורות|\breminders?\b/i.test(text)) return "reminder";
+  return null;
+}
+
+// Pull live items for a given list type. Caller owns household scoping.
+// Caps at 100 rows — renderer truncates to 5 visible items for any list >10
+// and shows "see web for full list" link, so higher limits just waste query time.
+async function fetchItemsForList(householdId: string, type: ListType): Promise<ListItem[]> {
+  switch (type) {
+    case "task": {
+      const { data } = await supabase
+        .from("tasks")
+        .select("title, created_at")
+        .eq("household_id", householdId)
+        .eq("done", false)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      return (data || []).map((r: any) => ({ title: String(r.title || "") }));
+    }
+    case "shopping": {
+      const { data } = await supabase
+        .from("shopping_items")
+        .select("name, qty, category, created_at")
+        .eq("household_id", householdId)
+        .eq("got", false)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      return (data || []).map((r: any) => {
+        const base = String(r.name || "");
+        // Append qty suffix when present so rendered list reads naturally
+        const title = r.qty ? `${base} (${r.qty})` : base;
+        return { title, category: r.category || undefined };
+      });
+    }
+    case "event": {
+      const { data } = await supabase
+        .from("events")
+        .select("title, scheduled_for")
+        .eq("household_id", householdId)
+        .gt("scheduled_for", new Date().toISOString())
+        .order("scheduled_for", { ascending: true })
+        .limit(100);
+      return (data || []).map((r: any) => ({
+        title: String(r.title || ""),
+        dueDate: r.scheduled_for || undefined,
+      }));
+    }
+    case "expense": {
+      const { data } = await supabase
+        .from("expenses")
+        .select("description, amount_minor, occurred_at")
+        .eq("household_id", householdId)
+        .eq("deleted", false)
+        .order("occurred_at", { ascending: false })
+        .limit(100);
+      return (data || []).map((r: any) => ({
+        title: String(r.description || ""),
+        amount: r.amount_minor ? r.amount_minor / 100 : undefined,
+      }));
+    }
+    case "reminder": {
+      const { data } = await supabase
+        .from("reminder_queue")
+        .select("message_text, send_at")
+        .eq("household_id", householdId)
+        .eq("sent", false)
+        .gt("send_at", new Date().toISOString())
+        .order("send_at", { ascending: true })
+        .limit(100);
+      return (data || []).map((r: any) => ({
+        title: String(r.message_text || ""),
+        dueDate: r.send_at || undefined,
+      }));
+    }
+  }
+}
+
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
   const phone = message.senderPhone;
   const text = (message.text || "").trim();
@@ -7076,6 +7293,24 @@ Deno.serve(async (req: Request) => {
 
     // Non-actionable intents (question, info_request, query_expense) — generate reply only, no DB writes
     if (!isActionable && classification.intent !== "ignore") {
+      // Task 12: deterministic list renderer for list-shape questions.
+      // Runs BEFORE Sonnet so questions like "מה יש ברשימת קניות?" get a
+      // guaranteed-correct, hallucination-free answer. Non-list questions
+      // (e.g. "מי בתור לכלים?") fall through to Sonnet as before.
+      if (classification.intent === "question") {
+        const listType = detectListQuery(message.text);
+        if (listType) {
+          const items = await fetchItemsForList(householdId, listType);
+          const rendered = renderList({ type: listType, items });
+          await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "list_query_rendered"
+          });
+          await logMessage(message, "list_query_rendered", householdId, classification);
+          console.log(`[Webhook] List query rendered: type=${listType} items=${items.length} for ${householdId}`);
+          return new Response("OK", { status: 200 });
+        }
+      }
+
       // For query_expense, fetch aggregated data and inject into classification for Sonnet
       if (classification.intent === "query_expense") {
         const isDirectMsg = !message.groupId?.includes("@g.us");
