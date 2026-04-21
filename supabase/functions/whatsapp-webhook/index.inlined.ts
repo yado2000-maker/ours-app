@@ -652,6 +652,7 @@ HEBREW PATTERNS:
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
 - "מי [verb]?" = question (not add_task)
 - "מה ברשימה?" / "מה צריך לקנות?" = question (in 1:1 or group)
+- BARE INFINITIVE + "?" = question, NOT add_task. Hebrew bare-infinitive questions ("לאסוף את X?", "להביא Y?", "לקנות Z?", "לבשל W?") mean "should I/we X?" and need a YES/NO answer, not a new task. The trailing "?" is decisive — the SAME words without "?" can be a task ("לקנות מתנה" alone = add_task; "לקנות מתנה?" = question). If the message is ONLY an infinitive-phrase + optional object + "?", classify as question. Exception: if the message starts with an explicit reminder/shopping trigger ("תזכירי לי לקנות X?", "נוסיף חלב?") it keeps its original intent.
 - "אני [verb]" matching an open task = claim_task
 - Past tense matching open task ("שטפתי כלים") = complete_task
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
@@ -857,6 +858,9 @@ EXAMPLES:
 [אמא]: "מי בתור" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מי בתור"}}
 [אבא]: "מה נשאר ברשימה" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה נשאר ברשימה"}}
 [אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן"}}
+[אור]: "לאסוף את שושי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"לאסוף את שושי?"}}
+[אמא]: "להביא חלב מהמכולת?" → {"intent":"question","confidence":0.85,"entities":{"raw_text":"להביא חלב מהמכולת?"}}
+[אבא]: "לקנות מתנה לסבתא?" → {"intent":"question","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
 [אמא]: "תורמי לשטוף כלים היום?" → {"intent":"question","confidence":0.92,"entities":{"raw_text":"תורמי לשטוף כלים היום?"}}
 [אבא]: "של מי התור היום לכלים" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"של מי התור היום לכלים"}}
 [ילד]: "נכון שזה תורה ולא תורי?" → {"intent":"question","confidence":0.88,"entities":{"raw_text":"נכון שזה תורה ולא תורי?"}}
@@ -5366,8 +5370,11 @@ async function claimAndProcessBatch(
 }
 
 // ─── Quick Undo Patterns (pre-classifier, no Haiku call needed) ───
-// Layer 1: Keyword undo — these words/phrases always mean "undo last action"
-const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב|תשכחי|ביטול|לא נכון|בעצם לא|אל תקנו|יש כבר|עזבי מזה|לא לא)(?:\s|$)/;
+// Layer 1: Keyword undo — these words/phrases always mean "undo last action".
+// Includes META-level phrases ("לא צריך להוסיף מטלה") which target the action
+// abstraction itself rather than a specific item — these bypass Layer 2's
+// item-name check because they don't reference an item.
+const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב|תשכחי|ביטול|לא נכון|בעצם לא|אל תקנו|יש כבר|עזבי מזה|לא לא|לא צריך להוסיף|לא צריך מטלה|לא צריך את זה|לא צריך בכלל|אין צורך במטלה|אין צורך להוסיף)(?:\s|$)/;
 // Layer 2: Negation + item name — "לא צריך חלב" only undoes if bot just added "חלב"
 const UNDO_NEGATIONS = /(?:לא צריך|אל תקנו|יש כבר|אין צורך|לא רוצה)/;
 
