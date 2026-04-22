@@ -6335,6 +6335,55 @@ async function logLivingLayerTrigger(
   }
 }
 
+// ─── Phase 4: invitation_accepted optimistic logger (2026-04-22) ───
+// Log that Sheli accepted an invitation to visit a living-layer moment
+// (celebration, photo share, emotional moment). The row is written with
+// pending_until = NOW() + 10 min. If the family corrects Sheli within
+// 10 min (שלי שקט etc.), the correction handler DELETEs the row before
+// it becomes a permanent signal. Otherwise it stands and the Haiku
+// classifier sees it as "ok to visit similar messages next time".
+//
+// CALL SITE DEFERRED TO PHASE 5: the proper trigger is
+// `classification.living_vs_operating === "living"` combined with
+// `addressed_to_bot === true`. Until Phase 5 ships that field, this
+// helper exists but is not yet invoked. Helper + correction-delete are
+// wired defensively now so Phase 5 can flip a single condition on.
+async function logInvitationPending(
+  householdId: string,
+  messageText: string,
+): Promise<string | null> {
+  try {
+    const snippet = (messageText || "").substring(0, 140);
+    if (!snippet) return null;
+    const pendingUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("household_patterns")
+      .upsert(
+        {
+          household_id: householdId,
+          pattern_type: "invitation_accepted",
+          pattern_key: snippet,
+          pattern_value: snippet,
+          confidence: 0.5,
+          hit_count: 1,
+          pending_until: pendingUntil,
+        },
+        { onConflict: "household_id,pattern_type,pattern_key" },
+      )
+      .select("id")
+      .maybeSingle();
+    if (error) {
+      console.error("[Patterns] logInvitationPending upsert error:", error);
+      return null;
+    }
+    console.log(`[Patterns] invitation_accepted (pending) for ${householdId}: "${snippet.substring(0, 60)}..."`);
+    return data?.id ?? null;
+  } catch (err) {
+    console.error("[Patterns] logInvitationPending unexpected error:", err);
+    return null;
+  }
+}
+
 // ─── Pending Confirmation Patterns ───
 const CONFIRM_AFFIRMATIVE = /^(כן|נכון|בדיוק|יאללה|אוקי|ok|כמובן|מדויק|yes|בטח|sure|👍|💪)[\s.!]*$/i;
 const CONFIRM_NEGATIVE = /^(לא|לא נכון|טעות|הפוך|שגוי|no|ממש לא)[\s.!]*$/i;
@@ -7279,6 +7328,19 @@ Deno.serve(async (req: Request) => {
       // Phase 4: log the PRIOR user message as a living_layer_trigger pattern
       // (non-blocking — errors log but don't affect the ack).
       await logLivingLayerTrigger(householdId, message.groupId, message.messageId);
+      // Phase 4: if Sheli optimistically logged an invitation_accepted pending
+      // row recently, retract it — the family just corrected, so the visit
+      // was NOT accepted. Phase 5 turns on the logInvitationPending call site;
+      // running this delete now is defensive and cheap (no rows today).
+      const { error: invErr } = await supabase
+        .from("household_patterns")
+        .delete()
+        .eq("household_id", householdId)
+        .eq("pattern_type", "invitation_accepted")
+        .gt("pending_until", new Date().toISOString());
+      if (invErr) {
+        console.error("[Patterns] retract pending invitation_accepted error:", invErr);
+      }
 
       await sendAndLog(provider, {
         groupId: message.groupId,
