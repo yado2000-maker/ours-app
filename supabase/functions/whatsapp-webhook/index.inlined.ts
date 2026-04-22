@@ -2087,12 +2087,67 @@ async function rescueRemindersAndStrip(
   if (allReminders.length === 0 && classification.intent === "add_reminder") {
     const e = classification.entities;
     if (e?.reminder_text && e?.time_iso) {
-      allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+      const synth: {
+        reminder_text: string;
+        send_at: string;
+        delivery_mode?: "group" | "dm" | "both";
+        recipient_phones?: string[];
+      } = { reminder_text: e.reminder_text, send_at: e.time_iso };
+      if (e.delivery_mode) synth.delivery_mode = e.delivery_mode;
+      allReminders.push(synth);
       console.log(`[ReminderRescue] Haiku entities fallback (no Sonnet REMINDER block): "${e.reminder_text}" @ ${e.time_iso}`);
     }
   }
 
-  for (const reminderData of allReminders) {
+  // Defense-in-depth enrichment (2026-04-22). Sonnet sometimes emits a basic
+  // REMINDER block and omits delivery_mode / recipient_phones even when Haiku
+  // classified "בפרטי"/"גם בפרטי". Merge Haiku entities + resolve names here so
+  // the feature works regardless of which side drops the metadata.
+  //   - delivery_mode: prefer the block's value, fall back to Haiku's entities.
+  //   - recipient_phones: prefer the block, else resolve Haiku's recipient_names,
+  //     else (for dm with no names) self-reference the sender.
+  //   - If ALL named recipients resolve as missing → short-circuit with a refuse
+  //     reply (matches MISSING_PHONES Case 1/3) and skip the insert.
+  let refuseReplyFromEnrichment: string | null = null;
+  const haikuE = classification.entities;
+  const haikuDeliveryMode = haikuE?.delivery_mode;
+  const haikuRecipientNames = haikuE?.recipient_names || [];
+  const enrichedReminders: typeof allReminders = [];
+  for (const r of allReminders) {
+    if (!r.delivery_mode && haikuDeliveryMode) {
+      r.delivery_mode = haikuDeliveryMode;
+    }
+    if ((r.delivery_mode === "dm" || r.delivery_mode === "both")
+        && (!r.recipient_phones || r.recipient_phones.length === 0)) {
+      if (haikuRecipientNames.length > 0) {
+        const { resolved, missing } = await resolveRecipientNamesToPhones(haikuRecipientNames, householdId);
+        if (resolved.length === 0 && missing.length > 0) {
+          // All unknown → refuse (Case 1 or Case 3)
+          if (missing.length === 1) {
+            refuseReplyFromEnrichment = `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`;
+          } else {
+            refuseReplyFromEnrichment = `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+          }
+          console.log(`[ReminderRescue] Enrichment refuse: all ${missing.length} recipient(s) unknown for "${r.reminder_text}"`);
+          continue; // skip this reminder entirely
+        }
+        r.recipient_phones = resolved.map((x) => x.phone);
+        console.log(`[ReminderRescue] Enrichment resolved ${resolved.length} of ${resolved.length + missing.length} recipient(s)`);
+      } else if (r.delivery_mode === "dm" && message.senderPhone) {
+        // Self-reference: "תזכירי לי בפרטי" → sender's own phone
+        r.recipient_phones = [message.senderPhone];
+        console.log(`[ReminderRescue] Self-reference dm → ${message.senderPhone}`);
+      }
+    }
+    enrichedReminders.push(r);
+  }
+
+  if (refuseReplyFromEnrichment && enrichedReminders.length === 0) {
+    // Pure refuse case — no surviving reminders. Short-circuit before insert loop.
+    return refuseReplyFromEnrichment;
+  }
+
+  for (const reminderData of enrichedReminders) {
     if (!reminderData.send_at) continue;
 
     const deliveryMode = reminderData.delivery_mode || "group";
@@ -2175,13 +2230,38 @@ async function rescueRemindersAndStrip(
   // the next 7 days of child rows.
   const recurring = extractRecurringRemindersFromReply(reply);
   for (const r of recurring) {
-    const recDeliveryMode = r.delivery_mode || "group";
-    const recRecipientPhones: string[] | null = r.recipient_phones || null;
+    // Enrichment (2026-04-22) — same defense-in-depth as REMINDER above. If
+    // Sonnet omitted delivery_mode, inherit from Haiku entities; if dm/both
+    // and recipient_phones missing, resolve via Haiku recipient_names or
+    // self-reference to sender.
+    if (!r.delivery_mode && haikuDeliveryMode) {
+      r.delivery_mode = haikuDeliveryMode;
+    }
+    let recDeliveryMode = r.delivery_mode || "group";
+    let recRecipientPhones: string[] | null = r.recipient_phones || null;
 
     if ((recDeliveryMode === "dm" || recDeliveryMode === "both")
         && (!recRecipientPhones || recRecipientPhones.length === 0)) {
-      console.warn(`[RecurringReminderRescue] ${recDeliveryMode} mode but no recipient_phones — skipping: "${r.reminder_text}"`);
-      continue;
+      if (haikuRecipientNames.length > 0) {
+        const { resolved, missing } = await resolveRecipientNamesToPhones(haikuRecipientNames, householdId);
+        if (resolved.length === 0 && missing.length > 0) {
+          if (!refuseReplyFromEnrichment) {
+            refuseReplyFromEnrichment = missing.length === 1
+              ? `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`
+              : `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+          }
+          console.log(`[RecurringReminderRescue] Enrichment refuse: all ${missing.length} recipient(s) unknown`);
+          continue;
+        }
+        recRecipientPhones = resolved.map((x) => x.phone);
+        console.log(`[RecurringReminderRescue] Enrichment resolved ${resolved.length} recipient(s)`);
+      } else if (recDeliveryMode === "dm" && message.senderPhone) {
+        recRecipientPhones = [message.senderPhone];
+        console.log(`[RecurringReminderRescue] Self-reference dm → ${message.senderPhone}`);
+      } else {
+        console.warn(`[RecurringReminderRescue] ${recDeliveryMode} mode but no recipient_phones — skipping: "${r.reminder_text}"`);
+        continue;
+      }
     }
 
     const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
@@ -2213,6 +2293,13 @@ async function rescueRemindersAndStrip(
     const { data: count, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
     if (matErr) console.warn("[RecurringReminderRescue] Immediate materialize failed:", matErr.message);
     else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
+  }
+
+  // If the enrichment pass generated a refuse reply AND nothing was saved,
+  // short-circuit with the refuse text. (recurring path may set this after
+  // the one-shot pass already ran without a refuse.)
+  if (refuseReplyFromEnrichment && rescueSaveCount === 0) {
+    return refuseReplyFromEnrichment;
   }
 
   // MISSING_PHONES handler (Option D fallback, 2026-04-22). When Sonnet cannot

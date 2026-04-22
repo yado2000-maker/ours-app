@@ -1472,14 +1472,16 @@ class TestPrivateDmReminders(unittest.TestCase):
     def test_03_rotation_all_mapped(self):
         # Seed rotation first
         sb_post("rotations", {
+            "id": f"rot_dm_test_{uuid.uuid4().hex[:8]}",
             "household_id": DM_TEST_HOUSEHOLD_ID,
             "title": "שטיפת כלים",
             "type": "duty",
-            "members": json.dumps(["יונתן", "איתן"]),
+            "members": ["יונתן", "איתן"],
             "current_index": 0,
-            "frequency": json.dumps({"type": "weekly", "days": ["wed", "thu"]}),
+            "frequency": {"type": "weekly", "days": ["wed", "thu"]},
             "active": True,
         })
+        time.sleep(1)
         _dm_send("תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7")
         parents = _dm_fetch_reminders(recurring_only=True)
         dm_parents = [p for p in parents if p.get("delivery_mode") == "dm"]
