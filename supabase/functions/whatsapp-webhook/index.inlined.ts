@@ -6259,6 +6259,27 @@ const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב
 // Layer 2: Negation + item name — "לא צריך חלב" only undoes if bot just added "חלב"
 const UNDO_NEGATIONS = /(?:לא צריך|אל תקנו|יש כבר|אין צורך|לא רוצה)/;
 
+// ─── Correction Phrases (Phase 3 of Sheli-in-Groups, 2026-04-22) ───
+// One-word "back off" from the family. Triggers, when wired (Task 3.3):
+//   1) undo the most recent Sheli-authored item in this group within last 5 min
+//      (reuses the existing quick-undo handler's side-effects)
+//   2) log the triggering PRIOR message as a living_layer_trigger household_pattern
+//      (Phase 4 wires the pattern log; 3.3 only leaves a marker)
+//   3) set whatsapp_config.quiet_until = NOW() + 10 min for this group, which
+//      Task 3.4 honors by suppressing ambient classifications (explicit-address
+//      still works).
+const CORRECTION_PHRASES: RegExp[] = [
+  /^\s*שלי[,\s]+שקט[!.]?\s*$/,
+  /^\s*שלי[,\s]+לא\s+עכשיו[!.]?\s*$/,
+  /^\s*שלי[,\s]+תירגעי[!.]?\s*$/,
+  /^\s*שלי[,\s]+לא\s+אלייך[!.]?\s*$/,
+];
+
+function isCorrectionPhrase(text: string): boolean {
+  const normalized = (text || "").trim();
+  return CORRECTION_PHRASES.some((re) => re.test(normalized));
+}
+
 // ─── Pending Confirmation Patterns ───
 const CONFIRM_AFFIRMATIVE = /^(כן|נכון|בדיוק|יאללה|אוקי|ok|כמובן|מדויק|yes|בטח|sure|👍|💪)[\s.!]*$/i;
 const CONFIRM_NEGATIVE = /^(לא|לא נכון|טעות|הפוך|שגוי|no|ממש לא)[\s.!]*$/i;

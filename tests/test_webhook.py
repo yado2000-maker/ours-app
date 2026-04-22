@@ -769,6 +769,36 @@ def build_test_cases():
         expected_intent="correct_bot",
     ))
 
+    # ── Category 7b: Correction Phrases (Phase 3, added 2026-04-22) ──
+    # Four one-word "back off" phrases. Pre-classifier match routes to the
+    # existing quick-undo handler AND sets whatsapp_config.quiet_until for 10 min.
+    # Tested at the reply level (ack like "הבנתי 🤫") — intent field is null on
+    # the pre-classifier path, so we rely on reply_pattern instead of expected_intent.
+    cases.append(TestCase(
+        "correction_shakat", "Correction",
+        "שלי שקט",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי שקט → undo + 10-min cool-down.",
+    ))
+    cases.append(TestCase(
+        "correction_lo_achshav", "Correction",
+        "שלי לא עכשיו",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי לא עכשיו.",
+    ))
+    cases.append(TestCase(
+        "correction_tirageyi", "Correction",
+        "שלי תירגעי",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי תירגעי.",
+    ))
+    cases.append(TestCase(
+        "correction_lo_elayich", "Correction",
+        "שלי לא אלייך",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי לא אלייך.",
+    ))
+
     # ── Category 8: Edge Cases (4 tests) ──
     cases.append(TestCase(
         "empty_message", "EdgeCases",
