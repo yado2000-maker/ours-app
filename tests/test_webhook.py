@@ -68,6 +68,7 @@ class TestCase:
                  negative_reply_pattern=None,
                  setup=None, teardown=None,
                  expected_classification=None,
+                 expected_living_vs_operating=None,
                  notes="", chat_id=None, forwarded=False):
         self.name = name
         self.category = category
@@ -80,6 +81,7 @@ class TestCase:
         self.setup = setup  # function to run before test
         self.teardown = teardown  # function to run after test (always — even on failure)
         self.expected_classification = expected_classification  # optional whatsapp_messages.classification match
+        self.expected_living_vs_operating = expected_living_vs_operating  # optional classification_data.living_vs_operating match
         self.notes = notes
         # Chat ID for the webhook payload. Default = group (Haiku classifier path).
         # Pass TEST_DM_ID explicitly for 1:1 tests (Sonnet path, no Haiku classification).
@@ -862,6 +864,73 @@ def build_test_cases():
         notes="Phase 4.4: living_layer_trigger injected into FAMILY PATTERNS should suppress misclassification.",
     ))
 
+    # ── Phase 5 Task 5.1: living_vs_operating layer discrimination (10 tests) ──
+    # Paired few-shots — same or similar verb, different layer signal.
+    # The discriminator is punctuation / time-marker / addressing / deictic.
+    # These tests verify Haiku emits the new living_vs_operating field AND
+    # classifies each message to the correct layer. Intent is orthogonal —
+    # we don't constrain it (depends on ambient context which varies).
+    cases.append(TestCase(
+        "layer_buy_milk_plain", "LayerDiscrimination",
+        "לקנות חלב",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: bare infinitive, no urgency → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_buy_milk_urgent", "LayerDiscrimination",
+        "לקנות חלב?!",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: same verb but ?! = live moment → living.",
+    ))
+    cases.append(TestCase(
+        "layer_pickup_planning", "LayerDiscrimination",
+        "נצטרך לאסוף את שושי בארבע",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: future tense + explicit time → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_pickup_now", "LayerDiscrimination",
+        "תאסוף את שושי עכשיו",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: imperative + 'עכשיו' now-marker → living.",
+    ))
+    cases.append(TestCase(
+        "layer_dentist_planning", "LayerDiscrimination",
+        "צריך תור לרופא שיניים לעידו",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: appointment planning → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_hurry_up", "LayerDiscrimination",
+        "תזדרזו כבר!",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: urgency-now exclamation → living.",
+    ))
+    cases.append(TestCase(
+        "layer_see_drawing", "LayerDiscrimination",
+        "שלי תראי את הציור של עידו",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: explicit + celebration invitation → living.",
+    ))
+    cases.append(TestCase(
+        "layer_remind_tomorrow", "LayerDiscrimination",
+        "שלי תזכירי לי מחר ב-9",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: explicit + planning (reminder with time) → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_indirect_wine", "LayerDiscrimination",
+        "מישהו יביא יין בדרך?",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: indirect plea, no specific time → living.",
+    ))
+    cases.append(TestCase(
+        "layer_call_mom_shabbat", "LayerDiscrimination",
+        "תקראי לאמא שתבוא לארוחה בשבת",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: planning with time reference → operating.",
+    ))
+
     # ── Category 8: Edge Cases (4 tests) ──
     cases.append(TestCase(
         "empty_message", "EdgeCases",
@@ -1257,6 +1326,14 @@ def _run_test_inner(tc):
                 diag = f" conf={cd.get('confidence','?')} atb={cd.get('addressed_to_bot','?')}"
             tc.result = "fail"
             tc.detail = f"Expected '{tc.expected_intent}', got '{actual_intent}'{diag} (cls: {logged.get('classification')})"
+            return
+
+    # Check expected living_vs_operating (Phase 5.1)
+    if tc.expected_living_vs_operating:
+        actual_layer = (cd or {}).get("living_vs_operating")
+        if actual_layer != tc.expected_living_vs_operating:
+            tc.result = "fail"
+            tc.detail = f"Expected living_vs_operating '{tc.expected_living_vs_operating}', got '{actual_layer}' (cd: {cd})"
             return
 
     # Check bot reply if pattern specified

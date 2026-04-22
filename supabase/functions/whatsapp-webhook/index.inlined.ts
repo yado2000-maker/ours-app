@@ -102,6 +102,11 @@ interface ClassificationOutput {
     | "clear_list";
   confidence: number; // 0.0 - 1.0
   addressed_to_bot?: boolean; // true when user is talking TO Sheli (not possessive "my/mine")
+  // Phase 5 of Sheli-in-Groups (2026-04-22): which conversation layer the message belongs to.
+  // operating = planning/tracking/remembering/deciding (shopping, tasks, reminders, events, expenses).
+  // living    = doing/reacting/urging/sharing/emoting right now (celebration, photo share, urgent command).
+  // ambiguous = could be either without more context — in ambient mode, silent is safer.
+  living_vs_operating?: "operating" | "ambiguous" | "living";
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
   entities: {
     person?: string;
@@ -1035,6 +1040,26 @@ RULES:
 - When unsure between action and ignore, prefer ignore (false silence > false action).
 - For correct_bot: ONLY classify as correct_bot when the message contains an EXPLICIT correction phrase. Allowed Hebrew triggers: "התכוונתי ל...", "לא X אלא Y", "לא X, כן Y", "לא X, Y", "טעית", "את טועה", "לא נכון", "אמרתי X, לא Y", "אמרתי אחרת", "אמרתי לך אחרת", "זה דבר אחד", "זה פריט אחד", "תתקני", "לא ככה". Allowed English triggers: "I meant X", "I said X, not Y", "you're wrong", "that's wrong", "not X, Y", "I told you X, not Y", "I told you differently". If the message is only emoji, only a reaction (🤦, 👎, 😤, 🙄), only "לא" / "אוף" / sighs, or only a quoted-reply with emoji and no explicit correction phrase → classify as ignore, NOT correct_bot. NEVER fabricate or paraphrase correction_text — the value you put in correction_text MUST appear VERBATIM as a substring of raw_text. If the user says "you're wrong" without specifying the right value, leave correction_text as empty string "".
 - If conversation context makes your classification uncertain, include "needs_conversation_review": true in your response.
+- ALWAYS include "living_vs_operating" in your output with one of three values: "operating", "ambiguous", "living".
+
+LAYER DISCRIMINATION (living vs operating, Phase 5 of Sheli-in-Groups, 2026-04-22):
+Every message lives on ONE of two conversational layers. This field is orthogonal to intent — an add_task can be either operating (planning) or living (urgent-now), and the handler uses both signals to decide whether to act silently, reply warmly, or stay out.
+
+- operating: structured planning language. explicit time/date, named assignee, shopping items, reminders, events, expenses. Examples: "לאסוף את שושי בארבע", "להוסיף חלב", "תזכירי לי מחר ב-8", "שילמתי 200 על פיצה".
+- living: urgency-now, deictic commands, exclamations, photos-and-reactions, chag greetings, indirect pleas to unnamed family. Examples: "תזדרזו!", "מישהו יכול?", "תאסוף את שושי עכשיו!", "חג שמח", "וואו".
+- ambiguous: genuinely unclear without context. "תאסוף את שושי" (no time, no urgency) alone could be either. When in doubt, pick ambiguous — in ambient mode the handler will stay silent (safer).
+
+Paired few-shots (same verb pair, different layer — the punctuation / time-marker / addressing difference is the whole signal):
+- "לקנות חלב" → operating
+- "לקנות חלב?!" → living   (exclamation + question = live moment)
+- "נצטרך לאסוף את שושי בארבע" → operating
+- "תאסוף את שושי עכשיו" → living   (now-marker)
+- "צריך תור לרופא שיניים לעידו" → operating
+- "תזדרזו כבר!" → living
+- "שלי תראי את הציור של עידו" → living   (explicit + celebration)
+- "שלי תזכירי לי מחר ב-9" → operating   (explicit + planning)
+- "מישהו יביא יין בדרך?" → living   (indirect plea, no specific time)
+- "תקראי לאמא שתבוא לארוחה בשבת" → operating   (planning with time)
 
 `;
 }
@@ -1102,11 +1127,16 @@ async function classifyIntent(
 
     try {
       const parsed = JSON.parse(raw);
+      // Phase 5: normalize living_vs_operating (default "ambiguous" when Haiku omits it).
+      const layer = parsed.living_vs_operating;
+      const livingVsOperating: "operating" | "ambiguous" | "living" =
+        layer === "operating" || layer === "living" ? layer : "ambiguous";
       return {
         intent: parsed.intent || "ignore",
         confidence:
           typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
         addressed_to_bot: parsed.addressed_to_bot || false,
+        living_vs_operating: livingVsOperating,
         needs_conversation_review: parsed.needs_conversation_review || false,
         entities: {
           ...parsed.entities,
