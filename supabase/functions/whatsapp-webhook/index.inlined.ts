@@ -1958,19 +1958,22 @@ function extractMissingPhonesFromReply(reply: string): Array<{
     delivery_mode: "dm" | "both";
     send_at_or_recurrence: { send_at?: string } | { days: number[]; time: string };
   }> = [];
-  for (const m of reply.matchAll(/<!--\s*MISSING_PHONES\s*:\s*(\{[\s\S]*?\})\s*-*>/g)) {
+  // Match until literal `-->` so nested braces inside send_at_or_recurrence don't
+  // truncate the JSON payload. Non-greedy on content, hard stop on HTML-comment close.
+  for (const m of reply.matchAll(/<!--\s*MISSING_PHONES\s*:\s*([\s\S]*?)\s*-->/g)) {
+    const raw = m[1].trim();
     try {
-      const parsed = JSON.parse(m[1]);
+      const parsed = JSON.parse(raw);
       if (Array.isArray(parsed.known) && Array.isArray(parsed.unknown)
           && typeof parsed.reminder_text === "string"
           && ["dm", "both"].includes(parsed.delivery_mode)
           && parsed.send_at_or_recurrence) {
         out.push(parsed);
       } else {
-        console.warn("[MissingPhones] Invalid MISSING_PHONES block shape:", m[1]);
+        console.warn("[MissingPhones] Invalid MISSING_PHONES block shape:", raw);
       }
     } catch {
-      console.warn("[MissingPhones] Failed to parse MISSING_PHONES block:", m[1]);
+      console.warn("[MissingPhones] Failed to parse MISSING_PHONES block:", raw);
     }
   }
   return out;
@@ -1979,7 +1982,7 @@ function extractMissingPhonesFromReply(reply: string): Array<{
 function cleanReminderFromReply(reply: string): string {
   return reply
     .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
-    .replace(/<!--\s*MISSING_PHONES\s*:?\s*\{[\s\S]*?\}\s*-*>/g, "")
+    .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
     .replace(/<!--\s*REMINDER[^>]*>/g, "")
@@ -8297,16 +8300,26 @@ Deno.serve(async (req: Request) => {
     // "מחר נעמי" → Sonnet helpfully schedules a tomorrow reminder). Previously we only
     // processed+cleaned reminders when intent==add_reminder, which leaked raw JSON to users
     // for other intents. Memory handling already follows this "always process" pattern.
-    const allReminders: { reminder_text: string; send_at: string }[] = reply
-      ? extractRemindersFromReply(reply)
-      : [];
+    //
+    // 2026-04-22: carries delivery_mode + recipient_phones + Haiku-entity enrichment +
+    // all-unknown refuse short-circuit so the private DM reminder feature works on the
+    // actionable path (parallel to rescueRemindersAndStrip on the direct_address_reply path).
+    const extractedReminders = reply ? extractRemindersFromReply(reply) : [];
+    const allReminders: Array<{
+      reminder_text: string;
+      send_at: string;
+      delivery_mode?: "group" | "dm" | "both";
+      recipient_phones?: string[];
+    }> = [...extractedReminders];
 
     // Haiku-entities fallback: only runs for add_reminder intent, since that's the only
     // classification that guarantees reminder_text + time_iso in entities.
     if (allReminders.length === 0 && classification.intent === "add_reminder") {
       const e = classification.entities;
       if (e?.reminder_text && e?.time_iso) {
-        allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+        const synth: typeof allReminders[number] = { reminder_text: e.reminder_text, send_at: e.time_iso };
+        if (e.delivery_mode) synth.delivery_mode = e.delivery_mode;
+        allReminders.push(synth);
         console.log(`[Reminder] Sonnet produced no REMINDER block — falling back to Haiku entities`);
         // If Sonnet also produced no visible reply, synthesize a minimal confirmation so the user knows it landed
         if (!reply) {
@@ -8323,8 +8336,51 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    for (const reminderData of allReminders) {
-      if (reminderData.send_at) {
+    // Enrichment pass — merge Haiku entities (delivery_mode + recipient_names) so the
+    // feature works even when Sonnet drops the extended fields. Same logic as in
+    // rescueRemindersAndStrip. Self-reference defaults to sender for dm w/ no names.
+    // If EVERY recipient is unknown, short-circuit with a refuse reply (MISSING_PHONES
+    // Case 1/3 behavior) instead of inserting broken rows.
+    const haikuE_ = classification.entities;
+    const haikuDm_ = haikuE_?.delivery_mode;
+    const haikuNames_ = haikuE_?.recipient_names || [];
+    let refuseReply_: string | null = null;
+    const enrichedReminders_: typeof allReminders = [];
+    for (const r of allReminders) {
+      if (!r.delivery_mode && haikuDm_) r.delivery_mode = haikuDm_;
+      if ((r.delivery_mode === "dm" || r.delivery_mode === "both")
+          && (!r.recipient_phones || r.recipient_phones.length === 0)) {
+        if (haikuNames_.length > 0) {
+          const { resolved, missing } = await resolveRecipientNamesToPhones(haikuNames_, householdId);
+          if (resolved.length === 0 && missing.length > 0) {
+            refuseReply_ = missing.length === 1
+              ? `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`
+              : `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+            console.log(`[Reminder] Enrichment refuse: all ${missing.length} recipient(s) unknown`);
+            continue;
+          }
+          r.recipient_phones = resolved.map((x) => x.phone);
+          console.log(`[Reminder] Enrichment resolved ${resolved.length} recipient(s)`);
+        } else if (r.delivery_mode === "dm" && message.senderPhone) {
+          r.recipient_phones = [message.senderPhone];
+          console.log(`[Reminder] Self-reference dm → ${message.senderPhone}`);
+        }
+      }
+      enrichedReminders_.push(r);
+    }
+
+    if (refuseReply_ && enrichedReminders_.length === 0) {
+      // Pure refuse — replace Sonnet's reply with the explanation, insert nothing.
+      reply = refuseReply_;
+    } else {
+      for (const reminderData of enrichedReminders_) {
+        if (!reminderData.send_at) continue;
+        const dm_ = reminderData.delivery_mode || "group";
+        const rp_: string[] | null = reminderData.recipient_phones || null;
+        if ((dm_ === "dm" || dm_ === "both") && (!rp_ || rp_.length === 0)) {
+          console.warn(`[Reminder] ${dm_} mode but no recipient_phones — skipping`);
+          continue;
+        }
         const { error: remErr } = await supabase.from("reminder_queue").insert({
           household_id: householdId,
           group_id: message.groupId,
@@ -8334,9 +8390,11 @@ Deno.serve(async (req: Request) => {
           reminder_type: "user",
           created_by_phone: message.senderPhone,
           created_by_name: message.senderName,
+          delivery_mode: dm_,
+          recipient_phones: rp_,
         });
         if (remErr) console.error("[Reminder] Insert error:", remErr);
-        else console.log(`[Reminder] Created for ${reminderData.send_at}: "${reminderData.reminder_text}" (intent=${classification.intent})`);
+        else console.log(`[Reminder] Created (${dm_}) for ${reminderData.send_at}: "${reminderData.reminder_text}" (intent=${classification.intent})`);
       }
     }
     // ALWAYS clean hidden REMINDER blocks from reply — defense in depth, never leak JSON to user.

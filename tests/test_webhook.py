@@ -1492,14 +1492,16 @@ class TestPrivateDmReminders(unittest.TestCase):
 
     def test_04_rotation_missing_phone(self):
         sb_post("rotations", {
+            "id": f"rot_dm_test_{uuid.uuid4().hex[:8]}",
             "household_id": DM_TEST_HOUSEHOLD_ID,
             "title": "שטיפת כלים",
             "type": "duty",
-            "members": json.dumps(["יונתן", "איתן", "נגה"]),
+            "members": ["יונתן", "איתן", "נגה"],
             "current_index": 0,
-            "frequency": json.dumps({"type": "weekly", "days": ["wed", "thu", "fri"]}),
+            "frequency": {"type": "weekly", "days": ["wed", "thu", "fri"]},
             "active": True,
         })
+        time.sleep(1)
         msg_id = _dm_send("תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7")
         reply = _dm_poll_bot_reply_text(msg_id)
         self.assertTrue("נגה" in reply or "בקבוצה" in reply,
@@ -1542,7 +1544,9 @@ class TestPrivateDmReminders(unittest.TestCase):
         self.assertEqual(row.get("delivery_mode") or "group", "group")
 
     def test_08_reconciliation_on_mapping_add(self):
-        # Seed a group-fallback row for נגה
+        # Seed a group-fallback row for נגה (pass dicts directly — json.dumps causes
+        # double-encoding that stores a JSON string into the jsonb column and breaks
+        # `metadata->>'missing_phone_for'` lookups in the RPC).
         sb_post("reminder_queue", {
             "household_id": DM_TEST_HOUSEHOLD_ID,
             "group_id": DM_TEST_GROUP_CHAT_ID,
@@ -1552,8 +1556,8 @@ class TestPrivateDmReminders(unittest.TestCase):
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "reminder_type": "user",
             "delivery_mode": "group",
-            "recurrence": json.dumps({"days": [5], "time": "07:00"}),
-            "metadata": json.dumps({"recurring_parent": True, "missing_phone_for": "נגה"}),
+            "recurrence": {"days": [5], "time": "07:00"},
+            "metadata": {"recurring_parent": True, "missing_phone_for": "נגה"},
         })
         # Add mapping + invoke reconciliation
         sb_post("whatsapp_member_mapping", {
