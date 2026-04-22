@@ -2029,6 +2029,16 @@ async function rescueRemindersAndStrip(
 
   for (const reminderData of allReminders) {
     if (!reminderData.send_at) continue;
+
+    const deliveryMode = reminderData.delivery_mode || "group";
+    const recipientPhones: string[] | null = reminderData.recipient_phones || null;
+
+    if ((deliveryMode === "dm" || deliveryMode === "both")
+        && (!recipientPhones || recipientPhones.length === 0)) {
+      console.warn(`[ReminderRescue] ${deliveryMode} mode but no recipient_phones — skipping: "${reminderData.reminder_text}"`);
+      continue;
+    }
+
     const { error } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -2038,10 +2048,15 @@ async function rescueRemindersAndStrip(
       reminder_type: "user",
       created_by_phone: message.senderPhone,
       created_by_name: message.senderName,
+      delivery_mode: deliveryMode,
+      recipient_phones: recipientPhones,
     });
     if (error) console.error("[ReminderRescue] Insert error:", error);
     else {
-      console.log(`[ReminderRescue] Saved from direct_address path: "${reminderData.reminder_text}" @ ${reminderData.send_at}`);
+      console.log(
+        `[ReminderRescue] Saved (${deliveryMode}): "${reminderData.reminder_text}" @ ${reminderData.send_at}`
+        + (recipientPhones ? ` → ${recipientPhones.length} recipients` : "")
+      );
       rescueSaveCount++;
     }
   }
@@ -2095,6 +2110,15 @@ async function rescueRemindersAndStrip(
   // the next 7 days of child rows.
   const recurring = extractRecurringRemindersFromReply(reply);
   for (const r of recurring) {
+    const recDeliveryMode = r.delivery_mode || "group";
+    const recRecipientPhones: string[] | null = r.recipient_phones || null;
+
+    if ((recDeliveryMode === "dm" || recDeliveryMode === "both")
+        && (!recRecipientPhones || recRecipientPhones.length === 0)) {
+      console.warn(`[RecurringReminderRescue] ${recDeliveryMode} mode but no recipient_phones — skipping: "${r.reminder_text}"`);
+      continue;
+    }
+
     const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -2106,13 +2130,18 @@ async function rescueRemindersAndStrip(
       created_by_phone: message.senderPhone,
       created_by_name: message.senderName,
       recurrence: { days: r.days, time: r.time },
+      delivery_mode: recDeliveryMode,
+      recipient_phones: recRecipientPhones,
       metadata: { recurring_parent: true, source: "sonnet_rescue" },
     }).select("id").single();
     if (recErr) {
       console.error("[RecurringReminderRescue] Insert error:", recErr);
       continue;
     }
-    console.log(`[RecurringReminderRescue] Parent row created: "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`);
+    console.log(
+      `[RecurringReminderRescue] Parent row created (${recDeliveryMode}): "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`
+      + (recRecipientPhones ? ` → ${recRecipientPhones.length} recipients` : "")
+    );
     rescueSaveCount++;
     // Immediately materialize the next 7 days so the first instance fires even before
     // the daily cron picks it up. The PG function is idempotent per (parent_id, date).
