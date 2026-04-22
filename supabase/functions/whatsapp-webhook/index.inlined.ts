@@ -7608,6 +7608,12 @@ Deno.serve(async (req: Request) => {
     // add_task, add_shopping etc. fire; intent=ignore stays silent).
     // ambient_living stays silenced: emoji-only reactions, urgent shouts,
     // chag greetings — those should never fire an action regardless of intent.
+    //
+    // Phase 6 Task 6.3 note (2026-04-23): plan called for dedicated_sheli mode
+    // to "treat ambient_ambiguous as visit-worthy (not silent)". After Option A,
+    // ambient_ambiguous is ALREADY falling through for all groups, so the override
+    // would be a no-op. group_mode is still detected and stored for future
+    // product/analytics use, but does not currently change routing.
     if (!isExplicit && layer === "living") {
       console.log(`[Webhook] Matrix: ${matrixCell} → silent`);
       await logMessage(message, `suppressed_${matrixCell}`, householdId, classification);
