@@ -189,6 +189,7 @@ interface ReplyContext {
   currentRotations?: Array<{ id: string; title: string; type: string; members: string[]; current_index: number; frequency?: object | null }>;
   recentBotReplies?: string[];
   familyMemories?: string; // Formatted family memories for prompt injection
+  phoneMappings?: string; // Formatted "name → phone" pairs for private DM reminder resolution (2026-04-22)
 }
 
 interface ReplyResult {
@@ -1555,6 +1556,9 @@ ${langInstructions}
 Members: ${memberNames}
 Sender: ${sender}
 ISRAEL CONTEXT: Weekend = Friday + Saturday ONLY. Sunday (יום ראשון) is the first WORK day. Never say "סוף השבוע" for Sunday.
+
+PHONE MAPPINGS (use to fill recipient_phones in private reminders — see REMINDERS section):
+${ctx.phoneMappings || "(no mappings)"}
 
 ACTION JUST TAKEN: ${actionSummary}
 ${stateContext}${antiRepetition}
@@ -5689,6 +5693,23 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   const ambiguousOptions = isAmbiguousName(message.senderName || "");
   const nameAskedAlready = convo.context?.name_spelling_asked === true;
 
+  // PHONE MAPPINGS for private DM reminders (2026-04-22). Only relevant once a
+  // household exists (pre-household users have nobody to DM but themselves).
+  let phoneMappingsStr = "(no mappings)";
+  if (convo.household_id) {
+    const { data: mappings } = await supabase
+      .from("whatsapp_member_mapping")
+      .select("phone_number, member_name")
+      .eq("household_id", convo.household_id);
+    const arr = (mappings || []) as Array<{ member_name: string; phone_number: string }>;
+    if (arr.length > 0) {
+      phoneMappingsStr = arr
+        .filter((m) => m.member_name && m.phone_number)
+        .map((m) => `${m.member_name} → ${m.phone_number}`)
+        .join("\n") || "(no mappings)";
+    }
+  }
+
   // Build context for Sonnet
   const botPhoneDisplay = `+${(Deno.env.get("BOT_PHONE_NUMBER") || "972555175553").replace(/^\+/, "").replace(/^(\d{3})(\d{2})(\d{3})(\d{4})$/, "$1 $2-$3-$4")}`;
   const contextBlock = `
@@ -5702,6 +5723,9 @@ CONVERSATION STATE:
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
+
+PHONE MAPPINGS (use to fill recipient_phones in private reminders — see REMINDERS section):
+${phoneMappingsStr}
 
 ${buildDayAnchor()}
 ${msgCount > 1 ? `
@@ -5906,6 +5930,22 @@ async function handlePersonalChannelMessage(
     const userName = convo?.context?.name || hebrewizeName(senderName) || "";
     const userGender = convo?.context?.gender || null;
 
+    // PHONE MAPPINGS for private DM reminders (2026-04-22).
+    let phoneMappingsStrPersonal = "(no mappings)";
+    {
+      const { data: mappings } = await supabase
+        .from("whatsapp_member_mapping")
+        .select("phone_number, member_name")
+        .eq("household_id", householdId);
+      const arr = (mappings || []) as Array<{ member_name: string; phone_number: string }>;
+      if (arr.length > 0) {
+        phoneMappingsStrPersonal = arr
+          .filter((m) => m.member_name && m.phone_number)
+          .map((m) => `${m.member_name} → ${m.phone_number}`)
+          .join("\n") || "(no mappings)";
+      }
+    }
+
     const botPhoneDisplay = `+${(Deno.env.get("BOT_PHONE_NUMBER") || "972555175553").replace(/^\+/, "").replace(/^(\d{3})(\d{2})(\d{3})(\d{4})$/, "$1 $2-$3-$4")}`;
     const contextBlock = `
 PERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally — shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.
@@ -5916,6 +5956,9 @@ CONVERSATION STATE:
 - User name: ${userName || "unknown"}
 - User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Items collected so far: ${JSON.stringify(existingItems)}
+
+PHONE MAPPINGS (use to fill recipient_phones in private reminders — see REMINDERS section):
+${phoneMappingsStrPersonal}
 
 ${buildDayAnchor()}
 
@@ -9125,6 +9168,16 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
     }
   }
 
+  // PHONE MAPPINGS for private DM reminders (2026-04-22). Sonnet uses this to
+  // fill recipient_phones when the user names someone for a dm/both reminder.
+  const mappingsArr = (mappingRes.data || []) as Array<{ member_name: string; phone_number: string }>;
+  const phoneMappings = mappingsArr.length === 0
+    ? "(no mappings)"
+    : mappingsArr
+        .filter((m) => m.member_name && m.phone_number)
+        .map((m) => `${m.member_name} → ${m.phone_number}`)
+        .join("\n");
+
   return {
     householdName: household?.name || "הבית",
     members: (membersRes.data || []).map((m) => m.display_name),
@@ -9139,6 +9192,7 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
     })),
     recentBotReplies: (botMsgsRes.data || []).map((m: any) => m.message_text),
     familyMemories,
+    phoneMappings,
   };
 }
 
