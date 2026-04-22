@@ -2150,6 +2150,104 @@ async function rescueRemindersAndStrip(
     else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
   }
 
+  // MISSING_PHONES handler (Option D fallback, 2026-04-22). When Sonnet cannot
+  // resolve every named recipient to a phone via PHONE MAPPINGS, it emits a
+  // MISSING_PHONES block instead of a REMINDER/RECURRING_REMINDER block. This
+  // handler enacts the hybrid Option D policy: refuse single-unknown requests,
+  // degrade rotation-with-missing-phones to group fallback tagged with
+  // metadata.missing_phone_for, and overrides the reply with a transparent
+  // explanation. Early-returns so COMMITMENT-EMISSION check + cleanReminder
+  // don't get a chance to mangle the fallback text.
+  const missingBlocks = extractMissingPhonesFromReply(reply);
+  let missingPhoneFallbackReply: string | null = null;
+
+  for (const block of missingBlocks) {
+    const { known, unknown, reminder_text, delivery_mode, send_at_or_recurrence } = block;
+
+    // Case 1: single unknown, zero known → refuse, no DB row.
+    if (unknown.length === 1 && known.length === 0) {
+      missingPhoneFallbackReply = `אין לי את הטלפון של ${unknown[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`;
+      rescueSaveCount++;
+      continue;
+    }
+
+    // Case 3: all missing, multi-person → refuse listing all, no DB row.
+    if (known.length === 0 && unknown.length > 1) {
+      missingPhoneFallbackReply = `אין לי את מספרי הטלפון של ${unknown.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+      rescueSaveCount++;
+      continue;
+    }
+
+    // Case 2: mixed — insert known as dm, unknown as group-fallback with tag.
+    const isRecurring = "days" in send_at_or_recurrence && "time" in send_at_or_recurrence;
+
+    for (const m of known) {
+      const baseRow: Record<string, unknown> = {
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: reminder_text,
+        sent: isRecurring,
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: delivery_mode,
+        recipient_phones: [m.phone],
+        metadata: { source: "missing_phones_handler", for_member: m.name },
+      };
+      if (isRecurring) {
+        baseRow.send_at = new Date().toISOString();
+        baseRow.sent_at = new Date().toISOString();
+        const rec = send_at_or_recurrence as { days: number[]; time: string };
+        baseRow.recurrence = { days: rec.days, time: rec.time };
+        (baseRow.metadata as Record<string, unknown>).recurring_parent = true;
+      } else {
+        baseRow.send_at = (send_at_or_recurrence as { send_at: string }).send_at;
+      }
+      const { error } = await supabase.from("reminder_queue").insert(baseRow);
+      if (error) console.error(`[MissingPhonesHandler] dm insert error for ${m.name}:`, error);
+      else rescueSaveCount++;
+    }
+
+    for (const u of unknown) {
+      const baseRow: Record<string, unknown> = {
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: `${u} — ${reminder_text}`,
+        sent: isRecurring,
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: "group",
+        recipient_phones: null,
+        metadata: { source: "missing_phones_handler", missing_phone_for: u },
+      };
+      if (isRecurring) {
+        baseRow.send_at = new Date().toISOString();
+        baseRow.sent_at = new Date().toISOString();
+        const rec = send_at_or_recurrence as { days: number[]; time: string };
+        baseRow.recurrence = { days: rec.days, time: rec.time };
+        (baseRow.metadata as Record<string, unknown>).recurring_parent = true;
+      } else {
+        baseRow.send_at = (send_at_or_recurrence as { send_at: string }).send_at;
+      }
+      const { error } = await supabase.from("reminder_queue").insert(baseRow);
+      if (error) console.error(`[MissingPhonesHandler] group-fallback insert error for ${u}:`, error);
+      else rescueSaveCount++;
+    }
+
+    if (isRecurring) {
+      await supabase.rpc("materialize_recurring_reminders");
+    }
+
+    const knownNames = known.map((k) => k.name).join(", ");
+    const unknownNames = unknown.join(", ");
+    missingPhoneFallbackReply = `רשמתי ל${knownNames} בפרטי. ל${unknownNames} אין לי מספר — אזכיר בקבוצה בימים שלו/ה. אם תשלח/י לי פעם אחת הודעה פרטית, אעביר גם אותו/ה לתזכורות פרטיות ✓`;
+  }
+
+  if (missingPhoneFallbackReply) {
+    return missingPhoneFallbackReply;
+  }
+
   // COMMITMENT-EMISSION safety net (2026-04-21). If Sonnet's visible reply contains
   // commitment language but no REMINDER/RECURRING_REMINDER/EVENT block was extracted
   // and saved, log a WARN with the reply text. These are the cases where the user
