@@ -5767,6 +5767,24 @@ function generateReferralCode(): string {
   return code;
 }
 
+// Atomically claim the right to send the group welcome exactly once, ever.
+// Returns true iff this caller won the race (welcome_sent_at was NULL and is now set).
+// Assumes the whatsapp_config row for groupId already exists.
+// Fails closed: any DB error returns false so we never double-send on uncertainty.
+async function claimWelcomeSend(groupId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("whatsapp_config")
+    .update({ welcome_sent_at: new Date().toISOString() })
+    .eq("group_id", groupId)
+    .is("welcome_sent_at", null)
+    .select("group_id");
+  if (error) {
+    console.error(`[Welcome] claim failed for ${groupId}:`, error);
+    return false;
+  }
+  return Array.isArray(data) && data.length > 0;
+}
+
 async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider) {
   console.log(`[GroupMgmt] Bot added to group ${groupId}`);
 
@@ -5786,10 +5804,16 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
         .eq("group_id", groupId);
       console.log(`[GroupMgmt] Re-activated bot for group ${groupId}`);
     }
-    // Send intro message on re-add
-    await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
-      householdId: existingConfig.household_id || "unknown", groupId, replyType: "group_mgmt"
-    });
+    // Welcome is exactly-once per group, ever. Claim atomically; skip if
+    // already sent (the common re-add case, or a concurrent auto-setup race).
+    if (await claimWelcomeSend(groupId)) {
+      await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
+        householdId: existingConfig.household_id || "unknown", groupId, replyType: "group_mgmt"
+      });
+      console.log(`[GroupMgmt] Intro sent to ${groupId} (existing config, welcome was unsent)`);
+    } else {
+      console.log(`[GroupMgmt] Welcome already delivered for ${groupId}, skipping intro on re-add`);
+    }
     return;
   }
 
@@ -5882,10 +5906,10 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
     });
     if (error) {
       console.error(`[GroupMgmt] Failed to create household:`, error);
-      // Still send intro even if household creation fails
-      await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
-        householdId: "unknown", groupId, replyType: "group_mgmt"
-      });
+      // Do NOT send intro when household creation failed: without a config row
+      // we cannot claim welcome_sent_at, so a retried group-add would double-send.
+      // Auto-setup on the next inbound message will retry household creation cleanly.
+      await notifyAdmin("Household create failed on group-add", `Group: ${groupId}`);
       return;
     }
     console.log(`[GroupMgmt] Created new household ${householdId} (${groupName})`);
@@ -5912,11 +5936,17 @@ async function handleBotAddedToGroup(groupId: string, provider: WhatsAppProvider
   }
   console.log(`[GroupMgmt] Pre-mapped ${humanParticipants.length} participants`);
 
-  // 7. Send introduction message
-  await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
-    householdId: householdId || "unknown", groupId, replyType: "group_mgmt"
-  });
-  console.log(`[GroupMgmt] Intro message sent to ${groupId}`);
+  // 7. Send introduction message — claim atomically so a racing auto-setup
+  // call (from the first inbound message arriving before/during this handler)
+  // cannot double-send. welcome_sent_at starts NULL on fresh config inserts.
+  if (await claimWelcomeSend(groupId)) {
+    await sendAndLog(provider, { groupId, text: INTRO_MESSAGE }, {
+      householdId: householdId || "unknown", groupId, replyType: "group_mgmt"
+    });
+    console.log(`[GroupMgmt] Intro message sent to ${groupId}`);
+  } else {
+    console.log(`[GroupMgmt] Welcome already claimed by concurrent caller for ${groupId}, skipping`);
+  }
 
   // 8. Notify any pending 1:1 onboarding conversations that their group is now active
   for (const p of humanParticipants) {
