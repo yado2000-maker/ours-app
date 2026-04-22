@@ -931,6 +931,28 @@ def build_test_cases():
         notes="Phase 5.1: planning with time reference → operating.",
     ))
 
+    # ── Phase 5 Task 5.3: matrix cell routing (new silence gates) ──
+    # Three tests exercising the NEW gates. Existing operating-cell behavior is
+    # already covered by the 100+ earlier tests — no need to duplicate.
+    cases.append(TestCase(
+        "matrix_ambient_living_silent", "MatrixRouting",
+        "תזדרזו כבר!",  # ambient + living (urgency-now exclamation, no @שלי)
+        expected_classification="suppressed_ambient_living",
+        notes="Phase 5.3: ambient + living must be silenced (no action, no reply).",
+    ))
+    cases.append(TestCase(
+        "matrix_ambient_ambiguous_silent", "MatrixRouting",
+        "תאסוף את שושי",  # ambient + ambiguous (imperative-ish, no time, no @שלי)
+        expected_classification="suppressed_ambient_ambiguous",
+        notes="Phase 5.3: ambient + ambiguous must also be silenced — safer to miss than to misfire.",
+    ))
+    cases.append(TestCase(
+        "matrix_explicit_operating_unchanged", "MatrixRouting",
+        "שלי תוסיפי חלב",  # explicit + operating (existing behavior preserved)
+        expected_intent="add_shopping",
+        notes="Phase 5.3 regression: explicit + operating still fires add_shopping as before.",
+    ))
+
     # ── Category 8: Edge Cases (4 tests) ──
     cases.append(TestCase(
         "empty_message", "EdgeCases",

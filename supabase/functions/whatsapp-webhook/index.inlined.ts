@@ -7523,12 +7523,45 @@ Deno.serve(async (req: Request) => {
       haikuCtx
     );
 
-    console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} addressed=${classification.addressed_to_bot} contextReview=${classification.needs_conversation_review} from ${message.senderName}`);
+    console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} addressed=${classification.addressed_to_bot} layer=${classification.living_vs_operating} contextReview=${classification.needs_conversation_review} from ${message.senderName}`);
 
     // Layer 2 merge: if Haiku says addressed_to_bot and Layer 1 didn't catch it, upgrade directAddress
     if (classification.addressed_to_bot && !directAddress) {
       directAddress = true;
       console.log(`[Webhook] Layer 2: Haiku detected שלי as bot name (Layer 1 missed it)`);
+    }
+
+    // Phase 5 Task 5.3 (2026-04-22): 3x2 matrix routing (addressed × layer).
+    // Two silence gates for ambient-non-operating cells, one visit-log hook
+    // for explicit_living. Other cells fall through to existing routing.
+    //
+    // Cells:
+    //   explicit_operating → existing chatty path (action + reply)
+    //   explicit_ambiguous → existing chatty path (clarify / best-guess)
+    //   explicit_living    → log invitation_accepted pending, fall through to Sonnet
+    //                        which uses VISIT_NOT_RESIDENCY prompt rule (Phase 2)
+    //   ambient_operating  → existing act path (shopping batch, tasks, etc.)
+    //   ambient_ambiguous  → SILENT (new — don't act when the family isn't asking Sheli)
+    //   ambient_living     → SILENT (new — emojis, reactions, urgent shouts, chag greetings)
+    const isExplicit = directAddress || classification.addressed_to_bot === true;
+    const layer = classification.living_vs_operating || "ambiguous";
+    const matrixCell = `${isExplicit ? "explicit" : "ambient"}_${layer}`;
+    console.log(`[Webhook] Matrix cell: ${matrixCell}`);
+
+    if (!isExplicit && (layer === "living" || layer === "ambiguous")) {
+      // Ambient + non-operating → stay out. Families talk about logistics,
+      // photos, urgency — Sheli is not in that conversation unless invited.
+      console.log(`[Webhook] Matrix: ${matrixCell} → silent`);
+      await logMessage(message, `suppressed_${matrixCell}`, householdId, classification);
+      return new Response("OK", { status: 200 });
+    }
+
+    if (isExplicit && layer === "living") {
+      // Explicit invitation into a living-layer moment (celebration, photo,
+      // urgency). Log optimistically — if the family corrects within 10 min,
+      // the correction handler deletes the pending row. Otherwise it becomes
+      // a permanent per-household signal that this kind of invitation is ok.
+      await logInvitationPending(householdId, message.text);
     }
 
     // SILENCE GUARD — trust the classifier's "this isn't for the bot" verdict.
