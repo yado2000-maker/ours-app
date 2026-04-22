@@ -834,6 +834,34 @@ def build_test_cases():
         notes="Phase 3.4: explicit @שלי address bypasses cool-down.",
     ))
 
+    # ── Phase 4 Task 4.4: household pattern suppresses misclassification ──
+    # Seed a living_layer_trigger in the test household; confirm the classifier
+    # now treats the same text as 'ignore' rather than add_task.
+    def _seed_living_layer_trigger():
+        sb_post("household_patterns", {
+            "household_id": TEST_HOUSEHOLD_ID,
+            "pattern_type": "living_layer_trigger",
+            "pattern_key": "תאסוף את שושי עכשיו",
+            "pattern_value": "תאסוף את שושי עכשיו",
+            "confidence": 0.8,
+            "hit_count": 3,
+        })
+
+    def _clear_living_layer_trigger():
+        sb_delete("household_patterns", {
+            "household_id": f"eq.{TEST_HOUSEHOLD_ID}",
+            "pattern_type": "eq.living_layer_trigger",
+        })
+
+    cases.append(TestCase(
+        "household_pattern_suppresses_misclassification", "Patterns",
+        "תאסוף את שושי עכשיו",
+        setup=_seed_living_layer_trigger,
+        teardown=_clear_living_layer_trigger,
+        expected_intent="ignore",
+        notes="Phase 4.4: living_layer_trigger injected into FAMILY PATTERNS should suppress misclassification.",
+    ))
+
     # ── Category 8: Edge Cases (4 tests) ──
     cases.append(TestCase(
         "empty_message", "EdgeCases",

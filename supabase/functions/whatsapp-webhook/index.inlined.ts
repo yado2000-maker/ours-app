@@ -8965,9 +8965,9 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     supabase.from("household_members").select("display_name").eq("household_id", householdId),
     supabase.from("tasks").select("id, title, assigned_to").eq("household_id", householdId).eq("done", false),
     supabase.from("shopping_items").select("id, name, qty").eq("household_id", householdId).eq("got", false),
-    supabase.from("household_patterns").select("pattern_type, pattern_key, pattern_value")
+    supabase.from("household_patterns").select("pattern_type, pattern_key, pattern_value, pending_until")
       .eq("household_id", householdId).gte("confidence", 0.3)
-      .order("hit_count", { ascending: false }).limit(20),
+      .order("hit_count", { ascending: false }).limit(30),
     supabase.from("rotations").select("title, type, members, current_index")
       .eq("household_id", householdId).eq("active", true),
   ]);
@@ -8976,10 +8976,29 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
   let familyPatterns = "";
   const patterns = patternsRes.data;
   if (patterns && patterns.length > 0) {
+    // Phase 4: filter out invitation_accepted rows still within their 10-min
+    // pending window — only permanent (pending_until in the past or null)
+    // rows inform the classifier.
+    const nowIso = new Date().toISOString();
+    const activePatterns = patterns.filter(
+      (p: { pattern_type: string; pending_until?: string | null }) =>
+        p.pattern_type !== "invitation_accepted" ||
+        !p.pending_until ||
+        p.pending_until < nowIso,
+    );
     const byType: Record<string, string[]> = {};
-    for (const p of patterns) {
+    for (const p of activePatterns) {
       if (!byType[p.pattern_type]) byType[p.pattern_type] = [];
-      byType[p.pattern_type].push(`"${p.pattern_key}" = ${p.pattern_value}`);
+      // Phase 4: living_layer_trigger and invitation_accepted store the same
+      // text in both key and value; render them as a bare quoted snippet.
+      if (
+        p.pattern_type === "living_layer_trigger" ||
+        p.pattern_type === "invitation_accepted"
+      ) {
+        byType[p.pattern_type].push(`"${p.pattern_value}"`);
+      } else {
+        byType[p.pattern_type].push(`"${p.pattern_key}" = ${p.pattern_value}`);
+      }
     }
     const sections: string[] = [];
     if (byType.nickname) sections.push(`Nicknames: ${byType.nickname.join(", ")}`);
@@ -8987,6 +9006,17 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     if (byType.category_pref) sections.push(`Categories: ${byType.category_pref.join(", ")}`);
     if (byType.compound_name) sections.push(`Compound names (ONE item): ${byType.compound_name.join(", ")}`);
     if (byType.recurring_item) sections.push(`Recurring: ${byType.recurring_item.join(", ")}`);
+    // Phase 4: bidirectional household learning.
+    if (byType.living_layer_trigger) {
+      sections.push(
+        `LIVING-LAYER PHRASES THIS FAMILY USES (do NOT classify these as operating — the family corrected Sheli on similar messages):\n  - ${byType.living_layer_trigger.join("\n  - ")}`,
+      );
+    }
+    if (byType.invitation_accepted) {
+      sections.push(
+        `INVITATIONS THIS FAMILY ACCEPTED (ok to visit warmly next time you see something similar):\n  - ${byType.invitation_accepted.join("\n  - ")}`,
+      );
+    }
     familyPatterns = sections.join("\n");
   }
 
