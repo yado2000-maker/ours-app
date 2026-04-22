@@ -282,6 +282,8 @@ export default function AdminDashboard({ session, onBack }) {
   const [funnel, setFunnel] = useState(null);
   const [features, setFeatures] = useState(null);
   const [channelStats, setChannelStats] = useState(null);
+  const [topUsers, setTopUsers] = useState(null);
+  const [topUsersError, setTopUsersError] = useState(null);
   const [waitlistStats, setWaitlistStats] = useState(null);
   const [waitlistError, setWaitlistError] = useState(null);
   const [period, setPeriod] = useState(7);
@@ -300,12 +302,13 @@ export default function AdminDashboard({ session, onBack }) {
     setError(null);
 
     try {
-      const [overviewRes, funnelRes, featuresRes, chRes, wlRes] = await Promise.all([
+      const [overviewRes, funnelRes, featuresRes, chRes, wlRes, tuRes] = await Promise.all([
         supabase.rpc("admin_dashboard_overview", { p_days: period }),
         supabase.rpc("admin_funnel_stats"),
         supabase.rpc("admin_feature_stats", { p_days: period }),
         supabase.rpc("admin_channel_stats", { p_days: period }),
         supabase.rpc("admin_waitlist_stats", { p_days: period }),
+        supabase.rpc("admin_top_users", { p_days: period, p_limit: 20 }),
       ]);
 
       if (overviewRes.error) throw new Error(`Overview: ${overviewRes.error.message}`);
@@ -318,6 +321,13 @@ export default function AdminDashboard({ session, onBack }) {
         setWaitlistError(wlRes.error.message);
       } else {
         setWaitlistError(null);
+      }
+      // Top users is non-fatal for the same reason (pre-migration).
+      if (tuRes.error) {
+        console.warn("[AdminDashboard] top_users RPC unavailable:", tuRes.error.message);
+        setTopUsersError(tuRes.error.message);
+      } else {
+        setTopUsersError(null);
       }
 
       // Check for empty response (non-admin RLS)
@@ -335,6 +345,7 @@ export default function AdminDashboard({ session, onBack }) {
       setFeatures(ft);
       setChannelStats(chRes.data || null);
       setWaitlistStats(wlRes.data || null);
+      setTopUsers(tuRes.data || null);
       setLastRefresh(new Date());
     } catch (err) {
       console.error("[AdminDashboard] fetch error:", err);
@@ -424,7 +435,10 @@ export default function AdminDashboard({ session, onBack }) {
     ? trendSrc.map((w) => fmtHour(w.hour))
     : trendSrc.map((w) => fmtDate(w.week));
 
-  const households = (ov.household_details || []).sort((a, b) => (b.wa_msgs + b.web_msgs) - (a.wa_msgs + a.web_msgs));
+  const HOUSEHOLD_ROWS = 10;
+  const allHouseholds = (ov.household_details || []).sort((a, b) => (b.wa_msgs + b.web_msgs) - (a.wa_msgs + a.web_msgs));
+  const households = allHouseholds.slice(0, HOUSEHOLD_ROWS);
+  const householdsHiddenCount = Math.max(0, allHouseholds.length - HOUSEHOLD_ROWS);
 
   const funnelCounts = fn.funnel_counts || {};
   const conversations = (fn.conversations || []).slice(0, 10);
@@ -434,7 +448,11 @@ export default function AdminDashboard({ session, onBack }) {
   const dailyCosts = ft.daily_ai_costs || [];
   const costData = dailyCosts.map((d) => d.cost || 0);
   const costLabels = dailyCosts.map((d) => fmtDate(d.day));
-  const hhFeatures = ft.household_features || [];
+  const FEATURE_ROWS = 10;
+  const allHhFeatures = (ft.household_features || []);
+  const hhFeatures = allHhFeatures.slice(0, FEATURE_ROWS);
+  const hhFeaturesHiddenCount = Math.max(0, allHhFeatures.length - FEATURE_ROWS);
+  const topUsersList = (topUsers && topUsers.users) ? topUsers.users : [];
   const referrals = ft.referrals || {};
 
   // Churned families + web traffic (new)
@@ -603,20 +621,70 @@ export default function AdminDashboard({ session, onBack }) {
           <div style={{
             background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
           }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Per-Household Activity</h3>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: 0 }}>Top {HOUSEHOLD_ROWS} Households by Activity</h3>
+              {householdsHiddenCount > 0 && (
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                  +{householdsHiddenCount} more hidden
+                </span>
+              )}
+            </div>
             <DataTable
               columns={[
                 { key: "name", label: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.name || "Unnamed"}</span> },
-                { key: "wa_msgs", label: "WA Msgs" },
-                { key: "web_msgs", label: "Web Msgs" },
-                { key: "total", label: "Total", render: (r) => <span style={{ fontWeight: 700, color: "var(--accent)" }}>{(r.wa_msgs || 0) + (r.web_msgs || 0)}</span> },
-                { key: "last_active", label: "Last Active", render: (r) => relativeTime(r.last_active) },
+                { key: "total", label: "Messages", render: (r) => <span style={{ fontWeight: 700, color: "var(--accent)" }}>{(r.wa_msgs || 0) + (r.web_msgs || 0)}</span> },
                 { key: "member_count", label: "Members" },
+                { key: "last_active", label: "Last Active", render: (r) => relativeTime(r.last_active) },
               ]}
               rows={households}
               emptyMsg="No household data"
             />
           </div>
+        </Section>
+
+        {/* ══════════════════════════════════════════════
+            Section 1b: Top Users (by action count)
+        ══════════════════════════════════════════════ */}
+        <Section title="Top Users" subtitle={`Most active individuals in the last ${period} day${period === 1 ? "" : "s"} — ranked by actions (tasks, shopping, reminders, events, expenses)`}>
+          {topUsersList.length > 0 ? (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
+            }}>
+              <DataTable
+                columns={[
+                  { key: "rank", label: "#", render: (r) => <span style={{ color: "var(--muted)", fontWeight: 600 }}>{topUsersList.indexOf(r) + 1}</span> },
+                  { key: "member_name", label: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.member_name || "—"}</span> },
+                  { key: "phone", label: "Phone", render: (r) => <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--muted)" }}>{r.phone || "—"}</span> },
+                  { key: "household_name", label: "Household", render: (r) => r.household_name || "—" },
+                  { key: "actions", label: "Actions", render: (r) => <span style={{ fontWeight: 700, color: "var(--accent)" }}>{r.actions || 0}</span> },
+                  { key: "total_messages", label: "Messages" },
+                  { key: "last_active", label: "Last Active", render: (r) => relativeTime(r.last_active) },
+                ]}
+                rows={topUsersList}
+                emptyMsg="No user activity"
+              />
+            </div>
+          ) : topUsersError ? (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "24px 20px",
+            }}>
+              <p style={{ fontSize: 13, color: "var(--muted)", margin: 0 }}>
+                Top users unavailable: <code style={{ fontSize: 12 }}>{topUsersError}</code>
+              </p>
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 0" }}>
+                Apply migration <code>2026_04_22_admin_top_users.sql</code> to enable.
+              </p>
+            </div>
+          ) : (
+            <div style={{
+              background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)",
+              padding: "40px 20px", textAlign: "center",
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.4 }}>&#128100;</div>
+              <p style={{ fontSize: 14, color: "var(--muted)" }}>No user actions in this period</p>
+            </div>
+          )}
         </Section>
 
         {/* ══════════════════════════════════════════════
@@ -748,7 +816,14 @@ export default function AdminDashboard({ session, onBack }) {
           <div style={{
             background: "var(--white)", borderRadius: "var(--radius-card)", boxShadow: "var(--sh)", padding: 20,
           }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: "0 0 12px" }}>Per-Household Features</h3>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", margin: 0 }}>Top {FEATURE_ROWS} Households by Feature Use</h3>
+              {hhFeaturesHiddenCount > 0 && (
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                  +{hhFeaturesHiddenCount} more hidden
+                </span>
+              )}
+            </div>
             <DataTable
               columns={[
                 { key: "name", label: "Name", render: (r) => <span style={{ fontWeight: 600 }}>{r.name || "Unnamed"}</span> },
