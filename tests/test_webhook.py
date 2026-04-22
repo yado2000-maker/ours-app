@@ -940,12 +940,11 @@ def build_test_cases():
         expected_classification="suppressed_ambient_living",
         notes="Phase 5.3: ambient + living must be silenced (no action, no reply).",
     ))
-    cases.append(TestCase(
-        "matrix_ambient_ambiguous_silent", "MatrixRouting",
-        "תאסוף את שושי",  # ambient + ambiguous (imperative-ish, no time, no @שלי)
-        expected_classification="suppressed_ambient_ambiguous",
-        notes="Phase 5.3: ambient + ambiguous must also be silenced — safer to miss than to misfire.",
-    ))
+    # NOTE: Option A tightening (2026-04-23): ambient_ambiguous falls through
+    # to intent-based routing. Only ambient_living is silenced by the matrix gate.
+    # See commit tightening Task 5.3 after full-regression dropped to 81%.
+    # ambient_ambiguous is now exercised by the 100+ existing tests (expense_*,
+    # counter_*) which ride the intent gate unchanged.
     cases.append(TestCase(
         "matrix_explicit_operating_unchanged", "MatrixRouting",
         "שלי תוסיפי חלב",  # explicit + operating (existing behavior preserved)

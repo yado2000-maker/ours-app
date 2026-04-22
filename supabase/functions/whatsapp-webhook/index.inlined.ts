@@ -7548,9 +7548,15 @@ Deno.serve(async (req: Request) => {
     const matrixCell = `${isExplicit ? "explicit" : "ambient"}_${layer}`;
     console.log(`[Webhook] Matrix cell: ${matrixCell}`);
 
-    if (!isExplicit && (layer === "living" || layer === "ambiguous")) {
-      // Ambient + non-operating → stay out. Families talk about logistics,
-      // photos, urgency — Sheli is not in that conversation unless invited.
+    // Option A (2026-04-23, tightened after 90/111 regression): silence ONLY
+    // ambient_living. ambient_ambiguous falls through to existing intent-based
+    // routing — Haiku mislabels many legitimate operating messages (expenses,
+    // tasks, shopping) as "ambiguous" because they look casual without @שלי.
+    // The intent-gate below already handles those correctly (add_expense,
+    // add_task, add_shopping etc. fire; intent=ignore stays silent).
+    // ambient_living stays silenced: emoji-only reactions, urgent shouts,
+    // chag greetings — those should never fire an action regardless of intent.
+    if (!isExplicit && layer === "living") {
       console.log(`[Webhook] Matrix: ${matrixCell} → silent`);
       await logMessage(message, `suppressed_${matrixCell}`, householdId, classification);
       return new Response("OK", { status: 200 });
@@ -9601,7 +9607,15 @@ async function handleCorrection(
   const reply = replyLines.join("\n");
 
   // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
-  await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
+  // Defensive try/catch — the Cursor→Dashboard paste occasionally injects a stray
+  // Hebrew char mid-identifier (seen 2026-04-22, ref: "ReferenceError:
+  // derivePatternFromCorrecשtion is not defined"). If that happens again, pattern
+  // derivation silently fails but the user still gets their correction ack.
+  try {
+    await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
+  } catch (dpErr) {
+    console.error("[handleCorrection] derivePatternFromCorrection call failed (non-fatal):", dpErr);
+  }
 
   await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
     householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
