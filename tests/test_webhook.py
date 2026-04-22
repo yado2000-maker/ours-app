@@ -65,6 +65,7 @@ SB_HEADERS = {
 class TestCase:
     def __init__(self, name, category, message, expected_intent=None,
                  should_be_ignored=False, db_check=None, reply_pattern=None,
+                 negative_reply_pattern=None,
                  setup=None, notes="", chat_id=None, forwarded=False):
         self.name = name
         self.category = category
@@ -72,7 +73,8 @@ class TestCase:
         self.expected_intent = expected_intent
         self.should_be_ignored = should_be_ignored
         self.db_check = db_check  # {"table": "tasks", "column": "title", "value": "...", "should_exist": True}
-        self.reply_pattern = reply_pattern  # regex to match in bot reply
+        self.reply_pattern = reply_pattern  # regex that bot reply MUST match
+        self.negative_reply_pattern = negative_reply_pattern  # regex that bot reply must NOT match
         self.setup = setup  # function to run before test
         self.notes = notes
         # Chat ID for the webhook payload. Default = group (Haiku classifier path).
@@ -715,6 +717,19 @@ def build_test_cases():
         notes="Counter-example — infinitive cleanup verb BUT with time reference (not in-the-moment).",
     ))
 
+    # ── Category 5c: Scope — Visit-not-residency (Phase 2, added 2026-04-22) ──
+    # Sheli stays warm-but-external during living-moment invitations. She cheers,
+    # she does not claim family membership. Positive reply must be warm; forbidden
+    # phrases indicate identity leak ("אני חלק מהמשפחה", "אני מתרגשת ביחד איתכם", "אנחנו משפחה").
+    cases.append(TestCase(
+        "visit_not_residency_holds_identity", "Scope",
+        "שלי תראי איזה ציור עידו צייר בגן!",
+        expected_intent="ignore",
+        reply_pattern=r"(כל הכבוד|יופי|חמוד|מדהים|איזה|חמד)",
+        negative_reply_pattern=r"(אני חלק מהמשפחה|אני מתרגשת ביחד איתכם|אנחנו משפחה|אנחנו מתרגשים)",
+        notes="VISIT_NOT_RESIDENCY — Sheli cheers warmly as an external helper; must not claim kinship.",
+    ))
+
     # ── Category 6: Bot Addressing / Name Detection (4 tests) ──
     cases.append(TestCase(
         "sheli_add_shopping", "Addressing",
@@ -1131,6 +1146,7 @@ def run_test(tc):
             return
 
     # Check bot reply if pattern specified
+    reply_for_neg_check = None
     if tc.reply_pattern:
         reply = poll_for_bot_reply(log_lookup_id(tc.chat_id), before_ts, timeout=15)
         if not reply:
@@ -1140,6 +1156,15 @@ def run_test(tc):
         if not re.search(tc.reply_pattern, reply.get("message_text", ""), re.IGNORECASE):
             tc.result = "fail"
             tc.detail = f"Reply didn't match pattern '{tc.reply_pattern}': {reply['message_text'][:100]}"
+            return
+        reply_for_neg_check = reply
+
+    # Check that bot reply does NOT match forbidden pattern
+    if tc.negative_reply_pattern:
+        reply = reply_for_neg_check or poll_for_bot_reply(log_lookup_id(tc.chat_id), before_ts, timeout=15)
+        if reply and re.search(tc.negative_reply_pattern, reply.get("message_text", ""), re.IGNORECASE):
+            tc.result = "fail"
+            tc.detail = f"Reply matched FORBIDDEN pattern '{tc.negative_reply_pattern}': {reply['message_text'][:100]}"
             return
 
     # Check DB state if specified (extra delay for Sonnet escalation path)
