@@ -1957,6 +1957,53 @@ function cleanReminderFromReply(reply: string): string {
 // verbs ("אזכיר"/"נזכיר"/"אזכור") + recurring-cadence phrases with a time.
 const COMMITMENT_PHRASE_REGEX = /(?:^|\s|\b)(?:אזכיר|נזכיר|אזכור|אני\s+אזכיר|אני\s+אזכור|I['\u2019]?ll\s+remind|I\s+will\s+remind)(?:\s|$|[.,!?])|(?:יומית|כל\s+יום|כל\s+ערב|כל\s+בוקר|בכל\s+יום|בכל\s+ערב|every\s+day|nightly|daily)\s+ב[-\s]?\d{1,2}/i;
 
+// Resolve free-form Hebrew/English recipient names to phone numbers via
+// whatsapp_member_mapping ilike lookup. Supports shortcuts (הילדים / המשפחה /
+// כולם) by expanding to every household_members.display_name. Names that don't
+// match a mapping row land in `missing` — the caller decides fallback UX.
+async function resolveRecipientNamesToPhones(
+  names: string[],
+  householdId: string,
+): Promise<{
+  resolved: Array<{ name: string; phone: string }>;
+  missing: string[];
+}> {
+  const resolved: Array<{ name: string; phone: string }> = [];
+  const missing: string[] = [];
+
+  const SHORTCUTS = ["הילדים", "המשפחה", "כולם", "כל המשפחה", "כל הילדים"];
+  const expanded: string[] = [];
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (SHORTCUTS.some((s) => trimmed.includes(s))) {
+      const { data: members } = await supabase
+        .from("household_members")
+        .select("display_name")
+        .eq("household_id", householdId);
+      for (const m of (members || []) as Array<{ display_name: string }>) {
+        if (m.display_name) expanded.push(m.display_name);
+      }
+    } else {
+      expanded.push(trimmed);
+    }
+  }
+  const uniqueNames = Array.from(new Set(expanded));
+
+  for (const name of uniqueNames) {
+    const lookupName = name.replace(/s$/i, "");
+    const { data } = await supabase
+      .from("whatsapp_member_mapping")
+      .select("phone_number, member_name")
+      .eq("household_id", householdId)
+      .ilike("member_name", `%${lookupName}%`)
+      .limit(1)
+      .maybeSingle();
+    if (data?.phone_number) resolved.push({ name, phone: data.phone_number });
+    else missing.push(name);
+  }
+  return { resolved, missing };
+}
+
 async function rescueRemindersAndStrip(
   reply: string,
   classification: ClassificationOutput,
