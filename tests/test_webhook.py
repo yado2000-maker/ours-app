@@ -1539,7 +1539,6 @@ class TestPrivateDmReminders(unittest.TestCase):
         self.assertIsNotNone(row, f"no row matching 'סבתא' in {rows}")
         self.assertEqual(row.get("delivery_mode") or "group", "group")
 
-    @unittest.skip("Task 13 reconciliation not yet shipped — revisit after Task 13 lands")
     def test_08_reconciliation_on_mapping_add(self):
         # Seed a group-fallback row for נגה
         sb_post("reminder_queue", {

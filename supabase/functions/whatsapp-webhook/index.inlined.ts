@@ -5350,6 +5350,24 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       // Refresh the local reference so the rest of this message's processing
       // sees the mapping as present.
       mapping = { household_id: convo.household_id };
+      // Private DM reconciliation (2026-04-22) — a pre-existing household may
+      // have MISSING_PHONES group-fallback reminders tagged for this member.
+      const healedName = (convo.context as Record<string, unknown>)?.name as string | undefined
+        || senderName || null;
+      if (healedName) {
+        try {
+          const { data: upgraded } = await supabase.rpc("upgrade_group_fallback_reminders", {
+            p_household_id: convo.household_id,
+            p_member_name: healedName,
+            p_phone: phone,
+          });
+          if (upgraded && Number(upgraded) > 0) {
+            console.log(`[1:1] Self-heal upgraded ${upgraded} group-fallback reminder(s) to dm for ${healedName}`);
+          }
+        } catch (err) {
+          console.warn("[1:1] upgrade_group_fallback_reminders failed:", (err as Error).message);
+        }
+      }
     }
   }
 
@@ -8751,6 +8769,23 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
       { onConflict: "household_id,phone_number" }
     );
     if (mapErr) console.error("[upsertMemberMapping] Supabase upsert error:", mapErr.message);
+    else {
+      // Private DM reconciliation (2026-04-22). If prior reminders were created
+      // as group fallbacks for this member (MISSING_PHONES Case 2), upgrade them
+      // to dm now that the phone is known.
+      try {
+        const { data: upgraded } = await supabase.rpc("upgrade_group_fallback_reminders", {
+          p_household_id: householdId,
+          p_member_name: name,
+          p_phone: phone,
+        });
+        if (upgraded && Number(upgraded) > 0) {
+          console.log(`[upsertMemberMapping] Upgraded ${upgraded} group-fallback reminder(s) to dm for ${name}`);
+        }
+      } catch (err) {
+        console.warn("[upsertMemberMapping] upgrade_group_fallback_reminders failed:", (err as Error).message);
+      }
+    }
 
     // 2. Auto-add to household_members if not already there (so AI knows the family)
     const { data: existing } = await supabase
