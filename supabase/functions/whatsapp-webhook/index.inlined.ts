@@ -172,6 +172,11 @@ interface ClassifierContext {
   dayOfWeek: string; // Hebrew day name "רביעי"
   familyPatterns?: string; // Learned patterns for this household
   conversationHistory?: string; // Formatted recent conversation for context
+  // Phase 5 Task 5.2 (2026-04-22): compact signal about the conversational moment
+  // — time since last message + living-layer density over the last 5 messages.
+  // Used by Haiku to pick living_vs_operating. Computed from conversationHistory
+  // window, no additional DB call.
+  threadState?: string;
   // (Removed: demoMode — no more Haiku in 1:1, Sonnet handles all)
 }
 
@@ -812,7 +817,11 @@ When the user lists multiple items in one message, recognize obvious typos and t
 - Common Hebrew typo patterns: terminal letter swaps (ן↔ץ↔ם↔ף↔ך), repeated letters, voice-transcription artifacts, missing/extra final ה.
 - When in doubt (the items might be intentionally different), keep them separate. Only merge when it's CLEARLY a typo of an item already mentioned in the same message.
 
-${ctx.conversationHistory ? `
+${ctx.threadState ? `
+THREAD STATE (Phase 5 of Sheli-in-Groups, 2026-04-22):
+${ctx.threadState}
+Use this signal to pick living_vs_operating: rapid-reactive threads + short gap → living weighting; long gap or sparse thread → ambient/planning weighting.
+` : ""}${ctx.conversationHistory ? `
 RECENT CONVERSATION (oldest first, for context):
 ${ctx.conversationHistory}
 
@@ -7483,6 +7492,25 @@ Deno.serve(async (req: Request) => {
 
     const haikuCtx = await buildClassifierCtx(householdId);
     haikuCtx.conversationHistory = conversationHistory;
+
+    // Phase 5 Task 5.2: compact thread-state signal computed from the same
+    // conversationMsgs window — no duplicate DB call. Time gap = seconds
+    // between the most recent prior message and now. Living-layer density =
+    // count of reactive (short/emoji-only) messages in the last 5.
+    if (conversationMsgs.length > 0) {
+      const last5 = conversationMsgs.slice(-5);
+      const mostRecentTs = new Date(last5[last5.length - 1].created_at).getTime();
+      const gapSec = Math.max(0, Math.floor((Date.now() - mostRecentTs) / 1000));
+      const EMOJI_OR_WHITESPACE = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s\u200d\ufe0f]+$/u;
+      const reactiveCount = last5.filter((m) => {
+        const t = (m.message_text || "").trim();
+        return t.length < 20 || EMOJI_OR_WHITESPACE.test(t);
+      }).length;
+      const density = reactiveCount >= 3 ? "high (rapid reactive thread)" : reactiveCount >= 1 ? "medium" : "low";
+      haikuCtx.threadState =
+        `Time since last message: ${gapSec}s\n` +
+        `Living-layer density (last 5 msgs): ${density} (${reactiveCount}/${last5.length} short/emoji)`;
+    }
 
     // Prepend quoted message context so classifier understands reply references
     const textForClassifier = message.quotedText
