@@ -5804,6 +5804,50 @@ async function fetchGroupInfo(groupId: string): Promise<GroupInfo | null> {
   }
 }
 
+// ─── Phase 6 of Sheli-in-Groups: dedicated-Sheli-group auto-detection (2026-04-22) ───
+// Promote group_mode to 'dedicated_sheli' when BOTH signals are true:
+//   1. Group name mentions שלי as a NAME (boundary-gated — "המשפחה שלי" is a
+//      family-chat possessive, not a Sheli-dedicated name).
+//   2. Address-ratio ≥ 40% over ≥ 20 messages (family actually talks TO the bot
+//      most of the time).
+// In dedicated mode the matrix router loosens ambient_ambiguous suppression.
+// Called every ~10 messages (cheap sweep).
+const DEDICATED_NAME_RE = /(^|\s)שלי(\s|$|[^א-ת])/;
+
+async function maybePromoteGroupMode(
+  groupId: string,
+  groupName: string | null,
+  householdId: string,
+): Promise<void> {
+  try {
+    if (!groupName || !DEDICATED_NAME_RE.test(groupName)) return;
+
+    const { count: total } = await supabase
+      .from("whatsapp_messages")
+      .select("whatsapp_message_id", { count: "exact", head: true })
+      .eq("household_id", householdId);
+    if (!total || total < 20) return;
+
+    const { count: addressed } = await supabase
+      .from("whatsapp_messages")
+      .select("whatsapp_message_id", { count: "exact", head: true })
+      .eq("household_id", householdId)
+      .eq("classification_data->>addressed_to_bot", "true");
+
+    const ratio = (addressed || 0) / total;
+    const isDedicated = ratio >= 0.40;
+    await supabase
+      .from("whatsapp_config")
+      .update({ group_mode: isDedicated ? "dedicated_sheli" : "family_chat" })
+      .eq("group_id", groupId);
+    console.log(
+      `[GroupMode] ${groupId} (${groupName}): ratio ${ratio.toFixed(2)} (${addressed}/${total}) → ${isDedicated ? "dedicated_sheli" : "family_chat"}`,
+    );
+  } catch (err) {
+    console.error("[maybePromoteGroupMode] Error:", err);
+  }
+}
+
 function generateHouseholdId(): string {
   return "hh_" + Math.random().toString(36).slice(2, 10);
 }
@@ -7054,7 +7098,7 @@ Deno.serve(async (req: Request) => {
     // 4. Look up household by WhatsApp group ID
     let { data: config } = await supabase
       .from("whatsapp_config")
-      .select("household_id, bot_active, language, group_message_count, quiet_until")
+      .select("household_id, bot_active, language, group_message_count, quiet_until, group_mode")
       .eq("group_id", message.groupId)
       .single();
 
@@ -7546,7 +7590,15 @@ Deno.serve(async (req: Request) => {
     const isExplicit = directAddress || classification.addressed_to_bot === true;
     const layer = classification.living_vs_operating || "ambiguous";
     const matrixCell = `${isExplicit ? "explicit" : "ambient"}_${layer}`;
-    console.log(`[Webhook] Matrix cell: ${matrixCell}`);
+    console.log(`[Webhook] Matrix cell: ${matrixCell} (group_mode: ${config.group_mode || "family_chat"})`);
+
+    // Phase 6 Task 6.2 (2026-04-22): every ~10 messages, re-evaluate whether
+    // this group is dedicated-Sheli (name contains שלי AND address-ratio ≥ 40%).
+    // Non-blocking sweep; next message's handler uses the updated group_mode.
+    if ((config.group_message_count || 0) % 10 === 0) {
+      const groupInfo = await fetchGroupInfo(message.groupId).catch(() => null);
+      await maybePromoteGroupMode(message.groupId, groupInfo?.name || null, householdId);
+    }
 
     // Option A (2026-04-23, tightened after 90/111 regression): silence ONLY
     // ambient_living. ambient_ambiguous falls through to existing intent-based
