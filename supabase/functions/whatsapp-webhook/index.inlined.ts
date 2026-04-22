@@ -8397,6 +8397,84 @@ Deno.serve(async (req: Request) => {
         else console.log(`[Reminder] Created (${dm_}) for ${reminderData.send_at}: "${reminderData.reminder_text}" (intent=${classification.intent})`);
       }
     }
+    // 13b'. RECURRING_REMINDER (2026-04-22). Sonnet emits for weekly patterns,
+    // rotations, and "כל יום X"-style schedules. Previously only the rescue path
+    // (direct_address_reply) processed these — the actionable path silently
+    // dropped them. Now: extract + enrich + insert parent rows + materialize.
+    // Split-by-phone: when delivery_mode is dm/both and enrichment resolves
+    // MULTIPLE recipient phones (e.g. from "הילדים" shortcut), create one parent
+    // per phone so each member gets their own private dm row.
+    const recurringBlocks = reply ? extractRecurringRemindersFromReply(reply) : [];
+    for (const rec of recurringBlocks) {
+      // Merge Haiku delivery_mode if Sonnet omitted it
+      if (!rec.delivery_mode && haikuDm_) rec.delivery_mode = haikuDm_;
+
+      let recPhones: string[] | null = rec.recipient_phones || null;
+      if ((rec.delivery_mode === "dm" || rec.delivery_mode === "both")
+          && (!recPhones || recPhones.length === 0)) {
+        if (haikuNames_.length > 0) {
+          const { resolved, missing } = await resolveRecipientNamesToPhones(haikuNames_, householdId);
+          if (resolved.length === 0) {
+            if (missing.length > 0 && !refuseReply_) {
+              refuseReply_ = missing.length === 1
+                ? `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`
+                : `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+            }
+            continue;
+          }
+          recPhones = resolved.map((x) => x.phone);
+        } else if (rec.delivery_mode === "dm" && message.senderPhone) {
+          recPhones = [message.senderPhone];
+        }
+      }
+
+      // Split-by-phone: one parent per recipient (plan's "ONE RECURRING_REMINDER
+      // PER member" rule applied server-side so Sonnet's shortcut-resolution
+      // still yields per-member rows).
+      const phoneGroups: Array<string[] | null> =
+        (rec.delivery_mode === "dm" || rec.delivery_mode === "both") && recPhones && recPhones.length > 1
+          ? recPhones.map((p) => [p])
+          : [recPhones];
+
+      for (const grp of phoneGroups) {
+        const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
+          household_id: householdId,
+          group_id: message.groupId,
+          message_text: rec.reminder_text,
+          send_at: new Date().toISOString(),
+          sent: true,
+          sent_at: new Date().toISOString(),
+          reminder_type: "user",
+          created_by_phone: message.senderPhone,
+          created_by_name: message.senderName,
+          recurrence: { days: rec.days, time: rec.time },
+          delivery_mode: rec.delivery_mode || "group",
+          recipient_phones: grp,
+          metadata: { recurring_parent: true, source: "actionable_path" },
+        }).select("id").single();
+        if (recErr) {
+          console.error("[RecurringReminder] Insert error:", recErr);
+          continue;
+        }
+        console.log(
+          `[RecurringReminder] Parent (${rec.delivery_mode || "group"}): "${rec.reminder_text}" days=${JSON.stringify(rec.days)} @ ${rec.time} (id=${parent?.id})`
+          + (grp ? ` → ${grp.length} recipient(s)` : "")
+        );
+      }
+    }
+    // Materialize once after all parents are inserted (idempotent per parent+date)
+    if (recurringBlocks.length > 0) {
+      const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
+      if (matErr) console.warn("[RecurringReminder] Immediate materialize failed:", matErr.message);
+      else console.log(`[RecurringReminder] Immediate materialize inserted ${matCount} child row(s)`);
+    }
+
+    // If enrichment (one-shot OR recurring) produced a refuse but no rows got inserted,
+    // override Sonnet's reply with the explanation.
+    if (refuseReply_ && enrichedReminders_.length === 0 && recurringBlocks.length > 0) {
+      reply = refuseReply_;
+    }
+
     // ALWAYS clean hidden REMINDER blocks from reply — defense in depth, never leak JSON to user.
     if (reply) reply = cleanReminderFromReply(reply);
 
