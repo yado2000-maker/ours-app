@@ -1661,6 +1661,28 @@ REMINDERS: When intent is add_reminder:
   "תזכירי לי לפני השעה 16 לעשות קניות" → reply "אזכיר לך ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"לעשות קניות","send_at":"<today>T15:00:00+03:00"}-->
   "תזכירי לאסנת לעשות רשימה לפני 16" (after earlier message mentioning "יום רביעי") → reply "אזכיר לאסנת לעשות רשימה יום רביעי ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"אסנת — לעשות רשימה","send_at":"<next Wednesday>T15:00:00+03:00"}-->
 
+PRIVATE DELIVERY (2026-04-22):
+If the classifier sets entities.delivery_mode, honor it. Otherwise infer from the user's phrasing:
+  "גם בפרטי" / "also privately" → delivery_mode="both"
+  bare "בפרטי" / "בפרטי בלבד" / "רק בפרטי" → delivery_mode="dm"
+  "בקבוצה" / "במשפחתי" / "בווטסאפ המשותף" → delivery_mode="group" (default)
+  no privacy marker → delivery_mode="group" (omit the field)
+
+Phone resolution — use PHONE MAPPINGS block above (earlier in this prompt):
+- Look up EACH named recipient in PHONE MAPPINGS by name (case-insensitive partial match).
+- If ALL named recipients resolve, emit an extended REMINDER with both fields:
+    <!--REMINDER:{"reminder_text":"...","send_at":"...","delivery_mode":"dm","recipient_phones":["972501111111"]}-->
+  For "both", include BOTH delivery_mode="both" AND the recipient_phones array.
+- If ONE OR MORE recipients are NOT in PHONE MAPPINGS, emit MISSING_PHONES instead of REMINDER:
+    <!--MISSING_PHONES:{"known":[{"name":"יונתן","phone":"972501111111"}],"unknown":["נגה"],"reminder_text":"...","delivery_mode":"dm","send_at_or_recurrence":{"send_at":"2026-04-22T07:00:00+03:00"}}-->
+  The server-side handler decides the fallback UX (refuse single-unknown / degrade rotation to group + tag). Do NOT write your own fallback reply text when emitting MISSING_PHONES — the handler will.
+- If you are emitting a MISSING_PHONES block, your visible reply text can be empty or a short "רגע..." — the handler overrides it.
+
+Examples (assuming PHONE MAPPINGS contains "יונתן → 972501111111"):
+  "תזכירי לי בפרטי לשלם חשמל חמישי ב-10" (sender in PHONE MAPPINGS as "ניב → 972500000100") → reply "אזכיר חמישי ב-10:00 בפרטי ✓" + <!--REMINDER:{"reminder_text":"לשלם חשמל","send_at":"<next Thursday>T10:00:00+03:00","delivery_mode":"dm","recipient_phones":["972500000100"]}-->
+  "תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7" → reply "אזכיר ליונתן רביעי 7:00 גם בפרטי ✓" + <!--REMINDER:{"reminder_text":"יונתן — לשטוף כלים","send_at":"<Wed>T07:00:00+03:00","delivery_mode":"both","recipient_phones":["972501111111"]}-->
+  "תזכירי לנגה בפרטי מחר ב-9" (נגה NOT in PHONE MAPPINGS) → short visible reply (or empty) + <!--MISSING_PHONES:{"known":[],"unknown":["נגה"],"reminder_text":"תזכורת","delivery_mode":"dm","send_at_or_recurrence":{"send_at":"<tomorrow>T09:00:00+03:00"}}-->
+
 RECURRING REMINDERS (2026-04-20 — first-class support):
 Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום ב-X", "כל סוף שבוע", weekly rotations ("בימי א׳ ג׳ ה׳ אריק, ב׳ ד׳ ו׳ עופרי"), daily chores, etc.
 - Days encoding: 0=ראשון (Sunday), 1=שני (Monday), 2=שלישי (Tuesday), 3=רביעי (Wednesday), 4=חמישי (Thursday), 5=שישי (Friday), 6=שבת (Saturday).
@@ -1673,6 +1695,27 @@ Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳",
   "בימי ראשון שלישי וחמישי אריק מפנה את המדיח, עד 15:00" → reply "רשמתי תזכורת קבועה לאריק בימי א׳ ג׳ ה׳ ב-14:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}-->
   "כל יום ב-7 בבוקר ויטמין לילדים" → reply "אזכיר כל יום ב-7:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}-->
 - When user asks for BOTH weekday rotations (e.g. "אריק בימי א׳ ג׳ ה׳, עופרי בימי ב׳ ד׳ ו׳"), emit TWO RECURRING_REMINDER blocks, one per person.
+
+PRIVATE DELIVERY + ROTATION SHORTCUT (2026-04-22):
+- Honor entities.delivery_mode exactly like one-shot reminders (see PRIVATE DELIVERY block above).
+- When delivery_mode is "dm" or "both", add recipient_phones to each RECURRING_REMINDER block:
+    <!--RECURRING_REMINDER:{"reminder_text":"...","days":[3],"time":"07:00","delivery_mode":"dm","recipient_phones":["972501111111"]}-->
+- ROTATION SHORTCUT — When the message contains "לפי התור" / "בתורות" / "בתורנות" / "מתחלפים" / "כל יום ילד אחר" AND the ACTIVE ROTATIONS / CURRENT STATE context has a matching rotation, emit ONE RECURRING_REMINDER PER member. Each block:
+    reminder_text = "<member> — <action>"
+    days = just that one member's days (from the rotation)
+    time = the rotation's time-of-day
+    recipient_phones = [that member's phone from PHONE MAPPINGS]
+    delivery_mode = from the user's phrasing (typically "dm")
+- If ANY rotation member has NO entry in PHONE MAPPINGS, do NOT emit per-member RECURRING_REMINDER blocks. Emit ONE MISSING_PHONES block instead, with send_at_or_recurrence set to the FULL rotation days + time; the server-side handler will slice per member and apply the Option D fallback.
+
+Examples — rotation kids Wed=יונתן (972501111111), Thu=איתן (972502222222), Fri=נגה (972503333333), all mapped:
+  "תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7"
+  reply "אזכיר לכל ילד ב-7:00 בתורו בפרטי ✓"
+  3 RECURRING_REMINDER blocks, one per child with their single day and phone.
+
+Same rotation but נגה MISSING from PHONE MAPPINGS:
+  reply (empty or short — handler writes the fallback)
+  <!--MISSING_PHONES:{"known":[{"name":"יונתן","phone":"972501111111"},{"name":"איתן","phone":"972502222222"}],"unknown":["נגה"],"reminder_text":"לשטוף כלים","delivery_mode":"dm","send_at_or_recurrence":{"days":[3,4,5],"time":"07:00"}}-->
 ${buildDayAnchor()}
 
 ${ctx.familyMemories ? `
