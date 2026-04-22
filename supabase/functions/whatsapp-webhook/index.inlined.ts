@@ -6280,6 +6280,61 @@ function isCorrectionPhrase(text: string): boolean {
   return CORRECTION_PHRASES.some((re) => re.test(normalized));
 }
 
+// ─── Phase 4 of Sheli-in-Groups: living_layer_trigger pattern (2026-04-22) ───
+// Record the PRIOR user message in the group (the one Sheli misfired on) as a
+// household-scoped living-layer-trigger pattern. Called from the correction
+// handler (6c-pre) after a שלי שקט / שלי לא עכשיו / etc. The pattern is later
+// injected into the Haiku classifier prompt so this family's Sheli learns to
+// stay silent on similar messages next time.
+async function logLivingLayerTrigger(
+  householdId: string,
+  groupId: string,
+  correctionMessageId: string,
+): Promise<void> {
+  try {
+    const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+    const fiveMinAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
+    const { data: prior } = await supabase
+      .from("whatsapp_messages")
+      .select("message_text, sender_phone, created_at, whatsapp_message_id")
+      .eq("group_id", groupId)
+      .neq("whatsapp_message_id", correctionMessageId)
+      .neq("sender_phone", botPhone)
+      .gt("created_at", fiveMinAgoIso)
+      .lt("created_at", nowIso)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!prior?.message_text) {
+      console.log(`[Patterns] living_layer_trigger: no prior user message in ${groupId} within 5 min`);
+      return;
+    }
+    const snippet = prior.message_text.substring(0, 140);
+    const { error } = await supabase
+      .from("household_patterns")
+      .upsert(
+        {
+          household_id: householdId,
+          pattern_type: "living_layer_trigger",
+          pattern_key: snippet,
+          pattern_value: snippet,
+          confidence: 0.6,
+          hit_count: 1,
+        },
+        { onConflict: "household_id,pattern_type,pattern_key" },
+      );
+    if (error) {
+      console.error("[Patterns] logLivingLayerTrigger upsert error:", error);
+      return;
+    }
+    console.log(`[Patterns] living_layer_trigger logged for ${householdId}: "${snippet.substring(0, 60)}..."`);
+  } catch (err) {
+    console.error("[Patterns] logLivingLayerTrigger unexpected error:", err);
+  }
+}
+
 // ─── Pending Confirmation Patterns ───
 const CONFIRM_AFFIRMATIVE = /^(כן|נכון|בדיוק|יאללה|אוקי|ok|כמובן|מדויק|yes|בטח|sure|👍|💪)[\s.!]*$/i;
 const CONFIRM_NEGATIVE = /^(לא|לא נכון|טעות|הפוך|שגוי|no|ממש לא)[\s.!]*$/i;
@@ -7221,9 +7276,9 @@ Deno.serve(async (req: Request) => {
         .update({ quiet_until: quietUntil })
         .eq("group_id", message.groupId);
       console.log(`[Correction] ${message.groupId} quiet until ${quietUntil}`);
-      // Phase 4 will add: log the PRIOR user message as a living_layer_trigger
-      // household_pattern. For now, leave a marker log line so Phase 4 can grep for it.
-      console.log(`[Correction:TODO-Phase4] log living_layer_trigger for prior message in ${message.groupId}`);
+      // Phase 4: log the PRIOR user message as a living_layer_trigger pattern
+      // (non-blocking — errors log but don't affect the ack).
+      await logLivingLayerTrigger(householdId, message.groupId, message.messageId);
 
       await sendAndLog(provider, {
         groupId: message.groupId,
