@@ -154,6 +154,12 @@ interface ClassificationOutput {
     // Follow-up turn: when bot's last reply asked "איזו רשימה?", a bare
     // "קניות"/"מטלות"/"הכל" reply resolves to the corresponding target.
     clear_target?: "shopping" | "tasks" | "all" | null;
+    // Private DM reminders (2026-04-22). delivery_mode captures the privacy
+    // modifier from the user's phrasing ("בפרטי"/"גם בפרטי"/"בקבוצה"...).
+    // recipient_names carries named people; phone resolution is Sonnet's job
+    // via PHONE MAPPINGS context (Haiku doesn't see that context).
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_names?: string[];
     raw_text: string;
   };
 }
@@ -690,6 +696,14 @@ HEBREW PATTERNS:
   - Time-only reminders ("תזכירי לי ב-4 להתקשר") = add_reminder, conf 0.95.
   - Third-person reminders ("תזכירי לאסנת לעשות רשימה") = add_reminder (NOT add_task). reminder_text should include the target name ("אסנת — לעשות רשימה").
   - Multi-reminder in one message ("תזכירי לי ב-4 להתקשר ובעוד שעה לאסוף את הילדים") → classify as add_reminder with FIRST reminder in entities + "needs_conversation_review": true. Sonnet creates both.
+  - PRIVACY MODIFIER: Detect and set entities.delivery_mode:
+      "בפרטי" / "תזכירי לי בפרטי" / "תזכירי לו בפרטי" / "privately" → delivery_mode="dm"
+      "גם בפרטי" / "also privately" / "also in DM" → delivery_mode="both"
+      "בפרטי בלבד" / "רק בפרטי" / "privately only" → delivery_mode="dm"
+      "בקבוצה" / "בקבוצתי" / "במשפחתי" / "בווטסאפ המשותף" / "in the group" → delivery_mode="group"
+      (no privacy phrase) → omit delivery_mode (Sonnet defaults to group)
+  - ROTATION SHORTCUT (set needs_conversation_review=true): "לפי התור" / "בתורות" / "בתורנות" / "תורנות" / "תורנים" / "מתחלפים" / "כל יום ילד אחר" / "כל יום מישהו אחר" / "לפי התורנות" / "מי שהתור שלו" — Sonnet expands to per-member recurring blocks.
+  - RECIPIENT NAMES: Extract named people into entities.recipient_names (array).
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
@@ -903,6 +917,10 @@ EXAMPLES:
 [אבא]: "תזכירי לאמא להביא חלב מחר ב-10" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"אמא — להביא חלב","time_raw":"מחר ב-10","raw_text":"תזכירי לאמא להביא חלב מחר ב-10"}}
 [אמא]: "תזכירי לי לפני השעה 16 לעשות קניות" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"לעשות קניות","time_raw":"לפני השעה 16","raw_text":"תזכירי לי לפני השעה 16 לעשות קניות"}}
 [אמיתי]: "ותזכיר לאסנת לעשות רשימה לפני 16" → {"intent":"add_reminder","confidence":0.80,"addressed_to_bot":true,"needs_conversation_review":true,"entities":{"reminder_text":"אסנת — לעשות רשימה","time_raw":"לפני 16","raw_text":"ותזכיר לאסנת לעשות רשימה לפני 16"}}
+[ניב]: "תזכירי לי בפרטי לשלם חשבון חשמל בחמישי" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לשלם חשבון חשמל","time_raw":"חמישי","delivery_mode":"dm","recipient_names":["ניב"],"raw_text":"תזכירי לי בפרטי לשלם חשבון חשמל בחמישי"}}
+[ניב]: "תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר" → {"intent":"add_reminder","confidence":0.92,"entities":{"reminder_text":"יונתן — לשטוף כלים","time_raw":"רביעי 7:00","delivery_mode":"both","recipient_names":["יונתן"],"raw_text":"תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר"}}
+[ניב]: "תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7" → {"intent":"add_reminder","confidence":0.85,"needs_conversation_review":true,"entities":{"reminder_text":"לשטוף כלים","time_raw":"כל יום 7:00","delivery_mode":"dm","recipient_names":["הילדים"],"raw_text":"תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7"}}
+[ניב]: "תזכירי ביום חמישי במשפחתי להביא שמיכות" → {"intent":"add_reminder","confidence":0.88,"entities":{"reminder_text":"להביא שמיכות","time_raw":"חמישי","delivery_mode":"group","raw_text":"תזכירי ביום חמישי במשפחתי להביא שמיכות"}}
 [אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}

@@ -44,6 +44,10 @@ export interface ClassificationOutput {
     reminder_text?: string;
     memory_content?: string;
     memory_about?: string; // member name
+    // Private DM reminders (2026-04-22). See inlined classifier for prompt
+    // rules + examples. Extracted here for type parity only.
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_names?: string[];
     raw_text: string;
   };
 }
