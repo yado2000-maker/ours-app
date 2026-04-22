@@ -66,7 +66,9 @@ class TestCase:
     def __init__(self, name, category, message, expected_intent=None,
                  should_be_ignored=False, db_check=None, reply_pattern=None,
                  negative_reply_pattern=None,
-                 setup=None, notes="", chat_id=None, forwarded=False):
+                 setup=None, teardown=None,
+                 expected_classification=None,
+                 notes="", chat_id=None, forwarded=False):
         self.name = name
         self.category = category
         self.message = message
@@ -76,6 +78,8 @@ class TestCase:
         self.reply_pattern = reply_pattern  # regex that bot reply MUST match
         self.negative_reply_pattern = negative_reply_pattern  # regex that bot reply must NOT match
         self.setup = setup  # function to run before test
+        self.teardown = teardown  # function to run after test (always — even on failure)
+        self.expected_classification = expected_classification  # optional whatsapp_messages.classification match
         self.notes = notes
         # Chat ID for the webhook payload. Default = group (Haiku classifier path).
         # Pass TEST_DM_ID explicitly for 1:1 tests (Sonnet path, no Haiku classification).
@@ -799,6 +803,37 @@ def build_test_cases():
         notes="Phase 3 correction phrase: שלי לא אלייך.",
     ))
 
+    # ── Phase 3 Task 3.4: cool-down gate ──
+    # quiet_until set to 5 min in the future on setup; ambient messages should
+    # be suppressed_cooldown; explicit @שלי addresses should fire anyway.
+    def _set_cooldown():
+        now_plus_5 = (datetime.utcnow() + timedelta(minutes=5)).isoformat() + "Z"
+        sb_patch("whatsapp_config",
+                 {"quiet_until": now_plus_5},
+                 {"group_id": f"eq.{TEST_GROUP_CHAT_ID}"})
+
+    def _clear_cooldown():
+        sb_patch("whatsapp_config",
+                 {"quiet_until": None},
+                 {"group_id": f"eq.{TEST_GROUP_CHAT_ID}"})
+
+    cases.append(TestCase(
+        "ambient_silent_during_cooldown", "Correction",
+        "צריך לקנות חלב",  # operating-ambient; would normally fire
+        setup=_set_cooldown,
+        teardown=_clear_cooldown,
+        expected_classification="suppressed_cooldown",
+        notes="Phase 3.4: ambient operating message during cool-down must be suppressed.",
+    ))
+    cases.append(TestCase(
+        "explicit_addressing_still_works_during_cooldown", "Correction",
+        "שלי תוסיפי חלב לרשימה",  # explicit + operating
+        setup=_set_cooldown,
+        teardown=_clear_cooldown,
+        expected_intent="add_shopping",
+        notes="Phase 3.4: explicit @שלי address bypasses cool-down.",
+    ))
+
     # ── Category 8: Edge Cases (4 tests) ──
     cases.append(TestCase(
         "empty_message", "EdgeCases",
@@ -1102,7 +1137,20 @@ def build_test_cases():
 # ─── Test Runner ───
 
 def run_test(tc):
-    """Run a single test case."""
+    """Run a single test case. Always runs teardown (if any), even on failure."""
+    try:
+        _run_test_inner(tc)
+    finally:
+        if tc.teardown:
+            try:
+                tc.teardown()
+            except Exception as e:
+                # Don't override a pre-existing failure with a teardown error.
+                if tc.result not in ("fail", "error"):
+                    tc.result = "error"
+                    tc.detail = f"Teardown failed: {e}"
+
+def _run_test_inner(tc):
     msg_id = generate_msg_id(tc.name)
 
     # Run setup if any
@@ -1152,6 +1200,14 @@ def run_test(tc):
         tc.result = "fail"
         tc.detail = "Message never logged to whatsapp_messages"
         return
+
+    # Check expected_classification if specified (match the raw whatsapp_messages.classification field)
+    if tc.expected_classification:
+        actual_cls = logged.get("classification")
+        if actual_cls != tc.expected_classification:
+            tc.result = "fail"
+            tc.detail = f"Expected classification '{tc.expected_classification}', got '{actual_cls}'"
+            return
 
     # Extract intent from classification_data
     cd = logged.get("classification_data")

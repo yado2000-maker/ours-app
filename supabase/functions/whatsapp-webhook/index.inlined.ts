@@ -6911,7 +6911,7 @@ Deno.serve(async (req: Request) => {
     // 4. Look up household by WhatsApp group ID
     let { data: config } = await supabase
       .from("whatsapp_config")
-      .select("household_id, bot_active, language, group_message_count")
+      .select("household_id, bot_active, language, group_message_count, quiet_until")
       .eq("group_id", message.groupId)
       .single();
 
@@ -7072,6 +7072,19 @@ Deno.serve(async (req: Request) => {
 
     if (directAddress) {
       console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention}, voiceFuzzy=${voiceFuzzyMatch}, imperative=${imperativeFirstWord ? firstWordOnly : false})`);
+    }
+
+    // 6b-cooldown. Phase 3 Task 3.4: honor quiet_until after a correction phrase.
+    // Ambient (non-addressed) messages during the 10-min window are suppressed
+    // silently — no classification, no reply. Explicit @שלי addresses still fire,
+    // so families can re-engage at any time. Correction phrases themselves match
+    // sheliFirstWord / atMention, so they pass through directAddress=true and hit
+    // the 6c-pre handler even during an active cool-down.
+    const isCoolingDown = !!config.quiet_until && new Date(config.quiet_until) > new Date();
+    if (isCoolingDown && !directAddress) {
+      console.log(`[Cooldown] Suppressed ambient in ${message.groupId} until ${config.quiet_until}`);
+      await logMessage(message, "suppressed_cooldown", householdId);
+      return new Response("OK", { status: 200 });
     }
 
     // 6b. Check for pending confirmation response
