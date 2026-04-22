@@ -1753,22 +1753,45 @@ async function generateEmojiReply(emoji: string, sender: string): Promise<string
 
 // ─── Reminder Extraction Helpers ───
 
-function extractRemindersFromReply(reply: string): { reminder_text: string; send_at: string }[] {
-  const jsonRegex = /<!--\s*REMINDER\s*:\s*(\{[^}]*\})/g;
-  const reminders: { reminder_text: string; send_at: string }[] = [];
-  let match;
-  while ((match = jsonRegex.exec(reply)) !== null) {
+function extractRemindersFromReply(reply: string): Array<{
+  reminder_text: string;
+  send_at: string;
+  delivery_mode?: "group" | "dm" | "both";
+  recipient_phones?: string[];
+}> {
+  const reminders: Array<{
+    reminder_text: string;
+    send_at: string;
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_phones?: string[];
+  }> = [];
+  for (const m of reply.matchAll(/<!--\s*REMINDER\s*:\s*(\{[^}]*\})/g)) {
     try {
-      const parsed = JSON.parse(match[1]);
-      if (parsed.send_at) reminders.push(parsed);
+      const parsed = JSON.parse(m[1]);
+      if (parsed.send_at) {
+        if (parsed.delivery_mode && !["group", "dm", "both"].includes(parsed.delivery_mode)) {
+          console.warn("[Reminder] Invalid delivery_mode, defaulting to group:", parsed.delivery_mode);
+          delete parsed.delivery_mode;
+        }
+        if (parsed.recipient_phones && !Array.isArray(parsed.recipient_phones)) {
+          console.warn("[Reminder] recipient_phones not an array, dropping:", parsed.recipient_phones);
+          delete parsed.recipient_phones;
+        }
+        reminders.push(parsed);
+      }
     } catch {
-      console.warn("[Reminder] Failed to parse REMINDER block:", match[1]);
+      console.warn("[Reminder] Failed to parse REMINDER block:", m[1]);
     }
   }
   return reminders;
 }
 
-function extractReminderFromReply(reply: string): { reminder_text: string; send_at: string } | null {
+function extractReminderFromReply(reply: string): {
+  reminder_text: string;
+  send_at: string;
+  delivery_mode?: "group" | "dm" | "both";
+  recipient_phones?: string[];
+} | null {
   const all = extractRemindersFromReply(reply);
   return all.length > 0 ? all[0] : null;
 }
@@ -1778,8 +1801,20 @@ function extractReminderFromReply(reply: string): { reminder_text: string; send_
 // for repeating weekly patterns. Parent rows are inserted with recurrence JSONB;
 // the materialize_recurring_reminders() PG function fills the next 7 days of
 // child rows daily via pg_cron.
-function extractRecurringRemindersFromReply(reply: string): Array<{ reminder_text: string; days: number[]; time: string }> {
-  const out: Array<{ reminder_text: string; days: number[]; time: string }> = [];
+function extractRecurringRemindersFromReply(reply: string): Array<{
+  reminder_text: string;
+  days: number[];
+  time: string;
+  delivery_mode?: "group" | "dm" | "both";
+  recipient_phones?: string[];
+}> {
+  const out: Array<{
+    reminder_text: string;
+    days: number[];
+    time: string;
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_phones?: string[];
+  }> = [];
   for (const m of reply.matchAll(/<!--\s*RECURRING_REMINDER\s*:\s*(\{[^}]*\})\s*-*>/g)) {
     try {
       const parsed = JSON.parse(m[1]);
@@ -1788,10 +1823,28 @@ function extractRecurringRemindersFromReply(reply: string): Array<{ reminder_tex
         Array.isArray(parsed.days) && parsed.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6) &&
         typeof parsed.time === "string" && /^\d{1,2}:\d{2}$/.test(parsed.time)
       ) {
+        let deliveryMode: "group" | "dm" | "both" | undefined;
+        if (parsed.delivery_mode) {
+          if (["group", "dm", "both"].includes(parsed.delivery_mode)) {
+            deliveryMode = parsed.delivery_mode;
+          } else {
+            console.warn("[RecurringReminder] Invalid delivery_mode, defaulting to group:", parsed.delivery_mode);
+          }
+        }
+        let recipientPhones: string[] | undefined;
+        if (parsed.recipient_phones !== undefined) {
+          if (Array.isArray(parsed.recipient_phones)) {
+            recipientPhones = parsed.recipient_phones as string[];
+          } else {
+            console.warn("[RecurringReminder] recipient_phones not an array, dropping:", parsed.recipient_phones);
+          }
+        }
         out.push({
           reminder_text: parsed.reminder_text,
           days: parsed.days as number[],
           time: parsed.time,
+          ...(deliveryMode && { delivery_mode: deliveryMode }),
+          ...(recipientPhones && { recipient_phones: recipientPhones }),
         });
       } else {
         console.warn("[RecurringReminder] Invalid RECURRING_REMINDER block shape:", m[1]);
@@ -1822,9 +1875,46 @@ function extractEventsFromReply(
   return events;
 }
 
+// MISSING_PHONES block extractor (2026-04-22). Sonnet emits this when one or
+// more named recipients for a private-delivery reminder are not in PHONE MAPPINGS.
+// The rescue handler then drives the Option D fallback UX (refuse / partial +
+// group fallback) rather than inserting a broken reminder row.
+function extractMissingPhonesFromReply(reply: string): Array<{
+  known: Array<{ name: string; phone: string }>;
+  unknown: string[];
+  reminder_text: string;
+  delivery_mode: "dm" | "both";
+  send_at_or_recurrence: { send_at?: string } | { days: number[]; time: string };
+}> {
+  const out: Array<{
+    known: Array<{ name: string; phone: string }>;
+    unknown: string[];
+    reminder_text: string;
+    delivery_mode: "dm" | "both";
+    send_at_or_recurrence: { send_at?: string } | { days: number[]; time: string };
+  }> = [];
+  for (const m of reply.matchAll(/<!--\s*MISSING_PHONES\s*:\s*(\{[\s\S]*?\})\s*-*>/g)) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      if (Array.isArray(parsed.known) && Array.isArray(parsed.unknown)
+          && typeof parsed.reminder_text === "string"
+          && ["dm", "both"].includes(parsed.delivery_mode)
+          && parsed.send_at_or_recurrence) {
+        out.push(parsed);
+      } else {
+        console.warn("[MissingPhones] Invalid MISSING_PHONES block shape:", m[1]);
+      }
+    } catch {
+      console.warn("[MissingPhones] Failed to parse MISSING_PHONES block:", m[1]);
+    }
+  }
+  return out;
+}
+
 function cleanReminderFromReply(reply: string): string {
   return reply
     .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
+    .replace(/<!--\s*MISSING_PHONES\s*:?\s*\{[\s\S]*?\}\s*-*>/g, "")
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
     .replace(/<!--\s*REMINDER[^>]*>/g, "")
