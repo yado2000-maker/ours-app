@@ -7184,6 +7184,56 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // 6c-pre. Correction phrases (Phase 3 of Sheli-in-Groups, 2026-04-22):
+    // One-word "back off" from the family. Always fires — best-effort undo
+    // in a 5-min window, then sets whatsapp_config.quiet_until = NOW() + 10 min
+    // (Task 3.4 honors this by suppressing ambient classification; explicit
+    // @שלי addresses still work). Placed BEFORE the normal quick-undo branch
+    // so a correction phrase can never fall through to classification even
+    // when there's no recent action to undo.
+    if (isCorrectionPhrase(message.text.trim())) {
+      const lastAction = await getLastBotAction(message.groupId, householdId);
+      let undone: string[] = [];
+      if (lastAction) {
+        const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+        if (new Date(lastAction.created_at).getTime() > fiveMinAgo) {
+          undone = await undoLastAction(householdId, lastAction.classification_data);
+        }
+      }
+
+      // Cool-down always fires, even if nothing was undone.
+      const quietUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      await supabase
+        .from("whatsapp_config")
+        .update({ quiet_until: quietUntil })
+        .eq("group_id", message.groupId);
+      console.log(`[Correction] ${message.groupId} quiet until ${quietUntil}`);
+      // Phase 4 will add: log the PRIOR user message as a living_layer_trigger
+      // household_pattern. For now, leave a marker log line so Phase 4 can grep for it.
+      console.log(`[Correction:TODO-Phase4] log living_layer_trigger for prior message in ${message.groupId}`);
+
+      await sendAndLog(provider, {
+        groupId: message.groupId,
+        text: "הבנתי 🤫",
+      }, {
+        householdId,
+        groupId: message.groupId,
+        inReplyTo: message.messageId,
+        replyType: "correction_phrase_reply",
+      });
+
+      if (lastAction && undone.length > 0) {
+        await supabase.from("classification_corrections").insert({
+          household_id: householdId,
+          message_id: lastAction.messageId,
+          correction_type: "explicit_reject",
+          original_data: lastAction.classification_data,
+        });
+      }
+      await logMessage(message, "correction_applied", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
     // 6c. Quick undo: if message matches rejection/negation pattern, undo last bot action
     const isUndoKeyword = UNDO_KEYWORDS.test(message.text.trim());
     // For item-specific negation, we need the last action to check item names
