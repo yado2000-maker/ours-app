@@ -65,15 +65,23 @@ SB_HEADERS = {
 class TestCase:
     def __init__(self, name, category, message, expected_intent=None,
                  should_be_ignored=False, db_check=None, reply_pattern=None,
-                 setup=None, notes="", chat_id=None, forwarded=False):
+                 negative_reply_pattern=None,
+                 setup=None, teardown=None,
+                 expected_classification=None,
+                 expected_living_vs_operating=None,
+                 notes="", chat_id=None, forwarded=False):
         self.name = name
         self.category = category
         self.message = message
         self.expected_intent = expected_intent
         self.should_be_ignored = should_be_ignored
         self.db_check = db_check  # {"table": "tasks", "column": "title", "value": "...", "should_exist": True}
-        self.reply_pattern = reply_pattern  # regex to match in bot reply
+        self.reply_pattern = reply_pattern  # regex that bot reply MUST match
+        self.negative_reply_pattern = negative_reply_pattern  # regex that bot reply must NOT match
         self.setup = setup  # function to run before test
+        self.teardown = teardown  # function to run after test (always — even on failure)
+        self.expected_classification = expected_classification  # optional whatsapp_messages.classification match
+        self.expected_living_vs_operating = expected_living_vs_operating  # optional classification_data.living_vs_operating match
         self.notes = notes
         # Chat ID for the webhook payload. Default = group (Haiku classifier path).
         # Pass TEST_DM_ID explicitly for 1:1 tests (Sonnet path, no Haiku classification).
@@ -715,6 +723,19 @@ def build_test_cases():
         notes="Counter-example — infinitive cleanup verb BUT with time reference (not in-the-moment).",
     ))
 
+    # ── Category 5c: Scope — Visit-not-residency (Phase 2, added 2026-04-22) ──
+    # Sheli stays warm-but-external during living-moment invitations. She cheers,
+    # she does not claim family membership. Positive reply must be warm; forbidden
+    # phrases indicate identity leak ("אני חלק מהמשפחה", "אני מתרגשת ביחד איתכם", "אנחנו משפחה").
+    cases.append(TestCase(
+        "visit_not_residency_holds_identity", "Scope",
+        "שלי תראי איזה ציור עידו צייר בגן!",
+        expected_intent="ignore",
+        reply_pattern=r"(כל הכבוד|יופי|חמוד|מדהים|איזה|חמד)",
+        negative_reply_pattern=r"(אני חלק מהמשפחה|אני מתרגשת ביחד איתכם|אנחנו משפחה|אנחנו מתרגשים)",
+        notes="VISIT_NOT_RESIDENCY — Sheli cheers warmly as an external helper; must not claim kinship.",
+    ))
+
     # ── Category 6: Bot Addressing / Name Detection (4 tests) ──
     cases.append(TestCase(
         "sheli_add_shopping", "Addressing",
@@ -752,6 +773,183 @@ def build_test_cases():
         "single_item_correction", "Corrections",
         "טעית, זה פריט אחד",
         expected_intent="correct_bot",
+    ))
+
+    # ── Category 7b: Correction Phrases (Phase 3, added 2026-04-22) ──
+    # Four one-word "back off" phrases. Pre-classifier match routes to the
+    # existing quick-undo handler AND sets whatsapp_config.quiet_until for 10 min.
+    # Tested at the reply level (ack like "הבנתי 🤫") — intent field is null on
+    # the pre-classifier path, so we rely on reply_pattern instead of expected_intent.
+    cases.append(TestCase(
+        "correction_shakat", "Correction",
+        "שלי שקט",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי שקט → undo + 10-min cool-down.",
+    ))
+    cases.append(TestCase(
+        "correction_lo_achshav", "Correction",
+        "שלי לא עכשיו",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי לא עכשיו.",
+    ))
+    cases.append(TestCase(
+        "correction_tirageyi", "Correction",
+        "שלי תירגעי",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי תירגעי.",
+    ))
+    cases.append(TestCase(
+        "correction_lo_elayich", "Correction",
+        "שלי לא אלייך",
+        reply_pattern=r"(הבנתי|אוקי|שקט|🤫)",
+        notes="Phase 3 correction phrase: שלי לא אלייך.",
+    ))
+
+    # ── Phase 3 Task 3.4: cool-down gate ──
+    # quiet_until set to 5 min in the future on setup; ambient messages should
+    # be suppressed_cooldown; explicit @שלי addresses should fire anyway.
+    def _set_cooldown():
+        now_plus_5 = (datetime.utcnow() + timedelta(minutes=5)).isoformat() + "Z"
+        sb_patch("whatsapp_config",
+                 {"quiet_until": now_plus_5},
+                 {"group_id": f"eq.{TEST_GROUP_CHAT_ID}"})
+
+    def _clear_cooldown():
+        sb_patch("whatsapp_config",
+                 {"quiet_until": None},
+                 {"group_id": f"eq.{TEST_GROUP_CHAT_ID}"})
+
+    cases.append(TestCase(
+        "ambient_silent_during_cooldown", "Correction",
+        "צריך לקנות חלב",  # operating-ambient; would normally fire
+        setup=_set_cooldown,
+        teardown=_clear_cooldown,
+        expected_classification="suppressed_cooldown",
+        notes="Phase 3.4: ambient operating message during cool-down must be suppressed.",
+    ))
+    cases.append(TestCase(
+        "explicit_addressing_still_works_during_cooldown", "Correction",
+        "שלי תוסיפי חלב לרשימה",  # explicit + operating
+        setup=_set_cooldown,
+        teardown=_clear_cooldown,
+        expected_intent="add_shopping",
+        notes="Phase 3.4: explicit @שלי address bypasses cool-down.",
+    ))
+
+    # ── Phase 4 Task 4.4: household pattern suppresses misclassification ──
+    # Seed a living_layer_trigger in the test household; confirm the classifier
+    # now treats the same text as 'ignore' rather than add_task.
+    def _seed_living_layer_trigger():
+        sb_post("household_patterns", {
+            "household_id": TEST_HOUSEHOLD_ID,
+            "pattern_type": "living_layer_trigger",
+            "pattern_key": "תאסוף את שושי עכשיו",
+            "pattern_value": "תאסוף את שושי עכשיו",
+            "confidence": 0.8,
+            "hit_count": 3,
+        })
+
+    def _clear_living_layer_trigger():
+        sb_delete("household_patterns", {
+            "household_id": f"eq.{TEST_HOUSEHOLD_ID}",
+            "pattern_type": "eq.living_layer_trigger",
+        })
+
+    cases.append(TestCase(
+        "household_pattern_suppresses_misclassification", "Patterns",
+        "תאסוף את שושי עכשיו",
+        setup=_seed_living_layer_trigger,
+        teardown=_clear_living_layer_trigger,
+        expected_intent="ignore",
+        notes="Phase 4.4: living_layer_trigger injected into FAMILY PATTERNS should suppress misclassification.",
+    ))
+
+    # ── Phase 5 Task 5.1: living_vs_operating layer discrimination (10 tests) ──
+    # Paired few-shots — same or similar verb, different layer signal.
+    # The discriminator is punctuation / time-marker / addressing / deictic.
+    # These tests verify Haiku emits the new living_vs_operating field AND
+    # classifies each message to the correct layer. Intent is orthogonal —
+    # we don't constrain it (depends on ambient context which varies).
+    cases.append(TestCase(
+        "layer_buy_milk_plain", "LayerDiscrimination",
+        "לקנות חלב",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: bare infinitive, no urgency → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_buy_milk_urgent", "LayerDiscrimination",
+        "לקנות חלב?!",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: same verb but ?! = live moment → living.",
+    ))
+    cases.append(TestCase(
+        "layer_pickup_planning", "LayerDiscrimination",
+        "נצטרך לאסוף את שושי בארבע",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: future tense + explicit time → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_pickup_now", "LayerDiscrimination",
+        "תאסוף את שושי עכשיו",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: imperative + 'עכשיו' now-marker → living.",
+    ))
+    cases.append(TestCase(
+        "layer_dentist_planning", "LayerDiscrimination",
+        "צריך תור לרופא שיניים לעידו",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: appointment planning → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_hurry_up", "LayerDiscrimination",
+        "תזדרזו כבר!",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: urgency-now exclamation → living.",
+    ))
+    cases.append(TestCase(
+        "layer_see_drawing", "LayerDiscrimination",
+        "שלי תראי את הציור של עידו",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: explicit + celebration invitation → living.",
+    ))
+    cases.append(TestCase(
+        "layer_remind_tomorrow", "LayerDiscrimination",
+        "שלי תזכירי לי מחר ב-9",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: explicit + planning (reminder with time) → operating.",
+    ))
+    cases.append(TestCase(
+        "layer_indirect_wine", "LayerDiscrimination",
+        "מישהו יביא יין בדרך?",
+        expected_living_vs_operating="living",
+        notes="Phase 5.1: indirect plea, no specific time → living.",
+    ))
+    cases.append(TestCase(
+        "layer_call_mom_shabbat", "LayerDiscrimination",
+        "תקראי לאמא שתבוא לארוחה בשבת",
+        expected_living_vs_operating="operating",
+        notes="Phase 5.1: planning with time reference → operating.",
+    ))
+
+    # ── Phase 5 Task 5.3: matrix cell routing (new silence gates) ──
+    # Three tests exercising the NEW gates. Existing operating-cell behavior is
+    # already covered by the 100+ earlier tests — no need to duplicate.
+    cases.append(TestCase(
+        "matrix_ambient_living_silent", "MatrixRouting",
+        "תזדרזו כבר!",  # ambient + living (urgency-now exclamation, no @שלי)
+        expected_classification="suppressed_ambient_living",
+        notes="Phase 5.3: ambient + living must be silenced (no action, no reply).",
+    ))
+    # NOTE: Option A tightening (2026-04-23): ambient_ambiguous falls through
+    # to intent-based routing. Only ambient_living is silenced by the matrix gate.
+    # See commit tightening Task 5.3 after full-regression dropped to 81%.
+    # ambient_ambiguous is now exercised by the 100+ existing tests (expense_*,
+    # counter_*) which ride the intent gate unchanged.
+    cases.append(TestCase(
+        "matrix_explicit_operating_unchanged", "MatrixRouting",
+        "שלי תוסיפי חלב",  # explicit + operating (existing behavior preserved)
+        expected_intent="add_shopping",
+        notes="Phase 5.3 regression: explicit + operating still fires add_shopping as before.",
     ))
 
     # ── Category 8: Edge Cases (4 tests) ──
@@ -1057,7 +1255,20 @@ def build_test_cases():
 # ─── Test Runner ───
 
 def run_test(tc):
-    """Run a single test case."""
+    """Run a single test case. Always runs teardown (if any), even on failure."""
+    try:
+        _run_test_inner(tc)
+    finally:
+        if tc.teardown:
+            try:
+                tc.teardown()
+            except Exception as e:
+                # Don't override a pre-existing failure with a teardown error.
+                if tc.result not in ("fail", "error"):
+                    tc.result = "error"
+                    tc.detail = f"Teardown failed: {e}"
+
+def _run_test_inner(tc):
     msg_id = generate_msg_id(tc.name)
 
     # Run setup if any
@@ -1108,6 +1319,14 @@ def run_test(tc):
         tc.detail = "Message never logged to whatsapp_messages"
         return
 
+    # Check expected_classification if specified (match the raw whatsapp_messages.classification field)
+    if tc.expected_classification:
+        actual_cls = logged.get("classification")
+        if actual_cls != tc.expected_classification:
+            tc.result = "fail"
+            tc.detail = f"Expected classification '{tc.expected_classification}', got '{actual_cls}'"
+            return
+
     # Extract intent from classification_data
     cd = logged.get("classification_data")
     actual_intent = None
@@ -1130,7 +1349,16 @@ def run_test(tc):
             tc.detail = f"Expected '{tc.expected_intent}', got '{actual_intent}'{diag} (cls: {logged.get('classification')})"
             return
 
+    # Check expected living_vs_operating (Phase 5.1)
+    if tc.expected_living_vs_operating:
+        actual_layer = (cd or {}).get("living_vs_operating")
+        if actual_layer != tc.expected_living_vs_operating:
+            tc.result = "fail"
+            tc.detail = f"Expected living_vs_operating '{tc.expected_living_vs_operating}', got '{actual_layer}' (cd: {cd})"
+            return
+
     # Check bot reply if pattern specified
+    reply_for_neg_check = None
     if tc.reply_pattern:
         reply = poll_for_bot_reply(log_lookup_id(tc.chat_id), before_ts, timeout=15)
         if not reply:
@@ -1140,6 +1368,15 @@ def run_test(tc):
         if not re.search(tc.reply_pattern, reply.get("message_text", ""), re.IGNORECASE):
             tc.result = "fail"
             tc.detail = f"Reply didn't match pattern '{tc.reply_pattern}': {reply['message_text'][:100]}"
+            return
+        reply_for_neg_check = reply
+
+    # Check that bot reply does NOT match forbidden pattern
+    if tc.negative_reply_pattern:
+        reply = reply_for_neg_check or poll_for_bot_reply(log_lookup_id(tc.chat_id), before_ts, timeout=15)
+        if reply and re.search(tc.negative_reply_pattern, reply.get("message_text", ""), re.IGNORECASE):
+            tc.result = "fail"
+            tc.detail = f"Reply matched FORBIDDEN pattern '{tc.negative_reply_pattern}': {reply['message_text'][:100]}"
             return
 
     # Check DB state if specified (extra delay for Sonnet escalation path)

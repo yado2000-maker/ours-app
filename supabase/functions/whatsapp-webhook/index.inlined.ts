@@ -102,6 +102,11 @@ interface ClassificationOutput {
     | "clear_list";
   confidence: number; // 0.0 - 1.0
   addressed_to_bot?: boolean; // true when user is talking TO Sheli (not possessive "my/mine")
+  // Phase 5 of Sheli-in-Groups (2026-04-22): which conversation layer the message belongs to.
+  // operating = planning/tracking/remembering/deciding (shopping, tasks, reminders, events, expenses).
+  // living    = doing/reacting/urging/sharing/emoting right now (celebration, photo share, urgent command).
+  // ambiguous = could be either without more context — in ambient mode, silent is safer.
+  living_vs_operating?: "operating" | "ambiguous" | "living";
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
   entities: {
     person?: string;
@@ -173,6 +178,11 @@ interface ClassifierContext {
   dayOfWeek: string; // Hebrew day name "רביעי"
   familyPatterns?: string; // Learned patterns for this household
   conversationHistory?: string; // Formatted recent conversation for context
+  // Phase 5 Task 5.2 (2026-04-22): compact signal about the conversational moment
+  // — time since last message + living-layer density over the last 5 messages.
+  // Used by Haiku to pick living_vs_operating. Computed from conversationHistory
+  // window, no additional DB call.
+  threadState?: string;
   // (Removed: demoMode — no more Haiku in 1:1, Sonnet handles all)
 }
 
@@ -822,7 +832,11 @@ When the user lists multiple items in one message, recognize obvious typos and t
 - Common Hebrew typo patterns: terminal letter swaps (ן↔ץ↔ם↔ף↔ך), repeated letters, voice-transcription artifacts, missing/extra final ה.
 - When in doubt (the items might be intentionally different), keep them separate. Only merge when it's CLEARLY a typo of an item already mentioned in the same message.
 
-${ctx.conversationHistory ? `
+${ctx.threadState ? `
+THREAD STATE (Phase 5 of Sheli-in-Groups, 2026-04-22):
+${ctx.threadState}
+Use this signal to pick living_vs_operating: rapid-reactive threads + short gap → living weighting; long gap or sparse thread → ambient/planning weighting.
+` : ""}${ctx.conversationHistory ? `
 RECENT CONVERSATION (oldest first, for context):
 ${ctx.conversationHistory}
 
@@ -1054,6 +1068,26 @@ RULES:
 - When unsure between action and ignore, prefer ignore (false silence > false action).
 - For correct_bot: ONLY classify as correct_bot when the message contains an EXPLICIT correction phrase. Allowed Hebrew triggers: "התכוונתי ל...", "לא X אלא Y", "לא X, כן Y", "לא X, Y", "טעית", "את טועה", "לא נכון", "אמרתי X, לא Y", "אמרתי אחרת", "אמרתי לך אחרת", "זה דבר אחד", "זה פריט אחד", "תתקני", "לא ככה". Allowed English triggers: "I meant X", "I said X, not Y", "you're wrong", "that's wrong", "not X, Y", "I told you X, not Y", "I told you differently". If the message is only emoji, only a reaction (🤦, 👎, 😤, 🙄), only "לא" / "אוף" / sighs, or only a quoted-reply with emoji and no explicit correction phrase → classify as ignore, NOT correct_bot. NEVER fabricate or paraphrase correction_text — the value you put in correction_text MUST appear VERBATIM as a substring of raw_text. If the user says "you're wrong" without specifying the right value, leave correction_text as empty string "".
 - If conversation context makes your classification uncertain, include "needs_conversation_review": true in your response.
+- ALWAYS include "living_vs_operating" in your output with one of three values: "operating", "ambiguous", "living".
+
+LAYER DISCRIMINATION (living vs operating, Phase 5 of Sheli-in-Groups, 2026-04-22):
+Every message lives on ONE of two conversational layers. This field is orthogonal to intent — an add_task can be either operating (planning) or living (urgent-now), and the handler uses both signals to decide whether to act silently, reply warmly, or stay out.
+
+- operating: structured planning language. explicit time/date, named assignee, shopping items, reminders, events, expenses. Examples: "לאסוף את שושי בארבע", "להוסיף חלב", "תזכירי לי מחר ב-8", "שילמתי 200 על פיצה".
+- living: urgency-now, deictic commands, exclamations, photos-and-reactions, chag greetings, indirect pleas to unnamed family. Examples: "תזדרזו!", "מישהו יכול?", "תאסוף את שושי עכשיו!", "חג שמח", "וואו".
+- ambiguous: genuinely unclear without context. "תאסוף את שושי" (no time, no urgency) alone could be either. When in doubt, pick ambiguous — in ambient mode the handler will stay silent (safer).
+
+Paired few-shots (same verb pair, different layer — the punctuation / time-marker / addressing difference is the whole signal):
+- "לקנות חלב" → operating
+- "לקנות חלב?!" → living   (exclamation + question = live moment)
+- "נצטרך לאסוף את שושי בארבע" → operating
+- "תאסוף את שושי עכשיו" → living   (now-marker)
+- "צריך תור לרופא שיניים לעידו" → operating
+- "תזדרזו כבר!" → living
+- "שלי תראי את הציור של עידו" → living   (explicit + celebration)
+- "שלי תזכירי לי מחר ב-9" → operating   (explicit + planning)
+- "מישהו יביא יין בדרך?" → living   (indirect plea, no specific time)
+- "תקראי לאמא שתבוא לארוחה בשבת" → operating   (planning with time)
 
 `;
 }
@@ -1121,11 +1155,16 @@ async function classifyIntent(
 
     try {
       const parsed = JSON.parse(raw);
+      // Phase 5: normalize living_vs_operating (default "ambiguous" when Haiku omits it).
+      const layer = parsed.living_vs_operating;
+      const livingVsOperating: "operating" | "ambiguous" | "living" =
+        layer === "operating" || layer === "living" ? layer : "ambiguous";
       return {
         intent: parsed.intent || "ignore",
         confidence:
           typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
         addressed_to_bot: parsed.addressed_to_bot || false,
+        living_vs_operating: livingVsOperating,
         needs_conversation_review: parsed.needs_conversation_review || false,
         entities: {
           ...parsed.entities,
@@ -1223,7 +1262,14 @@ NEVER claim to have erased, cleared, reset, emptied, deleted, or wiped a list un
 
 If the user asks to clear a list ("תמחקי את הרשימה" / "נקי הכל" / "clear the list" / "start over") and you don't see a clear_list action result in the prompt: say honestly you're not sure which list, ask which one, and WAIT. Do not fake the action. Fabricating erasure is the single most damaging thing you can do to trust — users rely on their lists being real.
 
-Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".`;
+Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".
+
+VISIT NOT RESIDENCY (bot identity during living-moment visits):
+- When a family member addresses you inside a celebration / photo-share / emotional moment, reply ONCE briefly, then STOP.
+- You are a helpful assistant. You are not a family member. Never write "אני חלק מהמשפחה" / "אני מתרגשת ביחד איתכם" / "אנחנו" as if you share their experience.
+- DO say: "כל הכבוד לעידו, איזה יופי!" / "חמוד מאוד" / "יופי של ציור 💚" — warm, external, short.
+- DO NOT extend the moment. The next message in the thread is not yours unless they invite you again by name.
+- The line: you cheered for them. You are not one of them.`;
 
 const SHARED_APOLOGY_RULES = `APOLOGY STYLE — MANDATORY:
 When you make a mistake, misunderstand, or need to correct yourself:
@@ -6195,6 +6241,8 @@ const INTRO_MESSAGE = `היי! 👋 אני שלי, העוזרת החכמה של�
 📅 אירועים - "יום שישי ארוחה אצל סבא וסבתא"
 ❓ שאלות - "מה צריך לעשות היום?"
 
+אם אני מפריעה באיזשהו רגע, פשוט תגידו "שלי שקט" ואני אלמד 🤫
+
 פשוט כתבו בקבוצה ואני אטפל בזה! 🏠`;
 
 interface GroupInfo {
@@ -6229,6 +6277,50 @@ async function fetchGroupInfo(groupId: string): Promise<GroupInfo | null> {
   } catch (err) {
     console.error("[fetchGroupInfo] Error:", err);
     return null;
+  }
+}
+
+// ─── Phase 6 of Sheli-in-Groups: dedicated-Sheli-group auto-detection (2026-04-22) ───
+// Promote group_mode to 'dedicated_sheli' when BOTH signals are true:
+//   1. Group name mentions שלי as a NAME (boundary-gated — "המשפחה שלי" is a
+//      family-chat possessive, not a Sheli-dedicated name).
+//   2. Address-ratio ≥ 40% over ≥ 20 messages (family actually talks TO the bot
+//      most of the time).
+// In dedicated mode the matrix router loosens ambient_ambiguous suppression.
+// Called every ~10 messages (cheap sweep).
+const DEDICATED_NAME_RE = /(^|\s)שלי(\s|$|[^א-ת])/;
+
+async function maybePromoteGroupMode(
+  groupId: string,
+  groupName: string | null,
+  householdId: string,
+): Promise<void> {
+  try {
+    if (!groupName || !DEDICATED_NAME_RE.test(groupName)) return;
+
+    const { count: total } = await supabase
+      .from("whatsapp_messages")
+      .select("whatsapp_message_id", { count: "exact", head: true })
+      .eq("household_id", householdId);
+    if (!total || total < 20) return;
+
+    const { count: addressed } = await supabase
+      .from("whatsapp_messages")
+      .select("whatsapp_message_id", { count: "exact", head: true })
+      .eq("household_id", householdId)
+      .eq("classification_data->>addressed_to_bot", "true");
+
+    const ratio = (addressed || 0) / total;
+    const isDedicated = ratio >= 0.40;
+    await supabase
+      .from("whatsapp_config")
+      .update({ group_mode: isDedicated ? "dedicated_sheli" : "family_chat" })
+      .eq("group_id", groupId);
+    console.log(
+      `[GroupMode] ${groupId} (${groupName}): ratio ${ratio.toFixed(2)} (${addressed}/${total}) → ${isDedicated ? "dedicated_sheli" : "family_chat"}`,
+    );
+  } catch (err) {
+    console.error("[maybePromoteGroupMode] Error:", err);
   }
 }
 
@@ -6725,6 +6817,131 @@ async function claimAndProcessBatch(
 const UNDO_KEYWORDS = /(?:^|\s)(תמחקי|בטלי|תבטלי|עזבי|עזוב|תשכחי|ביטול|לא נכון|בעצם לא|אל תקנו|יש כבר|עזבי מזה|לא לא|לא צריך להוסיף|לא צריך מטלה|לא צריך את זה|לא צריך בכלל|אין צורך במטלה|אין צורך להוסיף)(?:\s|$)/;
 // Layer 2: Negation + item name — "לא צריך חלב" only undoes if bot just added "חלב"
 const UNDO_NEGATIONS = /(?:לא צריך|אל תקנו|יש כבר|אין צורך|לא רוצה)/;
+
+// ─── Correction Phrases (Phase 3 of Sheli-in-Groups, 2026-04-22) ───
+// One-word "back off" from the family. Triggers, when wired (Task 3.3):
+//   1) undo the most recent Sheli-authored item in this group within last 5 min
+//      (reuses the existing quick-undo handler's side-effects)
+//   2) log the triggering PRIOR message as a living_layer_trigger household_pattern
+//      (Phase 4 wires the pattern log; 3.3 only leaves a marker)
+//   3) set whatsapp_config.quiet_until = NOW() + 10 min for this group, which
+//      Task 3.4 honors by suppressing ambient classifications (explicit-address
+//      still works).
+const CORRECTION_PHRASES: RegExp[] = [
+  /^\s*שלי[,\s]+שקט[!.]?\s*$/,
+  /^\s*שלי[,\s]+לא\s+עכשיו[!.]?\s*$/,
+  /^\s*שלי[,\s]+תירגעי[!.]?\s*$/,
+  /^\s*שלי[,\s]+לא\s+אלייך[!.]?\s*$/,
+];
+
+function isCorrectionPhrase(text: string): boolean {
+  const normalized = (text || "").trim();
+  return CORRECTION_PHRASES.some((re) => re.test(normalized));
+}
+
+// ─── Phase 4 of Sheli-in-Groups: living_layer_trigger pattern (2026-04-22) ───
+// Record the PRIOR user message in the group (the one Sheli misfired on) as a
+// household-scoped living-layer-trigger pattern. Called from the correction
+// handler (6c-pre) after a שלי שקט / שלי לא עכשיו / etc. The pattern is later
+// injected into the Haiku classifier prompt so this family's Sheli learns to
+// stay silent on similar messages next time.
+async function logLivingLayerTrigger(
+  householdId: string,
+  groupId: string,
+  correctionMessageId: string,
+): Promise<void> {
+  try {
+    const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+    const fiveMinAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
+    const { data: prior } = await supabase
+      .from("whatsapp_messages")
+      .select("message_text, sender_phone, created_at, whatsapp_message_id")
+      .eq("group_id", groupId)
+      .neq("whatsapp_message_id", correctionMessageId)
+      .neq("sender_phone", botPhone)
+      .gt("created_at", fiveMinAgoIso)
+      .lt("created_at", nowIso)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!prior?.message_text) {
+      console.log(`[Patterns] living_layer_trigger: no prior user message in ${groupId} within 5 min`);
+      return;
+    }
+    const snippet = prior.message_text.substring(0, 140);
+    const { error } = await supabase
+      .from("household_patterns")
+      .upsert(
+        {
+          household_id: householdId,
+          pattern_type: "living_layer_trigger",
+          pattern_key: snippet,
+          pattern_value: snippet,
+          confidence: 0.6,
+          hit_count: 1,
+        },
+        { onConflict: "household_id,pattern_type,pattern_key" },
+      );
+    if (error) {
+      console.error("[Patterns] logLivingLayerTrigger upsert error:", error);
+      return;
+    }
+    console.log(`[Patterns] living_layer_trigger logged for ${householdId}: "${snippet.substring(0, 60)}..."`);
+  } catch (err) {
+    console.error("[Patterns] logLivingLayerTrigger unexpected error:", err);
+  }
+}
+
+// ─── Phase 4: invitation_accepted optimistic logger (2026-04-22) ───
+// Log that Sheli accepted an invitation to visit a living-layer moment
+// (celebration, photo share, emotional moment). The row is written with
+// pending_until = NOW() + 10 min. If the family corrects Sheli within
+// 10 min (שלי שקט etc.), the correction handler DELETEs the row before
+// it becomes a permanent signal. Otherwise it stands and the Haiku
+// classifier sees it as "ok to visit similar messages next time".
+//
+// CALL SITE DEFERRED TO PHASE 5: the proper trigger is
+// `classification.living_vs_operating === "living"` combined with
+// `addressed_to_bot === true`. Until Phase 5 ships that field, this
+// helper exists but is not yet invoked. Helper + correction-delete are
+// wired defensively now so Phase 5 can flip a single condition on.
+async function logInvitationPending(
+  householdId: string,
+  messageText: string,
+): Promise<string | null> {
+  try {
+    const snippet = (messageText || "").substring(0, 140);
+    if (!snippet) return null;
+    const pendingUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("household_patterns")
+      .upsert(
+        {
+          household_id: householdId,
+          pattern_type: "invitation_accepted",
+          pattern_key: snippet,
+          pattern_value: snippet,
+          confidence: 0.5,
+          hit_count: 1,
+          pending_until: pendingUntil,
+        },
+        { onConflict: "household_id,pattern_type,pattern_key" },
+      )
+      .select("id")
+      .maybeSingle();
+    if (error) {
+      console.error("[Patterns] logInvitationPending upsert error:", error);
+      return null;
+    }
+    console.log(`[Patterns] invitation_accepted (pending) for ${householdId}: "${snippet.substring(0, 60)}..."`);
+    return data?.id ?? null;
+  } catch (err) {
+    console.error("[Patterns] logInvitationPending unexpected error:", err);
+    return null;
+  }
+}
 
 // ─── Pending Confirmation Patterns ───
 const CONFIRM_AFFIRMATIVE = /^(כן|נכון|בדיוק|יאללה|אוקי|ok|כמובן|מדויק|yes|בטח|sure|👍|💪)[\s.!]*$/i;
@@ -7357,7 +7574,7 @@ Deno.serve(async (req: Request) => {
     // 4. Look up household by WhatsApp group ID
     let { data: config } = await supabase
       .from("whatsapp_config")
-      .select("household_id, bot_active, language, group_message_count")
+      .select("household_id, bot_active, language, group_message_count, quiet_until, group_mode")
       .eq("group_id", message.groupId)
       .single();
 
@@ -7520,6 +7737,19 @@ Deno.serve(async (req: Request) => {
       console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention}, voiceFuzzy=${voiceFuzzyMatch}, imperative=${imperativeFirstWord ? firstWordOnly : false})`);
     }
 
+    // 6b-cooldown. Phase 3 Task 3.4: honor quiet_until after a correction phrase.
+    // Ambient (non-addressed) messages during the 10-min window are suppressed
+    // silently — no classification, no reply. Explicit @שלי addresses still fire,
+    // so families can re-engage at any time. Correction phrases themselves match
+    // sheliFirstWord / atMention, so they pass through directAddress=true and hit
+    // the 6c-pre handler even during an active cool-down.
+    const isCoolingDown = !!config.quiet_until && new Date(config.quiet_until) > new Date();
+    if (isCoolingDown && !directAddress) {
+      console.log(`[Cooldown] Suppressed ambient in ${message.groupId} until ${config.quiet_until}`);
+      await logMessage(message, "suppressed_cooldown", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
     // 6b. Check for pending confirmation response
     const { data: pendingConfirm } = await supabase
       .from("pending_confirmations")
@@ -7630,6 +7860,69 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // 6c-pre. Correction phrases (Phase 3 of Sheli-in-Groups, 2026-04-22):
+    // One-word "back off" from the family. Always fires — best-effort undo
+    // in a 5-min window, then sets whatsapp_config.quiet_until = NOW() + 10 min
+    // (Task 3.4 honors this by suppressing ambient classification; explicit
+    // @שלי addresses still work). Placed BEFORE the normal quick-undo branch
+    // so a correction phrase can never fall through to classification even
+    // when there's no recent action to undo.
+    if (isCorrectionPhrase(message.text.trim())) {
+      const lastAction = await getLastBotAction(message.groupId, householdId);
+      let undone: string[] = [];
+      if (lastAction) {
+        const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+        if (new Date(lastAction.created_at).getTime() > fiveMinAgo) {
+          undone = await undoLastAction(householdId, lastAction.classification_data);
+        }
+      }
+
+      // Cool-down always fires, even if nothing was undone.
+      const quietUntil = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      await supabase
+        .from("whatsapp_config")
+        .update({ quiet_until: quietUntil })
+        .eq("group_id", message.groupId);
+      console.log(`[Correction] ${message.groupId} quiet until ${quietUntil}`);
+      // Phase 4: log the PRIOR user message as a living_layer_trigger pattern
+      // (non-blocking — errors log but don't affect the ack).
+      await logLivingLayerTrigger(householdId, message.groupId, message.messageId);
+      // Phase 4: if Sheli optimistically logged an invitation_accepted pending
+      // row recently, retract it — the family just corrected, so the visit
+      // was NOT accepted. Phase 5 turns on the logInvitationPending call site;
+      // running this delete now is defensive and cheap (no rows today).
+      const { error: invErr } = await supabase
+        .from("household_patterns")
+        .delete()
+        .eq("household_id", householdId)
+        .eq("pattern_type", "invitation_accepted")
+        .gt("pending_until", new Date().toISOString());
+      if (invErr) {
+        console.error("[Patterns] retract pending invitation_accepted error:", invErr);
+      }
+
+      await sendAndLog(provider, {
+        groupId: message.groupId,
+        text: "הבנתי 🤫",
+      }, {
+        householdId,
+        groupId: message.groupId,
+        inReplyTo: message.messageId,
+        replyType: "correction_phrase_reply",
+      });
+
+      if (lastAction && undone.length > 0) {
+        await supabase.from("classification_corrections").insert({
+          household_id: householdId,
+          message_id: lastAction.messageId,
+          correction_type: "explicit_reject",
+          original_data: lastAction.classification_data,
+        });
+      }
+      await logMessage(message, "correction_applied", householdId);
+      return new Response("OK", { status: 200 });
+    }
+
     // 6c. Quick undo: if message matches rejection/negation pattern, undo last bot action
     const isUndoKeyword = UNDO_KEYWORDS.test(message.text.trim());
     // For item-specific negation, we need the last action to check item names
@@ -7720,6 +8013,25 @@ Deno.serve(async (req: Request) => {
     const haikuCtx = await buildClassifierCtx(householdId);
     haikuCtx.conversationHistory = conversationHistory;
 
+    // Phase 5 Task 5.2: compact thread-state signal computed from the same
+    // conversationMsgs window — no duplicate DB call. Time gap = seconds
+    // between the most recent prior message and now. Living-layer density =
+    // count of reactive (short/emoji-only) messages in the last 5.
+    if (conversationMsgs.length > 0) {
+      const last5 = conversationMsgs.slice(-5);
+      const mostRecentTs = new Date(last5[last5.length - 1].created_at).getTime();
+      const gapSec = Math.max(0, Math.floor((Date.now() - mostRecentTs) / 1000));
+      const EMOJI_OR_WHITESPACE = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s\u200d\ufe0f]+$/u;
+      const reactiveCount = last5.filter((m) => {
+        const t = (m.message_text || "").trim();
+        return t.length < 20 || EMOJI_OR_WHITESPACE.test(t);
+      }).length;
+      const density = reactiveCount >= 3 ? "high (rapid reactive thread)" : reactiveCount >= 1 ? "medium" : "low";
+      haikuCtx.threadState =
+        `Time since last message: ${gapSec}s\n` +
+        `Living-layer density (last 5 msgs): ${density} (${reactiveCount}/${last5.length} short/emoji)`;
+    }
+
     // Prepend quoted message context so classifier understands reply references
     const textForClassifier = message.quotedText
       ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
@@ -7731,12 +8043,65 @@ Deno.serve(async (req: Request) => {
       haikuCtx
     );
 
-    console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} addressed=${classification.addressed_to_bot} contextReview=${classification.needs_conversation_review} from ${message.senderName}`);
+    console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} addressed=${classification.addressed_to_bot} layer=${classification.living_vs_operating} contextReview=${classification.needs_conversation_review} from ${message.senderName}`);
 
     // Layer 2 merge: if Haiku says addressed_to_bot and Layer 1 didn't catch it, upgrade directAddress
     if (classification.addressed_to_bot && !directAddress) {
       directAddress = true;
       console.log(`[Webhook] Layer 2: Haiku detected שלי as bot name (Layer 1 missed it)`);
+    }
+
+    // Phase 5 Task 5.3 (2026-04-22): 3x2 matrix routing (addressed × layer).
+    // Two silence gates for ambient-non-operating cells, one visit-log hook
+    // for explicit_living. Other cells fall through to existing routing.
+    //
+    // Cells:
+    //   explicit_operating → existing chatty path (action + reply)
+    //   explicit_ambiguous → existing chatty path (clarify / best-guess)
+    //   explicit_living    → log invitation_accepted pending, fall through to Sonnet
+    //                        which uses VISIT_NOT_RESIDENCY prompt rule (Phase 2)
+    //   ambient_operating  → existing act path (shopping batch, tasks, etc.)
+    //   ambient_ambiguous  → SILENT (new — don't act when the family isn't asking Sheli)
+    //   ambient_living     → SILENT (new — emojis, reactions, urgent shouts, chag greetings)
+    const isExplicit = directAddress || classification.addressed_to_bot === true;
+    const layer = classification.living_vs_operating || "ambiguous";
+    const matrixCell = `${isExplicit ? "explicit" : "ambient"}_${layer}`;
+    console.log(`[Webhook] Matrix cell: ${matrixCell} (group_mode: ${config.group_mode || "family_chat"})`);
+
+    // Phase 6 Task 6.2 (2026-04-22): every ~10 messages, re-evaluate whether
+    // this group is dedicated-Sheli (name contains שלי AND address-ratio ≥ 40%).
+    // Non-blocking sweep; next message's handler uses the updated group_mode.
+    if ((config.group_message_count || 0) % 10 === 0) {
+      const groupInfo = await fetchGroupInfo(message.groupId).catch(() => null);
+      await maybePromoteGroupMode(message.groupId, groupInfo?.name || null, householdId);
+    }
+
+    // Option A (2026-04-23, tightened after 90/111 regression): silence ONLY
+    // ambient_living. ambient_ambiguous falls through to existing intent-based
+    // routing — Haiku mislabels many legitimate operating messages (expenses,
+    // tasks, shopping) as "ambiguous" because they look casual without @שלי.
+    // The intent-gate below already handles those correctly (add_expense,
+    // add_task, add_shopping etc. fire; intent=ignore stays silent).
+    // ambient_living stays silenced: emoji-only reactions, urgent shouts,
+    // chag greetings — those should never fire an action regardless of intent.
+    //
+    // Phase 6 Task 6.3 note (2026-04-23): plan called for dedicated_sheli mode
+    // to "treat ambient_ambiguous as visit-worthy (not silent)". After Option A,
+    // ambient_ambiguous is ALREADY falling through for all groups, so the override
+    // would be a no-op. group_mode is still detected and stored for future
+    // product/analytics use, but does not currently change routing.
+    if (!isExplicit && layer === "living") {
+      console.log(`[Webhook] Matrix: ${matrixCell} → silent`);
+      await logMessage(message, `suppressed_${matrixCell}`, householdId, classification);
+      return new Response("OK", { status: 200 });
+    }
+
+    if (isExplicit && layer === "living") {
+      // Explicit invitation into a living-layer moment (celebration, photo,
+      // urgency). Log optimistically — if the family corrects within 10 min,
+      // the correction handler deletes the pending row. Otherwise it becomes
+      // a permanent per-household signal that this kind of invitation is ok.
+      await logInvitationPending(householdId, message.text);
     }
 
     // SILENCE GUARD — trust the classifier's "this isn't for the bot" verdict.
@@ -9381,9 +9746,9 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     supabase.from("household_members").select("display_name").eq("household_id", householdId),
     supabase.from("tasks").select("id, title, assigned_to").eq("household_id", householdId).eq("done", false),
     supabase.from("shopping_items").select("id, name, qty").eq("household_id", householdId).eq("got", false),
-    supabase.from("household_patterns").select("pattern_type, pattern_key, pattern_value")
+    supabase.from("household_patterns").select("pattern_type, pattern_key, pattern_value, pending_until")
       .eq("household_id", householdId).gte("confidence", 0.3)
-      .order("hit_count", { ascending: false }).limit(20),
+      .order("hit_count", { ascending: false }).limit(30),
     supabase.from("rotations").select("title, type, members, current_index")
       .eq("household_id", householdId).eq("active", true),
   ]);
@@ -9392,10 +9757,29 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
   let familyPatterns = "";
   const patterns = patternsRes.data;
   if (patterns && patterns.length > 0) {
+    // Phase 4: filter out invitation_accepted rows still within their 10-min
+    // pending window — only permanent (pending_until in the past or null)
+    // rows inform the classifier.
+    const nowIso = new Date().toISOString();
+    const activePatterns = patterns.filter(
+      (p: { pattern_type: string; pending_until?: string | null }) =>
+        p.pattern_type !== "invitation_accepted" ||
+        !p.pending_until ||
+        p.pending_until < nowIso,
+    );
     const byType: Record<string, string[]> = {};
-    for (const p of patterns) {
+    for (const p of activePatterns) {
       if (!byType[p.pattern_type]) byType[p.pattern_type] = [];
-      byType[p.pattern_type].push(`"${p.pattern_key}" = ${p.pattern_value}`);
+      // Phase 4: living_layer_trigger and invitation_accepted store the same
+      // text in both key and value; render them as a bare quoted snippet.
+      if (
+        p.pattern_type === "living_layer_trigger" ||
+        p.pattern_type === "invitation_accepted"
+      ) {
+        byType[p.pattern_type].push(`"${p.pattern_value}"`);
+      } else {
+        byType[p.pattern_type].push(`"${p.pattern_key}" = ${p.pattern_value}`);
+      }
     }
     const sections: string[] = [];
     if (byType.nickname) sections.push(`Nicknames: ${byType.nickname.join(", ")}`);
@@ -9403,6 +9787,17 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     if (byType.category_pref) sections.push(`Categories: ${byType.category_pref.join(", ")}`);
     if (byType.compound_name) sections.push(`Compound names (ONE item): ${byType.compound_name.join(", ")}`);
     if (byType.recurring_item) sections.push(`Recurring: ${byType.recurring_item.join(", ")}`);
+    // Phase 4: bidirectional household learning.
+    if (byType.living_layer_trigger) {
+      sections.push(
+        `LIVING-LAYER PHRASES THIS FAMILY USES (do NOT classify these as operating — the family corrected Sheli on similar messages):\n  - ${byType.living_layer_trigger.join("\n  - ")}`,
+      );
+    }
+    if (byType.invitation_accepted) {
+      sections.push(
+        `INVITATIONS THIS FAMILY ACCEPTED (ok to visit warmly next time you see something similar):\n  - ${byType.invitation_accepted.join("\n  - ")}`,
+      );
+    }
     familyPatterns = sections.join("\n");
   }
 
@@ -9907,7 +10302,15 @@ async function handleCorrection(
   const reply = replyLines.join("\n");
 
   // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
-  await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
+  // Defensive try/catch — the Cursor→Dashboard paste occasionally injects a stray
+  // Hebrew char mid-identifier (seen 2026-04-22, ref: "ReferenceError:
+  // derivePatternFromCorrecשtion is not defined"). If that happens again, pattern
+  // derivation silently fails but the user still gets their correction ack.
+  try {
+    await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
+  } catch (dpErr) {
+    console.error("[handleCorrection] derivePatternFromCorrection call failed (non-fatal):", dpErr);
+  }
 
   await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
     householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
