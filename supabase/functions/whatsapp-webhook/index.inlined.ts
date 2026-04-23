@@ -1539,6 +1539,102 @@ Sheli: "הוספתי 15 ירקות" — forbidden.
 BAD (timid dodge):
 Sheli: "אילו ירקות?" — the user wants a SUGGESTION. Propose first, confirm second.`;
 
+// --- Correction Sonnet (Task 2 of update_event+update_reminder plan) ---
+// Produces structured JSON {action:update|remove|clarify, target_id, ...}
+// used by handleCorrection (Task 3) to dispatch via executeCrudAction.
+type CandidateRow = {
+  id: string;
+  kind: "event" | "reminder";
+  title: string;
+  whenLocal: string;
+};
+
+type SheliActionSummary = {
+  whenLocal: string;
+  text: string;
+};
+
+function buildCorrectionPrompt(
+  correctionText: string,
+  recentContext: Array<{ sender: string; text: string; whenLocal: string }>,
+  candidates: CandidateRow[],
+  recentSheliActions: SheliActionSummary[],
+): string {
+  const contextBlock = recentContext.length
+    ? recentContext.map((m) => "[" + m.whenLocal + "] " + m.sender + ": " + m.text).join("\n")
+    : "(אין הקשר אחרון)";
+  const sheliBlock = recentSheliActions.length
+    ? recentSheliActions.map((s) => "[" + s.whenLocal + "] " + s.text).join("\n")
+    : "(אין פעולות אחרונות)";
+  const candidateBlock = candidates.length
+    ? candidates.map((c) => "[" + c.id + "] " + (c.kind === "event" ? "אירוע" : "תזכורת") + ": \"" + c.title + "\" — " + c.whenLocal).join("\n")
+    : "(אין שורות מועמדות)";
+
+  return "את שלי. המשפחה תיקנה אותך. המטרה שלך: להבין מה הם רוצים לשנות ולהחזיר JSON אחד.\n\n" +
+    "הקשר אחרון (15 דקות):\n" + contextBlock + "\n\n" +
+    "פעולות אחרונות שלך:\n" + sheliBlock + "\n\n" +
+    "שורות מועמדות לעדכון (מקסימום 10):\n" + candidateBlock + "\n\n" +
+    "ההודעה המתקנת: \"" + correctionText + "\"\n\n" +
+    "כללים:\n" +
+    "- target_id חייב להיות מתוך הרשימה. אם לא מזהה — החזירי clarify.\n" +
+    "- new_scheduled_for / new_send_at ב-ISO 8601 עם offset מפורש (+03:00 בקיץ, +02:00 בחורף).\n" +
+    "- כללי רק שדות שבאמת משתנים. null או השמטה = לא לשנות.\n" +
+    "- clarify.ask הוא הטקסט בעברית שיישלח לקבוצה כשאלת הבהרה.\n\n" +
+    "החזירי JSON אחד בלבד, בלי טקסט נוסף. אחד משלושה:\n" +
+    '{"action":"update","target_id":"<id>","target_type":"event"|"reminder","new_scheduled_for":"<iso?>","new_send_at":"<iso?>","new_title":"<str?>","new_text":"<str?>"}\n' +
+    '{"action":"remove","target_id":"<id>","target_type":"event"|"reminder"}\n' +
+    '{"action":"clarify","reason":"<string>","ask":"<Hebrew question>"}';
+}
+
+type CorrectionSonnetResult =
+  | { action: "update"; target_id: string; target_type: "event" | "reminder"; new_scheduled_for?: string; new_send_at?: string; new_title?: string; new_text?: string }
+  | { action: "remove"; target_id: string; target_type: "event" | "reminder" }
+  | { action: "clarify"; reason?: string; ask: string };
+
+async function callCorrectionSonnet(prompt: string): Promise<CorrectionSonnetResult> {
+  // Test hook for Task 2 integration test (test_08 expects malformed fallback).
+  const mock = Deno.env.get("CORRECTION_SONNET_MOCK");
+  if (mock === "malformed") {
+    return { action: "clarify", reason: "mocked_malformed", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+  }
+
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) return { action: "clarify", reason: "no_api_key", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 512,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!res.ok) {
+      console.error("[correctionSonnet] HTTP", res.status, await res.text());
+      return { action: "clarify", reason: "http_error", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+    }
+    const body = await res.json();
+    const raw = (body?.content?.[0]?.text || "").trim();
+    // Strip optional markdown fences (json or bare) that Sonnet sometimes adds.
+    const fenceRegex = new RegExp("^" + "`".repeat(3) + "(?:json)?\\s*|\\s*" + "`".repeat(3) + "$", "g");
+    const jsonStr = raw.replace(fenceRegex, "").trim();
+    const parsed = JSON.parse(jsonStr);
+    if (parsed.action === "update" || parsed.action === "remove" || parsed.action === "clarify") {
+      return parsed as CorrectionSonnetResult;
+    }
+    return { action: "clarify", reason: "unknown_action", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+  } catch (err) {
+    console.error("[correctionSonnet] Parse/fetch error:", err);
+    return { action: "clarify", reason: "parse_error", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+  }
+}
+
 function buildReplyPrompt(
   classification: ClassificationOutput,
   ctx: ReplyContext,
@@ -4945,6 +5041,118 @@ const ITEMS_BASED_TYPES = new Set([
   "name_correction", "expense",
 ]);
 
+// --- Shared CRUD helper used by 1:1 inline dispatch AND group correction handler ---
+// Extracted from execute1on1Actions in Task 1 (update_event/update_reminder plan).
+// Accepts either a direct target_id (authoritative — Sonnet-structured path) OR a
+// fuzzy search string (legacy 1:1 path — Sonnet emits old_text/old_title).
+// Returns {ok, summary, error} so callers can build user-facing replies.
+type CrudAction = {
+  type: "update_event" | "update_reminder" | "update_task" | "update_shopping"
+       | "remove_event" | "remove_reminder" | "remove_task" | "remove_shopping";
+  target_id?: string;
+  old_name?: string; old_text?: string; old_title?: string;
+  name?: string; text?: string; title?: string;
+  new_name?: string; new_text?: string; new_title?: string;
+  new_send_at?: string; new_date?: string; new_time?: string;
+  new_scheduled_for?: string;
+};
+
+async function executeCrudAction(
+  householdId: string,
+  action: CrudAction,
+  logPrefix: string,
+): Promise<{ ok: boolean; summary: string; error?: string }> {
+  const CRUD_MAP: Record<string, { table: string; matchCol: string; activeFilter?: Record<string, any> }> = {
+    update_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
+    update_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
+    update_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
+    update_event:     { table: "events",          matchCol: "title" },
+    remove_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
+    remove_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
+    remove_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
+    remove_event:     { table: "events",          matchCol: "title" },
+  };
+  const cfg = CRUD_MAP[action.type];
+  if (!cfg) return { ok: false, summary: "", error: "unknown_action_type" };
+  const isRemove = action.type.startsWith("remove_");
+
+  // Resolve target row. Prefer direct id (authoritative — Task 2 structured path).
+  let match: { id: string; scheduled_for?: string | null } | null = null;
+  if (action.target_id) {
+    let q = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).eq("id", action.target_id);
+    if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) q = q.eq(k, v);
+    const { data, error } = await q.limit(1).maybeSingle();
+    if (!error && data) match = data as any;
+  }
+  // Fall back to fuzzy match (legacy 1:1 path — Sonnet emits old_text/old_title).
+  if (!match) {
+    const searchText = isRemove
+      ? (action.name || action.text || action.title)
+      : (action.old_name || action.old_text || action.old_title);
+    if (!searchText) return { ok: false, summary: "", error: "no_target" };
+    let exactQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).eq(cfg.matchCol, searchText);
+    if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) exactQ = exactQ.eq(k, v);
+    let { data: exact } = await exactQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!exact) {
+      let fuzzyQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
+      if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fuzzyQ = fuzzyQ.eq(k, v);
+      const { data: fuzzy } = await fuzzyQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+      exact = fuzzy;
+    }
+    match = (exact as any) || null;
+  }
+  if (!match) return { ok: false, summary: "", error: "not_found" };
+
+  if (isRemove) {
+    if (cfg.table === "reminder_queue") {
+      // Soft-cancel: preserve audit trail.
+      const { error: updErr } = await supabase
+        .from(cfg.table)
+        .update({ sent: true, metadata: { cancelled_by_user: true, cancelled_at: new Date().toISOString() } })
+        .eq("id", match.id)
+        .eq("household_id", householdId);
+      if (updErr) { console.error(`${logPrefix} ${action.type} soft-cancel error:`, updErr); return { ok: false, summary: "", error: "db_error" }; }
+    } else {
+      const { error: delErr } = await supabase.from(cfg.table).delete().eq("id", match.id).eq("household_id", householdId);
+      if (delErr) { console.error(`${logPrefix} ${action.type} delete error:`, delErr); return { ok: false, summary: "", error: "db_error" }; }
+    }
+    console.log(`${logPrefix} Removed ${cfg.table}: ${match.id}`);
+    return { ok: true, summary: `בוטלה ${cfg.table === "events" ? "אירוע" : cfg.table === "reminder_queue" ? "תזכורת" : "שורה"}` };
+  }
+
+  // For reminder updates, verify the row is still unsent (activeFilter already checks this,
+  // but an explicit second fetch catches the race where a reminder fired between gather + update).
+  if (cfg.table === "reminder_queue") {
+    const { data: freshRow } = await supabase.from(cfg.table).select("sent").eq("id", match.id).eq("household_id", householdId).maybeSingle();
+    if (freshRow?.sent === true) return { ok: false, summary: "", error: "already_sent" };
+  }
+
+  // UPDATE
+  const updates: Record<string, any> = {};
+  if (action.new_name) updates.name = action.new_name;
+  if (action.new_text) updates[cfg.matchCol] = action.new_text;
+  if (action.new_title) updates.title = action.new_title;
+  if (action.new_send_at) updates.send_at = new Date(action.new_send_at).toISOString();
+  if (action.new_scheduled_for) updates.scheduled_for = new Date(action.new_scheduled_for).toISOString();
+  if (action.new_date) {
+    updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
+  } else if (action.new_time && match.scheduled_for) {
+    const d = new Date(match.scheduled_for);
+    const israelDate = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+    updates.scheduled_for = `${israelDate}T${action.new_time}:00+03:00`;
+  }
+  if (Object.keys(updates).length === 0) return { ok: false, summary: "", error: "no_changes" };
+
+  const { error: updErr } = await supabase
+    .from(cfg.table)
+    .update(updates)
+    .eq("id", match.id)
+    .eq("household_id", householdId);
+  if (updErr) { console.error(`${logPrefix} ${action.type} error:`, updErr); return { ok: false, summary: "", error: "db_error" }; }
+  console.log(`${logPrefix} Updated ${cfg.table}: ${match.id}`);
+  return { ok: true, summary: `עדכנתי ${cfg.table === "events" ? "אירוע" : cfg.table === "reminder_queue" ? "תזכורת" : "שורה"}` };
+}
+
 async function execute1on1Actions(params: {
   raw: string;
   text: string;
@@ -5285,62 +5493,11 @@ async function execute1on1Actions(params: {
           else console.log(`${logPrefix} Expense logged: ${amountMinor} ${currency} "${action.description}" by ${paidBy || "household"}`);
           break;
         }
-        // --- UPDATE / REMOVE actions (table-driven) ---
+        // --- UPDATE / REMOVE actions (delegated to shared helper) ---
         case "update_shopping": case "update_task": case "update_reminder": case "update_event":
         case "remove_shopping": case "remove_task": case "remove_reminder": case "remove_event": {
-          const CRUD_MAP: Record<string, { table: string; matchCol: string; activeFilter?: Record<string, any> }> = {
-            update_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
-            update_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
-            update_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
-            update_event:     { table: "events",          matchCol: "title" },
-            remove_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
-            remove_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
-            remove_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
-            remove_event:     { table: "events",          matchCol: "title" },
-          };
-          const cfg = CRUD_MAP[action.type];
-          const isRemove = action.type.startsWith("remove_");
-          // Determine the search text (updates use old_name/old_text/old_title; removes use name/text/title)
-          const searchText = isRemove
-            ? (action.name || action.text || action.title)
-            : (action.old_name || action.old_text || action.old_title);
-          if (!searchText) break;
-          // Find matching row (include scheduled_for for time-only event updates)
-          // Try exact match first, fall back to substring (ilike). Order by most recent to prefer latest.
-          let query = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId);
-          if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) query = query.eq(k, v);
-          // Prefer exact match
-          let { data: match, error: findErr } = await query.eq(cfg.matchCol, searchText).order("created_at", { ascending: false }).limit(1).single();
-          if (!match) {
-            // Fall back to substring match
-            let fallbackQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
-            if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fallbackQ = fallbackQ.eq(k, v);
-            ({ data: match, error: findErr } = await fallbackQ.order("created_at", { ascending: false }).limit(1).single());
-          }
-          if (findErr || !match) { console.warn(`${logPrefix} ${action.type}: not found for "${searchText}"`); break; }
-          if (isRemove) {
-            const { error: delErr } = await supabase.from(cfg.table).delete().eq("id", match.id);
-            if (delErr) console.error(`${logPrefix} ${action.type} error:`, delErr);
-            else console.log(`${logPrefix} Removed ${cfg.table}: "${searchText}"`);
-          } else {
-            // Build update payload
-            const updates: Record<string, any> = {};
-            if (action.new_name) updates.name = action.new_name;
-            if (action.new_text) updates[cfg.matchCol] = action.new_text;
-            if (action.new_title) updates.title = action.new_title;
-            if (action.new_send_at) updates.send_at = new Date(action.new_send_at).toISOString();
-            if (action.new_date) {
-              updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
-            } else if (action.new_time && match.scheduled_for) {
-              // Time-only update: keep existing date (in Israel timezone), replace time
-              const d = new Date(match.scheduled_for);
-              const israelDate = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" }); // YYYY-MM-DD
-              updates.scheduled_for = `${israelDate}T${action.new_time}:00+03:00`;
-            }
-            const { error: updErr } = await supabase.from(cfg.table).update(updates).eq("id", match.id);
-            if (updErr) console.error(`${logPrefix} ${action.type} error:`, updErr);
-            else console.log(`${logPrefix} Updated ${cfg.table}: "${searchText}"`);
-          }
+          if (!householdId) break;
+          await executeCrudAction(householdId, action as CrudAction, logPrefix);
           break;
         }
         default:
@@ -11628,35 +11785,64 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
   return undone;
 }
 
-// Executor summary entries are internal debug tokens like:
-//   `Event-exists: "<title>"`, `Event: "<title>" @ <iso>`, `Shopping: "<name>" ×N`
-// These are safe to surface in operator logs, but NEVER in a user-visible reply.
-// handleCorrection used to concatenate them directly into `הוספתי: ...` — producing
-// live messages like `הוספתי: Event-exists: "שיחה עם סאם מחברת סוניגו"` (2026-04-23,
-// Roi's household). Translate to Hebrew or drop before showing.
-//
-// "Event-exists" is intentionally dropped: it means the correction produced no real
-// state change (the event already existed on that date). Let the apology-gate below
-// treat those as no-op so we prompt for clarification instead of pretending to act.
-function translateExecutorSummaryForUser(entries: string[]): string[] {
-  const result: string[] = [];
-  for (const entry of entries) {
-    if (/^Event-exists:/.test(entry)) continue; // silent — not a real change
-    let m = entry.match(/^Event:\s+"(.+?)"(?:\s+@\s+.+)?\s*$/);
-    if (m) { result.push(`"${m[1]}"`); continue; }
-    m = entry.match(/^Shopping:\s+"(.+?)"(?:\s+×\d+)?\s*$/);
-    if (m) { result.push(`"${m[1]}"`); continue; }
-    m = entry.match(/^Task:\s+"(.+?)"\s*$/);
-    if (m) { result.push(`"${m[1]}"`); continue; }
-    // Internal-id / bookkeeping lines — never show
-    if (/^(Completed task:|Got shopping item:|complete_shopping_by_names:|Assigned task:)/.test(entry)) continue;
-    // Unknown shape: extract a quoted substring if present; otherwise drop rather
-    // than leak a `Foo-bar: baz` token to the user.
-    const quoted = entry.match(/"([^"]+)"/);
-    if (quoted) { result.push(`"${quoted[1]}"`); continue; }
-    // Drop silently
-  }
-  return result;
+// --- Candidate + context gathering for handleCorrection (Task 3) ---
+// All three return arrays the Sonnet prompt will interpolate.
+
+async function gatherCorrectionCandidates(householdId: string): Promise<CandidateRow[]> {
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [evRes, remRes] = await Promise.all([
+    supabase.from("events").select("id, title, scheduled_for")
+      .eq("household_id", householdId).gte("created_at", dayAgo)
+      .order("created_at", { ascending: false }).limit(5),
+    supabase.from("reminder_queue").select("id, message_text, send_at")
+      .eq("household_id", householdId).eq("sent", false).gte("created_at", dayAgo)
+      .order("created_at", { ascending: false }).limit(5),
+  ]);
+  const events: CandidateRow[] = (evRes.data || []).map((e: any) => ({
+    id: e.id, kind: "event" as const, title: e.title, whenLocal: toIsraelTimeStr(e.scheduled_for),
+  }));
+  const reminders: CandidateRow[] = (remRes.data || []).map((r: any) => ({
+    id: r.id, kind: "reminder" as const, title: r.message_text, whenLocal: toIsraelTimeStr(r.send_at),
+  }));
+  return [...events, ...reminders].slice(0, 10);
+}
+
+async function gatherRecentGroupContext(
+  groupId: string,
+  minutes = 15,
+): Promise<Array<{ sender: string; text: string; whenLocal: string }>> {
+  const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
+  // whatsapp_messages.group_id stores bare first part (pre-"@") for both 1:1 and groups.
+  const { data } = await supabase.from("whatsapp_messages")
+    .select("sender_phone, message_text, created_at, sender_name")
+    .eq("group_id", groupId.split("@")[0])
+    .gte("created_at", since)
+    .order("created_at", { ascending: true })
+    .limit(30);
+  return (data || []).map((m: any) => ({
+    sender: m.sender_name || m.sender_phone || "unknown",
+    text: m.message_text || "",
+    whenLocal: toIsraelTimeStr(m.created_at),
+  }));
+}
+
+async function gatherRecentSheliActions(
+  groupId: string,
+  limit = 5,
+): Promise<SheliActionSummary[]> {
+  const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+  const { data } = await supabase.from("whatsapp_messages")
+    .select("message_text, created_at")
+    .eq("group_id", groupId.split("@")[0])
+    .eq("sender_phone", botPhone)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return (data || []).reverse().map((m: any) => ({
+    whenLocal: toIsraelTimeStr(m.created_at),
+    text: (m.message_text || "").slice(0, 120),
+  }));
 }
 
 async function handleCorrection(
@@ -11665,124 +11851,101 @@ async function handleCorrection(
   householdId: string,
   provider: WhatsAppProvider,
 ): Promise<void> {
-  // 1. Find the bot action being corrected.
-  // Prefer title-aware lookup when correction_text references a specific item;
-  // fall back to last-5-min most-recent. Bug 3 root cause (Roi 2026-04-23):
-  // correction "תתקני בדיקת דירה..." arrived after several other bot actions
-  // (cake pickup, tire change), so most-recent resolved to the cake task —
-  // undo deleted the wrong thing, bedika stayed on wrong day, redo inserted
-  // a duplicate on Friday.
-  const ctForLookup = classification.entities.correction_text || "";
-  let lastAction = ctForLookup
-    ? await findRelatedBotAction(ctForLookup, message.groupId, householdId)
-    : null;
-  if (!lastAction) {
-    lastAction = await getLastBotAction(message.groupId, householdId);
-  }
-
-  if (!lastAction) {
-    await sendAndLog(provider, {
-      groupId: message.groupId,
-      text: "לא מצאתי פעולה אחרונה לתקן 🤔",
-    }, {
-      householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
-    });
+  const logPrefix = `[handleCorrection:${householdId}]`;
+  const groupId = message.groupId;
+  if (!groupId) {
+    console.warn(`${logPrefix} No groupId, skipping`);
     return;
   }
 
-  // 2. Undo the last action
-  const undone = await undoLastAction(householdId, lastAction.classification_data);
-  console.log(`[Correction] Undone:`, undone);
+  // 1. Gather candidates + context in parallel.
+  const [candidates, ctx, sheliActs] = await Promise.all([
+    gatherCorrectionCandidates(householdId),
+    gatherRecentGroupContext(groupId),
+    gatherRecentSheliActions(groupId),
+  ]);
 
-  // 3. If correction_text provided AND user literally typed it, redo with the corrected version.
-  // Substring gate: the correction_text must appear VERBATIM in the user's actual message text.
-  // Prevents Haiku from fabricating/paraphrasing a correction when the user only sent emoji or a bare reaction.
-  // Without this guard, an emoji-only "correction" will cause undo + a bogus redo based on hallucinated text.
-  const correctionText = classification.entities.correction_text;
-  let redone: string[] = [];
-  if (correctionText) {
-    const userText = (message.text || "").toLowerCase();
-    const correctionLower = correctionText.toLowerCase();
-    if (!userText.includes(correctionLower)) {
-      console.log(`[Correction] Rejecting fabricated correction_text (not substring of user message). correction="${correctionText}" text="${message.text}"`);
-    } else {
-      // Re-classify the correction text to get proper entities
-      const ctx = await buildClassifierCtx(householdId);
-      const reclassified = await classifyIntent(correctionText, message.senderName, ctx);
+  if (candidates.length === 0) {
+    await sendAndLog(provider, { groupId, text: "סליחה, לא מצאתי שורה קרובה לתקן. תוכלי להגיד שוב?" }, {
+      householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
+    });
+    await logMessage(message, "correction_error", householdId, classification);
+    return;
+  }
 
-      if (reclassified.intent !== "ignore" && reclassified.intent !== "correct_bot") {
-        const actions = haikuEntitiesToActions(reclassified);
-        const result = await executeActions(householdId, actions, message.senderName);
-        redone = result.summary;
-      }
+  // 2. Call Sonnet for structured action JSON.
+  const prompt = buildCorrectionPrompt(message.text || "", ctx, candidates, sheliActs);
+  const result = await callCorrectionSonnet(prompt);
+
+  // 3. Validate target_id is in our candidate list (defence-in-depth against
+  // Sonnet inventing an id that doesn't belong to this household).
+  if (result.action === "update" || result.action === "remove") {
+    const inList = candidates.some((c) => c.id === result.target_id);
+    if (!inList) {
+      console.warn(`${logPrefix} Sonnet emitted unknown target_id ${result.target_id}, falling back to clarify`);
+      await sendAndLog(provider, { groupId, text: "לא הצלחתי לזהות בדיוק מה לעדכן. תוכלי להגיד שוב?" }, {
+        householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
+      });
+      await logMessage(message, "correction_error", householdId, classification);
+      return;
     }
   }
 
-  // 4. Log the correction for learning
-  await supabase.from("classification_corrections").insert({
-    household_id: householdId,
-    message_id: lastAction.messageId,
-    correction_type: "mention_correction",
-    original_data: lastAction.classification_data,
-    corrected_data: classification,
-  });
-
-  // 5. Reply — gate on actual state change (Bug 3a, 2026-04-23).
-  // Old behavior fired the warm apology template regardless of whether undo/redo
-  // actually mutated DB. A correction whose undo AND redo both no-opped (common
-  // when `getLastBotAction` resolved to an unrelated action, or when the
-  // reclassifier returned `ignore`) produced "תודה שתיקנת אותי! ... ✨" with no
-  // actual change — eroding user trust (2026-04-23, Roi's bedika + Sam corrections).
-  //
-  // New behavior: translate executor tokens to user-facing Hebrew first; if the
-  // translated arrays are both empty, surface honestly.
-  const undoneTranslated = translateExecutorSummaryForUser(undone);
-  const redoneTranslated = translateExecutorSummaryForUser(redone);
-  const hasAnyChange = undoneTranslated.length > 0 || redoneTranslated.length > 0;
-
-  let reply: string;
-  if (!hasAnyChange) {
-    // Nothing actually changed. Don't pretend.
-    if (correctionText && correctionText.trim().length > 0) {
-      reply = "לא הצלחתי להבין מה לתקן 🤔\nאפשר לומר את זה שוב בצורה אחרת?";
-    } else {
-      reply = "לא הצלחתי להבין מה לתקן 🤔";
-    }
-  } else {
-    const openers = [
-      "תודה על תשומת הלב! 🙏",
-      "תודה שתיקנת אותי! 🙏",
-      "אוי, טוב שאמרת! 🙏",
-    ];
-    const learningLines = [
-      "אני עדיין לומדת ומשתפרת כל הזמן 😅",
-      "ככה אני משתפרת — בזכותך 😅",
-      "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
-    ];
-    const opener = openers[Math.floor(Math.random() * openers.length)];
-    const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
-
-    const actionParts: string[] = [];
-    if (undoneTranslated.length > 0) actionParts.push(`ביטלתי: ${undoneTranslated.join(", ")}`);
-    if (redoneTranslated.length > 0) actionParts.push(`הוספתי: ${redoneTranslated.join(", ")}`);
-
-    const replyLines = [opener, learning, ...actionParts, "✨"];
-    reply = replyLines.join("\n");
+  // 4. Dispatch.
+  if (result.action === "clarify") {
+    await sendAndLog(provider, { groupId, text: result.ask }, {
+      householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
+    });
+    await logMessage(message, "correction_clarify", householdId, classification);
+    return;
   }
 
-  // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
-  // Defensive try/catch — the Cursor→Dashboard paste occasionally injects a stray
-  // Hebrew char mid-identifier (seen 2026-04-22, ref: "ReferenceError:
-  // derivePatternFromCorrecשtion is not defined"). If that happens again, pattern
-  // derivation silently fails but the user still gets their correction ack.
+  const actionType = result.action === "update"
+    ? (result.target_type === "reminder" ? "update_reminder" : "update_event")
+    : (result.target_type === "reminder" ? "remove_reminder" : "remove_event");
+
+  const crudAction: CrudAction = {
+    type: actionType as CrudAction["type"],
+    target_id: result.target_id,
+    ...(result.action === "update" ? {
+      new_scheduled_for: (result as any).new_scheduled_for,
+      new_send_at: (result as any).new_send_at,
+      new_title: (result as any).new_title,
+      new_text: (result as any).new_text,
+    } : {}),
+  };
+
+  const out = await executeCrudAction(householdId, crudAction, logPrefix);
+
+  if (!out.ok) {
+    const errMsg = out.error === "already_sent"
+      ? "התזכורת כבר נשלחה, לא יכולה לשנות 🙈"
+      : out.error === "not_found"
+      ? "לא מצאתי את השורה הזאת, אולי כבר נמחקה?"
+      : "משהו השתבש, תוכלי לנסות שוב?";
+    await sendAndLog(provider, { groupId, text: errMsg }, {
+      householdId, groupId, inReplyTo: message.messageId, replyType: "error_fallback",
+    });
+    await logMessage(message, "correction_error", householdId, classification);
+    return;
+  }
+
+  // 5. Log the correction for learning (preserves the old classification_corrections audit).
   try {
-    await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
-  } catch (dpErr) {
-    console.error("[handleCorrection] derivePatternFromCorrection call failed (non-fatal):", dpErr);
+    await supabase.from("classification_corrections").insert({
+      household_id: householdId,
+      message_id: message.messageId,
+      correction_type: "mention_correction_v2",
+      original_data: null,
+      corrected_data: classification,
+    });
+  } catch (logErr) {
+    console.error(`${logPrefix} classification_corrections insert failed (non-fatal):`, logErr);
   }
 
-  await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
-    householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
+  const opener = "סליחה, תיקנתי! ";
+  await sendAndLog(provider, { groupId, text: opener + out.summary + " ✨" }, {
+    householdId, groupId, inReplyTo: message.messageId, replyType: "action_reply",
   });
   await logMessage(message, "correction_applied", householdId, classification);
 }
