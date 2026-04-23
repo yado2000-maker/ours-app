@@ -1307,6 +1307,43 @@ If the user asks to clear a list ("תמחקי את הרשימה" / "נקי הכ�
 
 Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".
 
+CAPABILITIES HONESTY — MANDATORY (Bait family 2026-04-23):
+You coordinate the household INSIDE THIS CHAT only. You do NOT have tools to:
+- Send emails. NEVER say "אשלח מייל" / "אשלח לך מייל" / "I'll email you" / "I'll send an email" / "אמייל ל-X". You have zero email capability. If a user asks, say honestly in Hebrew: "אני לא יכולה לשלוח מיילים בעצמי 🙏 אבל אני יכולה להזכיר לך לשלוח, או לרשום את הפרטים שלא תשכחי".
+- Send SMS, make phone calls, leave voicemails. Same pattern — offer to remind / write down instead.
+- Browse the web, check external sites, look up prices, check weather, news, traffic, opening hours, read articles.
+- Access Google/Apple/Outlook Calendar or any external calendar (the events you save live ONLY inside this app).
+- Spend money, order products, book appointments, pay bills, transfer funds, interact with any external service or company on the user's behalf.
+- Integrate with third-party apps (Monday, Priority, Trello, Slack, banking apps, etc.).
+- Read/forward messages from OTHER chats or groups the user is in — you only see the chat you're active in.
+
+When asked to do any of the above, REFUSE HONESTLY and OFFER WHAT YOU CAN. Template:
+"לצערי אני לא [X] — זה לא אחת היכולות שלי כרגע 🙏 מה שאני כן יכולה לעשות בקלות: להזכיר לך [לשלוח מייל / להתקשר / לבצע את המשימה], לרשום את הפרטים כמטלה, או לשמור תזכורת לעתיד. להזכיר לך עכשיו?"
+
+The REFUSAL must come BEFORE any commitment word ("אשלח" / "אעשה" / "אבצע") — once you emit such a word you've lied. Never chain "אשלח מייל" with "אני לא יכולה" later — it's too late, trust is broken. The order is: REFUSE → OFFER → (if user says yes) add a reminder/task.
+
+If a user is mid-conversation and you realize you've agreed to an impossible action, apologize directly per SHARED_APOLOGY_RULES and correct course: "חח סורי — בלבלתי 🙈 אני לא יכולה לשלוח מיילים. אבל אזכיר לך לשלוח בעצמך מתי שנוח".
+
+PRONOUN DISCIPLINE — MANDATORY (Bait family 2026-04-23):
+When listing, summarizing, or referencing household items (tasks, shopping, events, reminders, expenses, rotations) in your reply, those items belong to the FAMILY — NOT to you. Speak ABOUT them in second person ("לך"/"לכם"/"אצלכם") or abstractly ("נשארה", "יש עוד", "הרשימה"). NEVER use first-person possessive/subject for user data.
+- WRONG: "יש לי עוד משימה פתוחה — לטפל בארנונה" (I have an open task) — the task is the user's, not yours.
+- WRONG: "הרשימה שלי מלאה", "המטלה שלי היום", "האירועים שלי השבוע"
+- WRONG: "שילמתי 200 ש״ח על חשמל" when reporting back a user's expense — the user paid, not you.
+- RIGHT: "יש לך/לכם עוד משימה פתוחה — לטפל בארנונה"
+- RIGHT: "נשארה משימה פתוחה — לטפל בארנונה" (abstract, avoids pronoun entirely)
+- RIGHT: "הרשימה די מלאה", "יש לכם שני אירועים השבוע", "שילמת 200 ש״ח על חשמל"
+
+First-person IS correct for YOUR actions — adding, reminding, saving, confirming, asking. Keep these:
+- "הוספתי לרשימה ✓" (I added to the list)
+- "אזכיר לך מחר ב-10:00" (I'll remind you)
+- "רשמתי את האירוע" (I noted the event)
+- "אני לא יכולה לשלוח מיילים" (capability disclaimer)
+
+Rule of thumb: if the sentence is about DATA (user's tasks/shopping/events/expenses), use second-person or abstract. If it's about ACTION YOU JUST TOOK or a statement about yourself, first-person is fine.
+In mixed replies, keep the two separate: "הוספתי למשימות ✓ | יש לך עכשיו 3 משימות פתוחות" — action in first person, data summary in second.
+
+Triggers to watch for where you most often slip: answering "מה יש היום?" / "מה את אומרת?" / "מה המצב?" / "תעשי לי סיכום" — the user is asking ABOUT THEIR data, so the reply describes their items, never possesses them.
+
 VISIT NOT RESIDENCY (bot identity during living-moment visits):
 - When a family member addresses you inside a celebration / photo-share / emotional moment, reply ONCE briefly, then STOP.
 - You are a helpful assistant. You are not a family member. Never write "אני חלק מהמשפחה" / "אני מתרגשת ביחד איתכם" / "אנחנו" as if you share their experience.
@@ -1634,7 +1671,7 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
 CURRENT STATE (use this to answer the question):
 Open tasks: ${openTasks.length === 0 ? "(none)" : openTasks.map((t) => `${t.title}${t.assigned_to ? ` → ${t.assigned_to}` : ""}`).join(", ")}
 Shopping needed: ${needShopping.length === 0 ? "(empty)" : needShopping.map((s) => `${s.name}${s.qty ? ` ×${s.qty}` : ""}`).join(", ")}
-Upcoming events: ${ctx.currentEvents.length === 0 ? "(none)" : ctx.currentEvents.map((e) => `${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${e.scheduled_for}`).join(", ")}`;
+Upcoming events: ${ctx.currentEvents.length === 0 ? "(none)" : ctx.currentEvents.map((e) => `${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${formatTimeWithDayLabel(e.scheduled_for)}`).join(", ")}`;
 
     const rotations = ctx.currentRotations || [];
     if (rotations.length > 0) {
@@ -1799,6 +1836,15 @@ Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳",
   "בימי ראשון שלישי וחמישי אריק מפנה את המדיח, עד 15:00" → reply "רשמתי תזכורת קבועה לאריק בימי א׳ ג׳ ה׳ ב-14:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}-->
   "כל יום ב-7 בבוקר ויטמין לילדים" → reply "אזכיר כל יום ב-7:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}-->
 - When user asks for BOTH weekday rotations (e.g. "אריק בימי א׳ ג׳ ה׳, עופרי בימי ב׳ ד׳ ו׳"), emit TWO RECURRING_REMINDER blocks, one per person.
+
+MONTHLY / DAY-OF-MONTH CADENCES (2026-04-23, first-class support):
+For "כל 15 לחודש" / "כל 15 בחודש" / "בכל 1 לחודש" / "monthly on the Xth" / explicit day-of-month phrasings, emit a MONTHLY variant of RECURRING_REMINDER with type="monthly" and day_of_month=1..31 (instead of the days array). The materializer will fire the reminder on that day each month automatically.
+- Format: <!--RECURRING_REMINDER:{"reminder_text":"...","type":"monthly","day_of_month":15,"time":"16:00"}-->
+- NEVER substitute monthly with days:[0,1,2,3,4,5,6] — that fires every day, which is wrong.
+- Your visible reply: short confirmation naming the day. "אזכיר כל 15 לחודש ב-16:00 ✓".
+- Ambiguous phrasings ("פעם בחודש" without a specific day) → ask for clarification, don't guess.
+Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה חשמל ומים" → reply "אזכיר כל 15 לחודש ב-16:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"לבדוק ארנונה, חשמל ומים","type":"monthly","day_of_month":15,"time":"16:00"}-->
+Example: "פעם בחודש תזכירי לי לבדוק סוללת הרכב" → reply "איזה יום בחודש? (למשל ה-1 או ה-15)" — don't guess.
 
 PRIVATE DELIVERY + ROTATION SHORTCUT (2026-04-22):
 - Honor entities.delivery_mode exactly like one-shot reminders (see PRIVATE DELIVERY block above).
@@ -1965,58 +2011,87 @@ function extractReminderFromReply(reply: string): {
   return all.length > 0 ? all[0] : null;
 }
 
-// RECURRING_REMINDER block extractor (Fix 4, 2026-04-20). Sonnet emits
-// <!--RECURRING_REMINDER:{"reminder_text":"...","days":[0,2,4],"time":"14:00"}-->
-// for repeating weekly patterns. Parent rows are inserted with recurrence JSONB;
-// the materialize_recurring_reminders() PG function fills the next 7 days of
-// child rows daily via pg_cron.
-function extractRecurringRemindersFromReply(reply: string): Array<{
+// RECURRING_REMINDER block extractor (Fix 4, 2026-04-20 / monthly added 2026-04-23).
+// Two accepted shapes:
+//   WEEKLY (existing):
+//     <!--RECURRING_REMINDER:{"reminder_text":"...","days":[0,2,4],"time":"14:00"}-->
+//   MONTHLY (new):
+//     <!--RECURRING_REMINDER:{"reminder_text":"...","type":"monthly","day_of_month":15,"time":"16:00"}-->
+// Parent rows are inserted with `recurrence` JSONB; the materialize_recurring_reminders()
+// PG function fills the next 7 days (weekly) or the next single occurrence (monthly).
+export type RecurringReminder = {
   reminder_text: string;
-  days: number[];
   time: string;
+  // Exactly one of these is set:
+  days?: number[]; // weekly
+  day_of_month?: number; // monthly
+  cadence: "weekly" | "monthly"; // derived from shape
   delivery_mode?: "group" | "dm" | "both";
   recipient_phones?: string[];
-}> {
-  const out: Array<{
-    reminder_text: string;
-    days: number[];
-    time: string;
-    delivery_mode?: "group" | "dm" | "both";
-    recipient_phones?: string[];
-  }> = [];
+};
+
+function extractRecurringRemindersFromReply(reply: string): RecurringReminder[] {
+  const out: RecurringReminder[] = [];
   for (const m of reply.matchAll(/<!--\s*RECURRING_REMINDER\s*:\s*(\{[^}]*\})\s*-*>/g)) {
     try {
       const parsed = JSON.parse(m[1]);
-      if (
+      const hasCommon =
         parsed.reminder_text && typeof parsed.reminder_text === "string" &&
-        Array.isArray(parsed.days) && parsed.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6) &&
-        typeof parsed.time === "string" && /^\d{1,2}:\d{2}$/.test(parsed.time)
-      ) {
-        let deliveryMode: "group" | "dm" | "both" | undefined;
-        if (parsed.delivery_mode) {
-          if (["group", "dm", "both"].includes(parsed.delivery_mode)) {
-            deliveryMode = parsed.delivery_mode;
-          } else {
-            console.warn("[RecurringReminder] Invalid delivery_mode, defaulting to group:", parsed.delivery_mode);
-          }
+        typeof parsed.time === "string" && /^\d{1,2}:\d{2}$/.test(parsed.time);
+      if (!hasCommon) {
+        console.warn("[RecurringReminder] Missing/invalid reminder_text or time:", m[1]);
+        continue;
+      }
+
+      const declaredType = typeof parsed.type === "string" ? parsed.type : null;
+      const isMonthly = declaredType === "monthly" ||
+        (declaredType == null && typeof parsed.day_of_month === "number");
+      const isWeekly = !isMonthly &&
+        Array.isArray(parsed.days) &&
+        parsed.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6);
+
+      let deliveryMode: "group" | "dm" | "both" | undefined;
+      if (parsed.delivery_mode) {
+        if (["group", "dm", "both"].includes(parsed.delivery_mode)) {
+          deliveryMode = parsed.delivery_mode;
+        } else {
+          console.warn("[RecurringReminder] Invalid delivery_mode, defaulting to group:", parsed.delivery_mode);
         }
-        let recipientPhones: string[] | undefined;
-        if (parsed.recipient_phones !== undefined) {
-          if (Array.isArray(parsed.recipient_phones)) {
-            recipientPhones = parsed.recipient_phones as string[];
-          } else {
-            console.warn("[RecurringReminder] recipient_phones not an array, dropping:", parsed.recipient_phones);
-          }
+      }
+      let recipientPhones: string[] | undefined;
+      if (parsed.recipient_phones !== undefined) {
+        if (Array.isArray(parsed.recipient_phones)) {
+          recipientPhones = parsed.recipient_phones as string[];
+        } else {
+          console.warn("[RecurringReminder] recipient_phones not an array, dropping:", parsed.recipient_phones);
         }
+      }
+
+      if (isMonthly) {
+        const dom = Number(parsed.day_of_month);
+        if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+          console.warn("[RecurringReminder] Invalid day_of_month (must be 1-31):", m[1]);
+          continue;
+        }
+        out.push({
+          reminder_text: parsed.reminder_text,
+          day_of_month: dom,
+          time: parsed.time,
+          cadence: "monthly",
+          ...(deliveryMode && { delivery_mode: deliveryMode }),
+          ...(recipientPhones && { recipient_phones: recipientPhones }),
+        });
+      } else if (isWeekly) {
         out.push({
           reminder_text: parsed.reminder_text,
           days: parsed.days as number[],
           time: parsed.time,
+          cadence: "weekly",
           ...(deliveryMode && { delivery_mode: deliveryMode }),
           ...(recipientPhones && { recipient_phones: recipientPhones }),
         });
       } else {
-        console.warn("[RecurringReminder] Invalid RECURRING_REMINDER block shape:", m[1]);
+        console.warn("[RecurringReminder] Invalid RECURRING_REMINDER block shape (not weekly days[] or monthly day_of_month):", m[1]);
       }
     } catch {
       console.warn("[RecurringReminder] Failed to parse RECURRING_REMINDER block:", m[1]);
@@ -2371,6 +2446,10 @@ async function rescueRemindersAndStrip(
       }
     }
 
+    // Build recurrence JSONB per cadence. Materializer branches on type.
+    const recurrenceJson = r.cadence === "monthly"
+      ? { type: "monthly", day_of_month: r.day_of_month, time: r.time }
+      : { days: r.days, time: r.time }; // weekly (default shape, no explicit type for backward compat)
     const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -2381,17 +2460,20 @@ async function rescueRemindersAndStrip(
       reminder_type: "user",
       created_by_phone: message.senderPhone,
       created_by_name: message.senderName,
-      recurrence: { days: r.days, time: r.time },
+      recurrence: recurrenceJson,
       delivery_mode: recDeliveryMode,
       recipient_phones: recRecipientPhones,
-      metadata: { recurring_parent: true, source: "sonnet_rescue" },
+      metadata: { recurring_parent: true, source: "sonnet_rescue", cadence: r.cadence },
     }).select("id").single();
     if (recErr) {
       console.error("[RecurringReminderRescue] Insert error:", recErr);
       continue;
     }
+    const cadenceDesc = r.cadence === "monthly"
+      ? `monthly day ${r.day_of_month}`
+      : `days=${JSON.stringify(r.days)}`;
     console.log(
-      `[RecurringReminderRescue] Parent row created (${recDeliveryMode}): "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`
+      `[RecurringReminderRescue] Parent row created (${recDeliveryMode}): "${r.reminder_text}" ${cadenceDesc} @ ${r.time} (id=${parent?.id})`
       + (recRecipientPhones ? ` → ${recRecipientPhones.length} recipients` : "")
     );
     rescueSaveCount++;
@@ -2658,7 +2740,7 @@ Keep responses SHORT — 1-2 lines max. This is WhatsApp, not email.`;
 
   const eventsStr = ctx.currentEvents.length === 0
     ? "(none)"
-    : ctx.currentEvents.map((e) => `• ${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${e.scheduled_for} (id:${e.id})`).join("\n");
+    : ctx.currentEvents.map((e) => `• ${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${formatTimeWithDayLabel(e.scheduled_for)} (id:${e.id})`).join("\n");
 
   const hebrewPatterns = isHe ? `
 HEBREW FAMILY CHAT PATTERNS — critical for correct classification:
@@ -4410,6 +4492,8 @@ ADD:
   For ROTATIONS with different people on different days → emit MULTIPLE recurring_reminder actions, one per person with their own days array.
   Example: "תזכירי לי כל בוקר ב-7 לקחת ויטמין" → [{"type":"recurring_reminder","text":"לקחת ויטמין","days":[0,1,2,3,4,5,6],"time":"07:00"}]
   Example: "בימי ראשון שלישי חמישי אריק מפנה מדיח, עד 15:00" → [{"type":"recurring_reminder","text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}]
+  MONTHLY CADENCES (2026-04-23, first-class support): For "כל 15 לחודש" / "כל 15 בחודש" / "monthly on the Xth" / explicit day-of-month, emit a MONTHLY variant of recurring_reminder: {"type":"recurring_reminder","text":"...","day_of_month":15,"time":"16:00"} (note: day_of_month INSTEAD of days). NEVER substitute monthly with days=[0,1,2,3,4,5,6] — that fires every day, which is wrong. Ambiguous "פעם בחודש" without a specific day → ask for clarification ("איזה יום בחודש?"), don't guess.
+  Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה" → [{"type":"recurring_reminder","text":"לבדוק ארנונה","day_of_month":15,"time":"16:00"}] + visible reply "אזכיר כל 15 לחודש ב-16:00 ✓".
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
@@ -4714,6 +4798,92 @@ function toIsraelTimeStr(utcDate: string): string {
   }
 }
 
+// Bug 6 fix (2026-04-23): server-side DATE ANCHOR re-resolution for add_event.
+// Sonnet/Haiku occasionally emit the wrong date when the user says an unambiguous
+// relative-day word: bedika incident — user said "מחר בשעה 08:00" at 12:36 UTC
+// Thursday, Sonnet emitted 2026-04-25 (Saturday) instead of 2026-04-24 (Friday).
+// The prompt already ships DAY ANCHOR but models still drift by one row when
+// juggling multiple events. This helper detects "היום"/"מחר"/"מחרתיים"/"אתמול"
+// as standalone tokens in the user's text and overrides the date portion of
+// scheduled_for authoritatively. Time + offset are preserved. Returns original
+// if no unambiguous anchor word is present (day-name phrases like "יום שני"
+// are left to the model — multiple interpretations).
+function reanchorEventDate(userText: string, scheduledFor: string): string {
+  if (!userText || !scheduledFor) return scheduledFor;
+  // Order matters: מחרתיים before מחר to avoid matching "מחר" inside "מחרתיים".
+  // Boundary: not-Hebrew-letter on either side (Hebrew has no whitespace-is-boundary like Latin).
+  const bounds = "(^|[^\\u0590-\\u05FF])";
+  const ends = "(?![\\u0590-\\u05FF])";
+  let expectedDayOffset: number | null = null;
+  let matchedWord = "";
+  if (new RegExp(bounds + "מחרתיים" + ends).test(userText)) { expectedDayOffset = 2; matchedWord = "מחרתיים"; }
+  else if (new RegExp(bounds + "מחר" + ends).test(userText)) { expectedDayOffset = 1; matchedWord = "מחר"; }
+  else if (new RegExp(bounds + "היום" + ends).test(userText)) { expectedDayOffset = 0; matchedWord = "היום"; }
+  else if (new RegExp(bounds + "אתמול" + ends).test(userText)) { expectedDayOffset = -1; matchedWord = "אתמול"; }
+  if (expectedDayOffset === null) return scheduledFor;
+
+  const ilTodayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const todayAnchor = new Date(ilTodayStr + "T12:00:00Z");
+  const expected = new Date(todayAnchor);
+  expected.setUTCDate(expected.getUTCDate() + expectedDayOffset);
+  const expectedIsoDate = expected.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+  const dateMatch = scheduledFor.match(/^(\d{4}-\d{2}-\d{2})(T.*)?$/);
+  if (!dateMatch) return scheduledFor;
+  const sonnetDate = dateMatch[1];
+  const timePart = dateMatch[2] || "T18:00:00+03:00";
+
+  if (sonnetDate !== expectedIsoDate) {
+    console.warn(`[add_event] Date anchor override: user text contains "${matchedWord}" (expected ${expectedIsoDate}), Sonnet/Haiku emitted ${sonnetDate}. Overriding to ${expectedIsoDate}${timePart}.`);
+    return `${expectedIsoDate}${timePart}`;
+  }
+  return scheduledFor;
+}
+
+// Pre-render a UTC timestamp with an explicit Hebrew day label (היום/מחר/יום X)
+// for event+reminder context blocks. Bug 5 (2026-04-23): previously events were
+// formatted as raw ISO or as `toIsraelTimeStr` short-weekday abbrev ("חמ׳ 23.4");
+// Sonnet had to cross-reference against the DAY ANCHOR to compute Hebrew labels
+// and drifted by one row when listing multiple events (Roi's household: Sam's
+// call was today but Sheli said "מחר"). Now we do the day-label resolution
+// server-side so Sonnet just copies the string.
+function formatTimeWithDayLabel(utcDate: string): string {
+  try {
+    const d = new Date(utcDate);
+    const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
+    const ilTodayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+    const ilEventStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+    // Anchor both dates at UTC noon to avoid DST-boundary edge cases in diff arithmetic.
+    const todayAnchor = new Date(ilTodayStr + "T12:00:00Z");
+    const eventAnchor = new Date(ilEventStr + "T12:00:00Z");
+    const diffDays = Math.round((eventAnchor.getTime() - todayAnchor.getTime()) / (24 * 3600 * 1000));
+    const weekday = hebrewDays[eventAnchor.getUTCDay()];
+
+    const dateTime = d.toLocaleString("he-IL", {
+      timeZone: "Asia/Jerusalem",
+      day: "numeric",
+      month: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
+    let label: string;
+    if (diffDays === 0) label = "היום";
+    else if (diffDays === 1) label = "מחר";
+    else if (diffDays === 2) label = "מחרתיים";
+    else if (diffDays === -1) label = "אתמול";
+    else if (diffDays >= 3 && diffDays <= 6) label = `יום ${weekday}, בעוד ${diffDays} ימים`;
+    else if (diffDays < 0) label = `יום ${weekday}, לפני ${-diffDays} ימים`;
+    else label = `יום ${weekday}`;
+
+    return `${dateTime} (${label})`;
+  } catch {
+    return utcDate;
+  }
+}
+
 // Load active household items (tasks, shopping, events, reminders, expenses) for Sonnet context.
 // Times are converted to Israel timezone strings so Sonnet doesn't misread UTC as local.
 async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; scheduled_for?: string; send_at?: string }[]> {
@@ -4732,8 +4902,8 @@ async function loadHouseholdItems(householdId: string): Promise<{ type: string; 
   return [
     ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
     ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
-    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: toIsraelTimeStr(r.scheduled_for) })),
-    ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: toIsraelTimeStr(r.send_at) })),
+    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
+    ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: formatTimeWithDayLabel(r.send_at) })),
     ...(expensesRes.data || []).map((r: any) => {
       const unit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100 };
       const sym: Record<string, string> = { ILS: "\u20AA", USD: "$", EUR: "\u20AC", GBP: "\u00A3" };
@@ -4837,13 +5007,25 @@ async function execute1on1Actions(params: {
       return false;
     }
     if (action.type === "recurring_reminder") {
-      if (!Array.isArray(action.days) || action.days.length === 0) {
-        droppedActions.push({ reason: "recurring_no_days", action });
-        return false;
-      }
-      if (!action.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6)) {
-        droppedActions.push({ reason: "recurring_invalid_days", action });
-        return false;
+      // Monthly shape (2026-04-23): {text, day_of_month:1..31, time:"HH:MM"}
+      const isMonthlyRecur = action.cadence === "monthly" ||
+        (action.day_of_month !== undefined && action.day_of_month !== null);
+      if (isMonthlyRecur) {
+        const dom = Number(action.day_of_month);
+        if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+          droppedActions.push({ reason: "recurring_invalid_day_of_month", action });
+          return false;
+        }
+      } else {
+        // Weekly shape (existing): {text, days:[0..6], time}
+        if (!Array.isArray(action.days) || action.days.length === 0) {
+          droppedActions.push({ reason: "recurring_no_days", action });
+          return false;
+        }
+        if (!action.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6)) {
+          droppedActions.push({ reason: "recurring_invalid_days", action });
+          return false;
+        }
       }
       if (!action.time || !/^\d{1,2}:\d{2}$/.test(String(action.time))) {
         droppedActions.push({ reason: "recurring_invalid_time", action });
@@ -4933,18 +5115,23 @@ async function execute1on1Actions(params: {
             data: { title: action.text || "", assigned_to: null },
           });
           break;
-        case "event":
+        case "event": {
+          const initialScheduledFor = action.date
+            ? `${action.date}${action.time ? "T" + action.time + ":00+03:00" : "T18:00:00+03:00"}`
+            : new Date().toISOString();
+          // Bug 6 (2026-04-23): re-anchor relative day words ("מחר"/"היום") from
+          // the user's literal text. Same as the group path in haikuEntitiesToActions.
+          const scheduledFor = reanchorEventDate(String(text || raw || ""), initialScheduledFor);
           mappedActions.push({
             type: "add_event",
             data: {
               title: action.title || action.text || "",
               assigned_to: null,
-              scheduled_for: action.date
-                ? `${action.date}${action.time ? "T" + action.time + ":00+03:00" : "T18:00:00+03:00"}`
-                : new Date().toISOString(),
+              scheduled_for: scheduledFor,
             },
           });
           break;
+        }
         case "rotation":
           if (action.members && Array.isArray(action.members)) {
             mappedActions.push({
@@ -4976,10 +5163,32 @@ async function execute1on1Actions(params: {
           break;
         }
         case "recurring_reminder": {
-          // 1:1 path recurring-reminder wiring (Fix 4, 2026-04-20). Same shape as
-          // the group-path rescueRemindersAndStrip: insert a parent row with
-          // recurrence JSONB, then call the materializer immediately so the first
-          // instance fires without waiting for the 01:00 UTC cron.
+          // 1:1 path recurring-reminder wiring (Fix 4, 2026-04-20; monthly added 2026-04-23).
+          // Accepted shapes:
+          //   weekly:  {text, days:[0..6], time:"HH:MM"}
+          //   monthly: {text, day_of_month:1..31, time:"HH:MM"}   (optional cadence:"monthly")
+          // Same storage path either way: insert parent with recurrence JSONB, call
+          // materializer immediately so the first instance fires without waiting for cron.
+          const isMonthlyAction = action.cadence === "monthly" ||
+            (action.day_of_month !== undefined && action.day_of_month !== null);
+          let recurrenceJson: Record<string, unknown>;
+          let cadenceDesc: string;
+          if (isMonthlyAction) {
+            const dom = Number(action.day_of_month);
+            if (!Number.isInteger(dom) || dom < 1 || dom > 31) {
+              console.warn(`${logPrefix} recurring_reminder monthly invalid day_of_month: ${action.day_of_month} — skipping`);
+              break;
+            }
+            recurrenceJson = { type: "monthly", day_of_month: dom, time: action.time };
+            cadenceDesc = `monthly day ${dom}`;
+          } else {
+            if (!Array.isArray(action.days) || action.days.length === 0) {
+              console.warn(`${logPrefix} recurring_reminder weekly missing days — skipping`);
+              break;
+            }
+            recurrenceJson = { days: action.days, time: action.time };
+            cadenceDesc = `days=${JSON.stringify(action.days)}`;
+          }
           const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
             household_id: householdId,
             group_id: phone + "@s.whatsapp.net",
@@ -4990,14 +5199,14 @@ async function execute1on1Actions(params: {
             reminder_type: "user",
             created_by_phone: phone,
             created_by_name: userName,
-            recurrence: { days: action.days, time: action.time },
-            metadata: { recurring_parent: true, source: "1on1_actions" },
+            recurrence: recurrenceJson,
+            metadata: { recurring_parent: true, source: "1on1_actions", cadence: isMonthlyAction ? "monthly" : "weekly" },
           }).select("id").single();
           if (recErr) {
             console.error(`${logPrefix} Recurring reminder insert error:`, recErr);
             break;
           }
-          console.log(`${logPrefix} Recurring reminder parent created: "${action.text}" days=${JSON.stringify(action.days)} @ ${action.time} (id=${parent?.id})`);
+          console.log(`${logPrefix} Recurring reminder parent created: "${action.text}" ${cadenceDesc} @ ${action.time} (id=${parent?.id})`);
           // Materialize next 7 days so first occurrence doesn't wait for cron
           const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
           if (matErr) console.warn(`${logPrefix} Immediate materialize failed:`, matErr.message);
@@ -7592,6 +7801,34 @@ Deno.serve(async (req: Request) => {
 
       // Haiku pass: fix Hebrew voice transcription errors before classification
       const fixedTranscript = await fixVoiceTranscription(cleanTranscript);
+
+      // Incoherence gate (Bug 2, 2026-04-23): Haiku fixer may flag severely
+      // garbled transcripts with the __UNCLEAR__ sentinel. Previously such
+      // transcripts would fall through to Sonnet, which over-eagerly split
+      // them into bogus shopping items (live bug: "שינת עם קקי" landed in
+      // Sheli family's shopping list 2026-04-23). Ask user to repeat instead.
+      if (fixedTranscript && /^__UNCLEAR__$/.test(fixedTranscript.trim())) {
+        console.log(`[Webhook] Voice transcript flagged incoherent by Haiku fixer: "${cleanTranscript.slice(0, 80)}"`);
+        const chatTarget = message.groupId;
+        if (chatTarget) {
+          const politeRepeat = [
+            "אוי, חלק מההודעה יצא לא ברור 🙈 אפשר לחזור על זה לאט, או לכתוב בטקסט?",
+            "סורי, לא הצלחתי להבין חלקים מההודעה הקולית 🙏 אפשר בבקשה לחזור עליה ברור יותר?",
+            "חח קצת התבלבלתי עם ההקלטה 🙈 אפשר לחזור עליה או לשלוח בטקסט?",
+          ][Math.floor(Math.random() * 3)];
+          try {
+            await sendAndLog(provider, { groupId: chatTarget, text: politeRepeat }, {
+              householdId: "unknown",
+              groupId: chatTarget,
+              inReplyTo: message.messageId,
+              replyType: "voice_incoherent_reply",
+            });
+          } catch (e) { console.error("[IncoherentVoice] reply failed:", e); }
+        }
+        await logMessage(message, "voice_incoherent");
+        return new Response("OK", { status: 200 });
+      }
+
       if (fixedTranscript && fixedTranscript !== cleanTranscript) {
         console.log(`[Webhook] Voice fix: "${cleanTranscript.slice(0, 60)}" → "${fixedTranscript.slice(0, 60)}"`);
         cleanTranscript = fixedTranscript;
@@ -9575,8 +9812,16 @@ COMMON ERRORS TO FIX:
 4. WORD BOUNDARIES around common Hebrew phrases:
    "תור מי", "של מי", "מי בתור", "בשביל מה", "למה זה", "איך אני"
 
+INCOHERENCE GATE (2026-04-23):
+If the transcript is SEVERELY GARBLED — impossible Hebrew word combinations that cannot form any plausible household request, dangling morpheme prefixes with no attached word ("וב" / "מ-" / "לה" alone), or completely incoherent fragments where no rough intent can be extracted — return the exact marker: __UNCLEAR__
+Concrete examples of garbled that MUST return __UNCLEAR__:
+  "שינת עם קקי אורז וב בננות מרשימה" → __UNCLEAR__ (word salad, "שינת עם קקי" is not a plausible shopping item, "וב" is a dangling prefix)
+  "מה עם כי ואו אמא" → __UNCLEAR__
+  "ה-ה-ה אה בשביל" → __UNCLEAR__
+Be CONSERVATIVE: if ANY plausible household intent can be recovered (even awkward phrasing, typos, slang), fix it and return the corrected text. Only return __UNCLEAR__ when the transcript is genuinely useless.
+
 RULES:
-- Return ONLY the corrected text, nothing else.
+- Return ONLY the corrected text (or __UNCLEAR__), nothing else.
 - If the text is fine, return it unchanged.
 - Do NOT change meaning, add words, or rephrase.
 - Do NOT remove content you're not sure is hallucinated.
@@ -11079,6 +11324,11 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
         scheduledFor = `${israelDateStr}T18:00:00+03:00`;
         console.log(`[Webhook] M13: No time_iso for add_event, defaulting to 18:00 IST. time_raw: ${e.time_raw}`);
       }
+      // Bug 6 (2026-04-23): server-side re-anchor. If raw_text contains
+      // "מחר"/"היום"/"מחרתיים"/"אתמול" and Sonnet/Haiku emitted a date that
+      // disagrees, override. DAY ANCHOR is authoritative for these unambiguous
+      // tokens.
+      scheduledFor = reanchorEventDate(String(e.raw_text || ""), scheduledFor);
       actions.push({
         type: "add_event",
         data: {
@@ -11202,6 +11452,85 @@ async function getLastBotAction(groupId: string, householdId: string): Promise<{
   };
 }
 
+// Bug 3 fix (2026-04-23): title-aware lookup for corrections. When a user
+// says "תתקני בדיקת דירה לא במוצ"ש אלא מחר", the correct bot action to undo
+// is the one that CREATED the bedika — not the last bot action overall.
+// Without this, handleCorrection's getLastBotAction picks the most recent
+// actionable message in the last 5 min regardless of topic (Roi scenario:
+// last action was cake-pickup-task, correction was about bedika event →
+// undo deleted the cake task, bedika stayed on wrong day, redo inserted
+// a duplicate on Friday). This helper scans the last 15 min of actionable
+// messages and returns the one whose stored title/name fuzzy-matches the
+// correction_text. Falls through to null if no match (caller uses the old
+// most-recent path as fallback).
+async function findRelatedBotAction(
+  correctionText: string,
+  groupId: string,
+  householdId: string,
+): Promise<{
+  messageId: string;
+  classification_data: ClassificationOutput;
+  created_at: string;
+} | null> {
+  if (!correctionText || correctionText.length < 3) return null;
+  const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  const { data } = await supabase
+    .from("whatsapp_messages")
+    .select("id, whatsapp_message_id, classification_data, created_at")
+    .eq("group_id", groupId)
+    .eq("household_id", householdId)
+    .in("classification", ["haiku_actionable", "sonnet_escalated", "batch_actionable"])
+    .gte("created_at", fifteenMinAgo)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (!data || data.length === 0) return null;
+
+  // Normalize: lowercase, strip niqud + common Hebrew punctuation, collapse whitespace.
+  const norm = (s: string) =>
+    String(s || "")
+      .toLowerCase()
+      .replace(/[\u0591-\u05C7]/g, "")
+      .replace(/[.,!?"'"׳״]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const ctLow = norm(correctionText);
+  if (ctLow.length < 3) return null;
+
+  for (const row of data) {
+    const cd = row.classification_data as ClassificationOutput | null;
+    if (!cd) continue;
+    const e = (cd.entities || {}) as any;
+    const candidates: string[] = [];
+    if (e.title) candidates.push(String(e.title));
+    if (e.reminder_text) candidates.push(String(e.reminder_text));
+    if (Array.isArray(e.items)) {
+      for (const it of e.items) {
+        if (it && typeof it === "object" && it.name) candidates.push(String(it.name));
+      }
+    }
+    const hit = candidates.some((t) => {
+      const tLow = norm(t);
+      if (tLow.length < 3) return false;
+      // Either the stored title appears in the correction text, or a 6+char
+      // substring of the correction text appears in the stored title (handles
+      // "בדיקת דירה בהנטקה" in stored vs. "בדיקת דירה" in correction).
+      if (ctLow.includes(tLow)) return true;
+      for (let start = 0; start + 6 <= ctLow.length; start++) {
+        if (tLow.includes(ctLow.slice(start, start + 6))) return true;
+      }
+      return false;
+    });
+    if (hit) {
+      return {
+        messageId: row.whatsapp_message_id || row.id,
+        classification_data: cd,
+        created_at: row.created_at,
+      };
+    }
+  }
+  return null;
+}
+
 async function undoLastAction(householdId: string, lastAction: ClassificationOutput): Promise<string[]> {
   const undone: string[] = [];
 
@@ -11286,14 +11615,57 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
   return undone;
 }
 
+// Executor summary entries are internal debug tokens like:
+//   `Event-exists: "<title>"`, `Event: "<title>" @ <iso>`, `Shopping: "<name>" ×N`
+// These are safe to surface in operator logs, but NEVER in a user-visible reply.
+// handleCorrection used to concatenate them directly into `הוספתי: ...` — producing
+// live messages like `הוספתי: Event-exists: "שיחה עם סאם מחברת סוניגו"` (2026-04-23,
+// Roi's household). Translate to Hebrew or drop before showing.
+//
+// "Event-exists" is intentionally dropped: it means the correction produced no real
+// state change (the event already existed on that date). Let the apology-gate below
+// treat those as no-op so we prompt for clarification instead of pretending to act.
+function translateExecutorSummaryForUser(entries: string[]): string[] {
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (/^Event-exists:/.test(entry)) continue; // silent — not a real change
+    let m = entry.match(/^Event:\s+"(.+?)"(?:\s+@\s+.+)?\s*$/);
+    if (m) { result.push(`"${m[1]}"`); continue; }
+    m = entry.match(/^Shopping:\s+"(.+?)"(?:\s+×\d+)?\s*$/);
+    if (m) { result.push(`"${m[1]}"`); continue; }
+    m = entry.match(/^Task:\s+"(.+?)"\s*$/);
+    if (m) { result.push(`"${m[1]}"`); continue; }
+    // Internal-id / bookkeeping lines — never show
+    if (/^(Completed task:|Got shopping item:|complete_shopping_by_names:|Assigned task:)/.test(entry)) continue;
+    // Unknown shape: extract a quoted substring if present; otherwise drop rather
+    // than leak a `Foo-bar: baz` token to the user.
+    const quoted = entry.match(/"([^"]+)"/);
+    if (quoted) { result.push(`"${quoted[1]}"`); continue; }
+    // Drop silently
+  }
+  return result;
+}
+
 async function handleCorrection(
   message: IncomingMessage,
   classification: ClassificationOutput,
   householdId: string,
   provider: WhatsAppProvider,
 ): Promise<void> {
-  // 1. Find the last bot action
-  const lastAction = await getLastBotAction(message.groupId, householdId);
+  // 1. Find the bot action being corrected.
+  // Prefer title-aware lookup when correction_text references a specific item;
+  // fall back to last-5-min most-recent. Bug 3 root cause (Roi 2026-04-23):
+  // correction "תתקני בדיקת דירה..." arrived after several other bot actions
+  // (cake pickup, tire change), so most-recent resolved to the cake task —
+  // undo deleted the wrong thing, bedika stayed on wrong day, redo inserted
+  // a duplicate on Friday.
+  const ctForLookup = classification.entities.correction_text || "";
+  let lastAction = ctForLookup
+    ? await findRelatedBotAction(ctForLookup, message.groupId, householdId)
+    : null;
+  if (!lastAction) {
+    lastAction = await getLastBotAction(message.groupId, householdId);
+  }
 
   if (!lastAction) {
     await sendAndLog(provider, {
@@ -11342,29 +11714,48 @@ async function handleCorrection(
     corrected_data: classification,
   });
 
-  // 5. Reply with warm confirmation + learning acknowledgement
-  const openers = [
-    "תודה על תשומת הלב! 🙏",
-    "תודה שתיקנת אותי! 🙏",
-    "אוי, טוב שאמרת! 🙏",
-  ];
-  const learningLines = [
-    "אני עדיין לומדת ומשתפרת כל הזמן 😅",
-    "ככה אני משתפרת — בזכותך 😅",
-    "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
-  ];
-  const opener = openers[Math.floor(Math.random() * openers.length)];
-  const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
+  // 5. Reply — gate on actual state change (Bug 3a, 2026-04-23).
+  // Old behavior fired the warm apology template regardless of whether undo/redo
+  // actually mutated DB. A correction whose undo AND redo both no-opped (common
+  // when `getLastBotAction` resolved to an unrelated action, or when the
+  // reclassifier returned `ignore`) produced "תודה שתיקנת אותי! ... ✨" with no
+  // actual change — eroding user trust (2026-04-23, Roi's bedika + Sam corrections).
+  //
+  // New behavior: translate executor tokens to user-facing Hebrew first; if the
+  // translated arrays are both empty, surface honestly.
+  const undoneTranslated = translateExecutorSummaryForUser(undone);
+  const redoneTranslated = translateExecutorSummaryForUser(redone);
+  const hasAnyChange = undoneTranslated.length > 0 || redoneTranslated.length > 0;
 
-  const actionParts: string[] = [];
-  if (undone.length > 0) actionParts.push(`ביטלתי: ${undone.join(", ")}`);
-  if (redone.length > 0) actionParts.push(`הוספתי: ${redone.join(", ")}`);
+  let reply: string;
+  if (!hasAnyChange) {
+    // Nothing actually changed. Don't pretend.
+    if (correctionText && correctionText.trim().length > 0) {
+      reply = "לא הצלחתי להבין מה לתקן 🤔\nאפשר לומר את זה שוב בצורה אחרת?";
+    } else {
+      reply = "לא הצלחתי להבין מה לתקן 🤔";
+    }
+  } else {
+    const openers = [
+      "תודה על תשומת הלב! 🙏",
+      "תודה שתיקנת אותי! 🙏",
+      "אוי, טוב שאמרת! 🙏",
+    ];
+    const learningLines = [
+      "אני עדיין לומדת ומשתפרת כל הזמן 😅",
+      "ככה אני משתפרת — בזכותך 😅",
+      "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
+    ];
+    const opener = openers[Math.floor(Math.random() * openers.length)];
+    const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
 
-  const replyLines = [opener, learning];
-  if (actionParts.length > 0) replyLines.push(...actionParts);
-  replyLines.push("✨");
+    const actionParts: string[] = [];
+    if (undoneTranslated.length > 0) actionParts.push(`ביטלתי: ${undoneTranslated.join(", ")}`);
+    if (redoneTranslated.length > 0) actionParts.push(`הוספתי: ${redoneTranslated.join(", ")}`);
 
-  const reply = replyLines.join("\n");
+    const replyLines = [opener, learning, ...actionParts, "✨"];
+    reply = replyLines.join("\n");
+  }
 
   // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
   // Defensive try/catch — the Cursor→Dashboard paste occasionally injects a stray
