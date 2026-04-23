@@ -1800,6 +1800,15 @@ Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳",
   "כל יום ב-7 בבוקר ויטמין לילדים" → reply "אזכיר כל יום ב-7:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}-->
 - When user asks for BOTH weekday rotations (e.g. "אריק בימי א׳ ג׳ ה׳, עופרי בימי ב׳ ד׳ ו׳"), emit TWO RECURRING_REMINDER blocks, one per person.
 
+MONTHLY / DAY-OF-MONTH CADENCES ARE NOT SUPPORTED YET (2026-04-23):
+The RECURRING_REMINDER schema stores weekdays only (Sun..Sat). It CANNOT represent "every 15th of the month" or "once a month". NEVER substitute with days=[0,1,2,3,4,5,6] — that fires daily, which is wrong.
+Trigger phrases: "כל 15 לחודש" / "כל 15 בחודש" / "בכל 1 לחודש" / "פעם בחודש" / "אחת לחודש" / "monthly" / "once a month" / "every month on the Xth" / explicit day-of-month.
+Handling:
+- Do NOT emit a RECURRING_REMINDER block for these.
+- Emit ONE one-shot REMINDER for the NEXT occurrence only.
+- In your visible reply, be honest about the limitation so the user knows to re-ask next month.
+Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה חשמל ומים" → reply "עוד אין לי תזכורות חודשיות קבועות 🙏 אזכיר לך ב-15/5 ב-16:00 לבדוק ארנונה חשמל ומים — תזכירי לי שוב בחודש הבא" + <!--REMINDER:{"reminder_text":"לבדוק ארנונה, חשמל ומים","send_at":"2026-05-15T16:00:00+03:00"}-->
+
 PRIVATE DELIVERY + ROTATION SHORTCUT (2026-04-22):
 - Honor entities.delivery_mode exactly like one-shot reminders (see PRIVATE DELIVERY block above).
 - When delivery_mode is "dm" or "both", add recipient_phones to each RECURRING_REMINDER block:
@@ -4410,6 +4419,8 @@ ADD:
   For ROTATIONS with different people on different days → emit MULTIPLE recurring_reminder actions, one per person with their own days array.
   Example: "תזכירי לי כל בוקר ב-7 לקחת ויטמין" → [{"type":"recurring_reminder","text":"לקחת ויטמין","days":[0,1,2,3,4,5,6],"time":"07:00"}]
   Example: "בימי ראשון שלישי חמישי אריק מפנה מדיח, עד 15:00" → [{"type":"recurring_reminder","text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}]
+  MONTHLY CADENCES NOT SUPPORTED YET (2026-04-23): The schema stores weekdays only. NEVER substitute "כל 15 לחודש" / "פעם בחודש" / "monthly" with days=[0,1,2,3,4,5,6] — that fires daily, which is wrong. For monthly-cadence phrasing, emit ONE one-shot reminder for the NEXT occurrence and say honestly "עוד אין לי תזכורות חודשיות קבועות 🙏 אזכיר לך ב-<date>, תזכירי לי שוב בחודש הבא".
+  Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה" → [{"type":"reminder","text":"לבדוק ארנונה","time":"16:00","send_at":"2026-05-15T16:00:00+03:00"}] + visible reply "עוד אין לי תזכורות חודשיות קבועות 🙏 אזכיר לך ב-15/5 ב-16:00, תזכירי לי שוב בחודש הבא".
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
@@ -7592,6 +7603,34 @@ Deno.serve(async (req: Request) => {
 
       // Haiku pass: fix Hebrew voice transcription errors before classification
       const fixedTranscript = await fixVoiceTranscription(cleanTranscript);
+
+      // Incoherence gate (Bug 2, 2026-04-23): Haiku fixer may flag severely
+      // garbled transcripts with the __UNCLEAR__ sentinel. Previously such
+      // transcripts would fall through to Sonnet, which over-eagerly split
+      // them into bogus shopping items (live bug: "שינת עם קקי" landed in
+      // Sheli family's shopping list 2026-04-23). Ask user to repeat instead.
+      if (fixedTranscript && /^__UNCLEAR__$/.test(fixedTranscript.trim())) {
+        console.log(`[Webhook] Voice transcript flagged incoherent by Haiku fixer: "${cleanTranscript.slice(0, 80)}"`);
+        const chatTarget = message.groupId;
+        if (chatTarget) {
+          const politeRepeat = [
+            "אוי, חלק מההודעה יצא לא ברור 🙈 אפשר לחזור על זה לאט, או לכתוב בטקסט?",
+            "סורי, לא הצלחתי להבין חלקים מההודעה הקולית 🙏 אפשר בבקשה לחזור עליה ברור יותר?",
+            "חח קצת התבלבלתי עם ההקלטה 🙈 אפשר לחזור עליה או לשלוח בטקסט?",
+          ][Math.floor(Math.random() * 3)];
+          try {
+            await sendAndLog(provider, { groupId: chatTarget, text: politeRepeat }, {
+              householdId: "unknown",
+              groupId: chatTarget,
+              inReplyTo: message.messageId,
+              replyType: "voice_incoherent_reply",
+            });
+          } catch (e) { console.error("[IncoherentVoice] reply failed:", e); }
+        }
+        await logMessage(message, "voice_incoherent");
+        return new Response("OK", { status: 200 });
+      }
+
       if (fixedTranscript && fixedTranscript !== cleanTranscript) {
         console.log(`[Webhook] Voice fix: "${cleanTranscript.slice(0, 60)}" → "${fixedTranscript.slice(0, 60)}"`);
         cleanTranscript = fixedTranscript;
@@ -9575,8 +9614,16 @@ COMMON ERRORS TO FIX:
 4. WORD BOUNDARIES around common Hebrew phrases:
    "תור מי", "של מי", "מי בתור", "בשביל מה", "למה זה", "איך אני"
 
+INCOHERENCE GATE (2026-04-23):
+If the transcript is SEVERELY GARBLED — impossible Hebrew word combinations that cannot form any plausible household request, dangling morpheme prefixes with no attached word ("וב" / "מ-" / "לה" alone), or completely incoherent fragments where no rough intent can be extracted — return the exact marker: __UNCLEAR__
+Concrete examples of garbled that MUST return __UNCLEAR__:
+  "שינת עם קקי אורז וב בננות מרשימה" → __UNCLEAR__ (word salad, "שינת עם קקי" is not a plausible shopping item, "וב" is a dangling prefix)
+  "מה עם כי ואו אמא" → __UNCLEAR__
+  "ה-ה-ה אה בשביל" → __UNCLEAR__
+Be CONSERVATIVE: if ANY plausible household intent can be recovered (even awkward phrasing, typos, slang), fix it and return the corrected text. Only return __UNCLEAR__ when the transcript is genuinely useless.
+
 RULES:
-- Return ONLY the corrected text, nothing else.
+- Return ONLY the corrected text (or __UNCLEAR__), nothing else.
 - If the text is fine, return it unchanged.
 - Do NOT change meaning, add words, or rephrase.
 - Do NOT remove content you're not sure is hallucinated.
@@ -11286,6 +11333,37 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
   return undone;
 }
 
+// Executor summary entries are internal debug tokens like:
+//   `Event-exists: "<title>"`, `Event: "<title>" @ <iso>`, `Shopping: "<name>" ×N`
+// These are safe to surface in operator logs, but NEVER in a user-visible reply.
+// handleCorrection used to concatenate them directly into `הוספתי: ...` — producing
+// live messages like `הוספתי: Event-exists: "שיחה עם סאם מחברת סוניגו"` (2026-04-23,
+// Roi's household). Translate to Hebrew or drop before showing.
+//
+// "Event-exists" is intentionally dropped: it means the correction produced no real
+// state change (the event already existed on that date). Let the apology-gate below
+// treat those as no-op so we prompt for clarification instead of pretending to act.
+function translateExecutorSummaryForUser(entries: string[]): string[] {
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (/^Event-exists:/.test(entry)) continue; // silent — not a real change
+    let m = entry.match(/^Event:\s+"(.+?)"(?:\s+@\s+.+)?\s*$/);
+    if (m) { result.push(`"${m[1]}"`); continue; }
+    m = entry.match(/^Shopping:\s+"(.+?)"(?:\s+×\d+)?\s*$/);
+    if (m) { result.push(`"${m[1]}"`); continue; }
+    m = entry.match(/^Task:\s+"(.+?)"\s*$/);
+    if (m) { result.push(`"${m[1]}"`); continue; }
+    // Internal-id / bookkeeping lines — never show
+    if (/^(Completed task:|Got shopping item:|complete_shopping_by_names:|Assigned task:)/.test(entry)) continue;
+    // Unknown shape: extract a quoted substring if present; otherwise drop rather
+    // than leak a `Foo-bar: baz` token to the user.
+    const quoted = entry.match(/"([^"]+)"/);
+    if (quoted) { result.push(`"${quoted[1]}"`); continue; }
+    // Drop silently
+  }
+  return result;
+}
+
 async function handleCorrection(
   message: IncomingMessage,
   classification: ClassificationOutput,
@@ -11342,29 +11420,48 @@ async function handleCorrection(
     corrected_data: classification,
   });
 
-  // 5. Reply with warm confirmation + learning acknowledgement
-  const openers = [
-    "תודה על תשומת הלב! 🙏",
-    "תודה שתיקנת אותי! 🙏",
-    "אוי, טוב שאמרת! 🙏",
-  ];
-  const learningLines = [
-    "אני עדיין לומדת ומשתפרת כל הזמן 😅",
-    "ככה אני משתפרת — בזכותך 😅",
-    "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
-  ];
-  const opener = openers[Math.floor(Math.random() * openers.length)];
-  const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
+  // 5. Reply — gate on actual state change (Bug 3a, 2026-04-23).
+  // Old behavior fired the warm apology template regardless of whether undo/redo
+  // actually mutated DB. A correction whose undo AND redo both no-opped (common
+  // when `getLastBotAction` resolved to an unrelated action, or when the
+  // reclassifier returned `ignore`) produced "תודה שתיקנת אותי! ... ✨" with no
+  // actual change — eroding user trust (2026-04-23, Roi's bedika + Sam corrections).
+  //
+  // New behavior: translate executor tokens to user-facing Hebrew first; if the
+  // translated arrays are both empty, surface honestly.
+  const undoneTranslated = translateExecutorSummaryForUser(undone);
+  const redoneTranslated = translateExecutorSummaryForUser(redone);
+  const hasAnyChange = undoneTranslated.length > 0 || redoneTranslated.length > 0;
 
-  const actionParts: string[] = [];
-  if (undone.length > 0) actionParts.push(`ביטלתי: ${undone.join(", ")}`);
-  if (redone.length > 0) actionParts.push(`הוספתי: ${redone.join(", ")}`);
+  let reply: string;
+  if (!hasAnyChange) {
+    // Nothing actually changed. Don't pretend.
+    if (correctionText && correctionText.trim().length > 0) {
+      reply = "לא הצלחתי להבין מה לתקן 🤔\nאפשר לומר את זה שוב בצורה אחרת?";
+    } else {
+      reply = "לא הצלחתי להבין מה לתקן 🤔";
+    }
+  } else {
+    const openers = [
+      "תודה על תשומת הלב! 🙏",
+      "תודה שתיקנת אותי! 🙏",
+      "אוי, טוב שאמרת! 🙏",
+    ];
+    const learningLines = [
+      "אני עדיין לומדת ומשתפרת כל הזמן 😅",
+      "ככה אני משתפרת — בזכותך 😅",
+      "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
+    ];
+    const opener = openers[Math.floor(Math.random() * openers.length)];
+    const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
 
-  const replyLines = [opener, learning];
-  if (actionParts.length > 0) replyLines.push(...actionParts);
-  replyLines.push("✨");
+    const actionParts: string[] = [];
+    if (undoneTranslated.length > 0) actionParts.push(`ביטלתי: ${undoneTranslated.join(", ")}`);
+    if (redoneTranslated.length > 0) actionParts.push(`הוספתי: ${redoneTranslated.join(", ")}`);
 
-  const reply = replyLines.join("\n");
+    const replyLines = [opener, learning, ...actionParts, "✨"];
+    reply = replyLines.join("\n");
+  }
 
   // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
   // Defensive try/catch — the Cursor→Dashboard paste occasionally injects a stray
