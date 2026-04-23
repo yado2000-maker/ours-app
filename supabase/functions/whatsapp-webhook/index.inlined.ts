@@ -11785,35 +11785,64 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
   return undone;
 }
 
-// Executor summary entries are internal debug tokens like:
-//   `Event-exists: "<title>"`, `Event: "<title>" @ <iso>`, `Shopping: "<name>" ×N`
-// These are safe to surface in operator logs, but NEVER in a user-visible reply.
-// handleCorrection used to concatenate them directly into `הוספתי: ...` — producing
-// live messages like `הוספתי: Event-exists: "שיחה עם סאם מחברת סוניגו"` (2026-04-23,
-// Roi's household). Translate to Hebrew or drop before showing.
-//
-// "Event-exists" is intentionally dropped: it means the correction produced no real
-// state change (the event already existed on that date). Let the apology-gate below
-// treat those as no-op so we prompt for clarification instead of pretending to act.
-function translateExecutorSummaryForUser(entries: string[]): string[] {
-  const result: string[] = [];
-  for (const entry of entries) {
-    if (/^Event-exists:/.test(entry)) continue; // silent — not a real change
-    let m = entry.match(/^Event:\s+"(.+?)"(?:\s+@\s+.+)?\s*$/);
-    if (m) { result.push(`"${m[1]}"`); continue; }
-    m = entry.match(/^Shopping:\s+"(.+?)"(?:\s+×\d+)?\s*$/);
-    if (m) { result.push(`"${m[1]}"`); continue; }
-    m = entry.match(/^Task:\s+"(.+?)"\s*$/);
-    if (m) { result.push(`"${m[1]}"`); continue; }
-    // Internal-id / bookkeeping lines — never show
-    if (/^(Completed task:|Got shopping item:|complete_shopping_by_names:|Assigned task:)/.test(entry)) continue;
-    // Unknown shape: extract a quoted substring if present; otherwise drop rather
-    // than leak a `Foo-bar: baz` token to the user.
-    const quoted = entry.match(/"([^"]+)"/);
-    if (quoted) { result.push(`"${quoted[1]}"`); continue; }
-    // Drop silently
-  }
-  return result;
+// --- Candidate + context gathering for handleCorrection (Task 3) ---
+// All three return arrays the Sonnet prompt will interpolate.
+
+async function gatherCorrectionCandidates(householdId: string): Promise<CandidateRow[]> {
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [evRes, remRes] = await Promise.all([
+    supabase.from("events").select("id, title, scheduled_for")
+      .eq("household_id", householdId).gte("created_at", dayAgo)
+      .order("created_at", { ascending: false }).limit(5),
+    supabase.from("reminder_queue").select("id, message_text, send_at")
+      .eq("household_id", householdId).eq("sent", false).gte("created_at", dayAgo)
+      .order("created_at", { ascending: false }).limit(5),
+  ]);
+  const events: CandidateRow[] = (evRes.data || []).map((e: any) => ({
+    id: e.id, kind: "event" as const, title: e.title, whenLocal: toIsraelTimeStr(e.scheduled_for),
+  }));
+  const reminders: CandidateRow[] = (remRes.data || []).map((r: any) => ({
+    id: r.id, kind: "reminder" as const, title: r.message_text, whenLocal: toIsraelTimeStr(r.send_at),
+  }));
+  return [...events, ...reminders].slice(0, 10);
+}
+
+async function gatherRecentGroupContext(
+  groupId: string,
+  minutes = 15,
+): Promise<Array<{ sender: string; text: string; whenLocal: string }>> {
+  const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
+  // whatsapp_messages.group_id stores bare first part (pre-"@") for both 1:1 and groups.
+  const { data } = await supabase.from("whatsapp_messages")
+    .select("sender_phone, message_text, created_at, sender_name")
+    .eq("group_id", groupId.split("@")[0])
+    .gte("created_at", since)
+    .order("created_at", { ascending: true })
+    .limit(30);
+  return (data || []).map((m: any) => ({
+    sender: m.sender_name || m.sender_phone || "unknown",
+    text: m.message_text || "",
+    whenLocal: toIsraelTimeStr(m.created_at),
+  }));
+}
+
+async function gatherRecentSheliActions(
+  groupId: string,
+  limit = 5,
+): Promise<SheliActionSummary[]> {
+  const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const botPhone = Deno.env.get("BOT_PHONE_NUMBER") || "972555175553";
+  const { data } = await supabase.from("whatsapp_messages")
+    .select("message_text, created_at")
+    .eq("group_id", groupId.split("@")[0])
+    .eq("sender_phone", botPhone)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return (data || []).reverse().map((m: any) => ({
+    whenLocal: toIsraelTimeStr(m.created_at),
+    text: (m.message_text || "").slice(0, 120),
+  }));
 }
 
 async function handleCorrection(
@@ -11822,124 +11851,101 @@ async function handleCorrection(
   householdId: string,
   provider: WhatsAppProvider,
 ): Promise<void> {
-  // 1. Find the bot action being corrected.
-  // Prefer title-aware lookup when correction_text references a specific item;
-  // fall back to last-5-min most-recent. Bug 3 root cause (Roi 2026-04-23):
-  // correction "תתקני בדיקת דירה..." arrived after several other bot actions
-  // (cake pickup, tire change), so most-recent resolved to the cake task —
-  // undo deleted the wrong thing, bedika stayed on wrong day, redo inserted
-  // a duplicate on Friday.
-  const ctForLookup = classification.entities.correction_text || "";
-  let lastAction = ctForLookup
-    ? await findRelatedBotAction(ctForLookup, message.groupId, householdId)
-    : null;
-  if (!lastAction) {
-    lastAction = await getLastBotAction(message.groupId, householdId);
-  }
-
-  if (!lastAction) {
-    await sendAndLog(provider, {
-      groupId: message.groupId,
-      text: "לא מצאתי פעולה אחרונה לתקן 🤔",
-    }, {
-      householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
-    });
+  const logPrefix = `[handleCorrection:${householdId}]`;
+  const groupId = message.groupId;
+  if (!groupId) {
+    console.warn(`${logPrefix} No groupId, skipping`);
     return;
   }
 
-  // 2. Undo the last action
-  const undone = await undoLastAction(householdId, lastAction.classification_data);
-  console.log(`[Correction] Undone:`, undone);
+  // 1. Gather candidates + context in parallel.
+  const [candidates, ctx, sheliActs] = await Promise.all([
+    gatherCorrectionCandidates(householdId),
+    gatherRecentGroupContext(groupId),
+    gatherRecentSheliActions(groupId),
+  ]);
 
-  // 3. If correction_text provided AND user literally typed it, redo with the corrected version.
-  // Substring gate: the correction_text must appear VERBATIM in the user's actual message text.
-  // Prevents Haiku from fabricating/paraphrasing a correction when the user only sent emoji or a bare reaction.
-  // Without this guard, an emoji-only "correction" will cause undo + a bogus redo based on hallucinated text.
-  const correctionText = classification.entities.correction_text;
-  let redone: string[] = [];
-  if (correctionText) {
-    const userText = (message.text || "").toLowerCase();
-    const correctionLower = correctionText.toLowerCase();
-    if (!userText.includes(correctionLower)) {
-      console.log(`[Correction] Rejecting fabricated correction_text (not substring of user message). correction="${correctionText}" text="${message.text}"`);
-    } else {
-      // Re-classify the correction text to get proper entities
-      const ctx = await buildClassifierCtx(householdId);
-      const reclassified = await classifyIntent(correctionText, message.senderName, ctx);
+  if (candidates.length === 0) {
+    await sendAndLog(provider, { groupId, text: "סליחה, לא מצאתי שורה קרובה לתקן. תוכלי להגיד שוב?" }, {
+      householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
+    });
+    await logMessage(message, "correction_error", householdId, classification);
+    return;
+  }
 
-      if (reclassified.intent !== "ignore" && reclassified.intent !== "correct_bot") {
-        const actions = haikuEntitiesToActions(reclassified);
-        const result = await executeActions(householdId, actions, message.senderName);
-        redone = result.summary;
-      }
+  // 2. Call Sonnet for structured action JSON.
+  const prompt = buildCorrectionPrompt(message.text || "", ctx, candidates, sheliActs);
+  const result = await callCorrectionSonnet(prompt);
+
+  // 3. Validate target_id is in our candidate list (defence-in-depth against
+  // Sonnet inventing an id that doesn't belong to this household).
+  if (result.action === "update" || result.action === "remove") {
+    const inList = candidates.some((c) => c.id === result.target_id);
+    if (!inList) {
+      console.warn(`${logPrefix} Sonnet emitted unknown target_id ${result.target_id}, falling back to clarify`);
+      await sendAndLog(provider, { groupId, text: "לא הצלחתי לזהות בדיוק מה לעדכן. תוכלי להגיד שוב?" }, {
+        householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
+      });
+      await logMessage(message, "correction_error", householdId, classification);
+      return;
     }
   }
 
-  // 4. Log the correction for learning
-  await supabase.from("classification_corrections").insert({
-    household_id: householdId,
-    message_id: lastAction.messageId,
-    correction_type: "mention_correction",
-    original_data: lastAction.classification_data,
-    corrected_data: classification,
-  });
-
-  // 5. Reply — gate on actual state change (Bug 3a, 2026-04-23).
-  // Old behavior fired the warm apology template regardless of whether undo/redo
-  // actually mutated DB. A correction whose undo AND redo both no-opped (common
-  // when `getLastBotAction` resolved to an unrelated action, or when the
-  // reclassifier returned `ignore`) produced "תודה שתיקנת אותי! ... ✨" with no
-  // actual change — eroding user trust (2026-04-23, Roi's bedika + Sam corrections).
-  //
-  // New behavior: translate executor tokens to user-facing Hebrew first; if the
-  // translated arrays are both empty, surface honestly.
-  const undoneTranslated = translateExecutorSummaryForUser(undone);
-  const redoneTranslated = translateExecutorSummaryForUser(redone);
-  const hasAnyChange = undoneTranslated.length > 0 || redoneTranslated.length > 0;
-
-  let reply: string;
-  if (!hasAnyChange) {
-    // Nothing actually changed. Don't pretend.
-    if (correctionText && correctionText.trim().length > 0) {
-      reply = "לא הצלחתי להבין מה לתקן 🤔\nאפשר לומר את זה שוב בצורה אחרת?";
-    } else {
-      reply = "לא הצלחתי להבין מה לתקן 🤔";
-    }
-  } else {
-    const openers = [
-      "תודה על תשומת הלב! 🙏",
-      "תודה שתיקנת אותי! 🙏",
-      "אוי, טוב שאמרת! 🙏",
-    ];
-    const learningLines = [
-      "אני עדיין לומדת ומשתפרת כל הזמן 😅",
-      "ככה אני משתפרת — בזכותך 😅",
-      "עוד טעות שלמדתי ממנה — שמרתי לעתיד 😅",
-    ];
-    const opener = openers[Math.floor(Math.random() * openers.length)];
-    const learning = learningLines[Math.floor(Math.random() * learningLines.length)];
-
-    const actionParts: string[] = [];
-    if (undoneTranslated.length > 0) actionParts.push(`ביטלתי: ${undoneTranslated.join(", ")}`);
-    if (redoneTranslated.length > 0) actionParts.push(`הוספתי: ${redoneTranslated.join(", ")}`);
-
-    const replyLines = [opener, learning, ...actionParts, "✨"];
-    reply = replyLines.join("\n");
+  // 4. Dispatch.
+  if (result.action === "clarify") {
+    await sendAndLog(provider, { groupId, text: result.ask }, {
+      householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
+    });
+    await logMessage(message, "correction_clarify", householdId, classification);
+    return;
   }
 
-  // 6. Auto-derive patterns from this correction (pass user's actual text for substring validation)
-  // Defensive try/catch — the Cursor→Dashboard paste occasionally injects a stray
-  // Hebrew char mid-identifier (seen 2026-04-22, ref: "ReferenceError:
-  // derivePatternFromCorrecשtion is not defined"). If that happens again, pattern
-  // derivation silently fails but the user still gets their correction ack.
+  const actionType = result.action === "update"
+    ? (result.target_type === "reminder" ? "update_reminder" : "update_event")
+    : (result.target_type === "reminder" ? "remove_reminder" : "remove_event");
+
+  const crudAction: CrudAction = {
+    type: actionType as CrudAction["type"],
+    target_id: result.target_id,
+    ...(result.action === "update" ? {
+      new_scheduled_for: (result as any).new_scheduled_for,
+      new_send_at: (result as any).new_send_at,
+      new_title: (result as any).new_title,
+      new_text: (result as any).new_text,
+    } : {}),
+  };
+
+  const out = await executeCrudAction(householdId, crudAction, logPrefix);
+
+  if (!out.ok) {
+    const errMsg = out.error === "already_sent"
+      ? "התזכורת כבר נשלחה, לא יכולה לשנות 🙈"
+      : out.error === "not_found"
+      ? "לא מצאתי את השורה הזאת, אולי כבר נמחקה?"
+      : "משהו השתבש, תוכלי לנסות שוב?";
+    await sendAndLog(provider, { groupId, text: errMsg }, {
+      householdId, groupId, inReplyTo: message.messageId, replyType: "error_fallback",
+    });
+    await logMessage(message, "correction_error", householdId, classification);
+    return;
+  }
+
+  // 5. Log the correction for learning (preserves the old classification_corrections audit).
   try {
-    await derivePatternFromCorrection(householdId, "mention_correction", lastAction.classification_data, classification, message.text);
-  } catch (dpErr) {
-    console.error("[handleCorrection] derivePatternFromCorrection call failed (non-fatal):", dpErr);
+    await supabase.from("classification_corrections").insert({
+      household_id: householdId,
+      message_id: message.messageId,
+      correction_type: "mention_correction_v2",
+      original_data: null,
+      corrected_data: classification,
+    });
+  } catch (logErr) {
+    console.error(`${logPrefix} classification_corrections insert failed (non-fatal):`, logErr);
   }
 
-  await sendAndLog(provider, { groupId: message.groupId, text: reply }, {
-    householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "action_reply"
+  const opener = "סליחה, תיקנתי! ";
+  await sendAndLog(provider, { groupId, text: opener + out.summary + " ✨" }, {
+    householdId, groupId, inReplyTo: message.messageId, replyType: "action_reply",
   });
   await logMessage(message, "correction_applied", householdId, classification);
 }
