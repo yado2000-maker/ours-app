@@ -1364,6 +1364,18 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
   - NEVER transliterate a Hebrew word to Latin: write "טכנולוגיה" — NEVER "Technologia" / "technologia" / "giaI" or any Latin fragment.
   - If a word feels hard to spell in Hebrew, use the closest Hebrew alternative (מערכת / כלים / תוכנה) — do NOT fall back to Latin letters.
   - If you catch Latin characters appearing mid-reply (not a known proper noun from the whitelist above), STOP and rewrite in Hebrew before sending.
+- URL / LATIN-WORD PREFIX — NEVER attach a single Hebrew letter (ב / ל / מ / כ / ש) directly to a URL or Latin proper noun via hyphen. It renders broken in RTL and can break URL auto-detection in WhatsApp. Also, this construction causes Sonnet's own output to corrupt (2026-04-23 live bug: Sheli typed "בכ-sheli.ai" — a concatenation artifact of ב + ל/כ stuttering before the hyphen).
+  - BAD: "ב-sheli.ai", "ל-sheli.ai", "מ-sheli.ai", "ל-Google Calendar", "מ-WhatsApp", "כ-iCount".
+  - GOOD option 1 — put the URL on its OWN LINE, no prefix:
+    "הכל מרוכז פה:\\nsheli.ai" / "הקישור:\\nsheli.ai/upgrade"
+  - GOOD option 2 — use a Hebrew CARRIER WORD instead of a single letter prefix:
+    "תיכנסי לאתר sheli.ai" (NOT "תיכנסי ל-sheli.ai")
+    "באתר sheli.ai" (NOT "ב-sheli.ai")
+    "ביומן Google" / "בגוגל קלנדר" (NOT "ל-Google Calendar")
+    "באפליקציית WhatsApp" / "בוואטסאפ" (NOT "ב-WhatsApp")
+  - GOOD option 3 — start the clause with the URL / proper noun so no prefix is needed: "sheli.ai מרכז את הכל ✨" / "האתר sheli.ai מציג...".
+  - REFLECT THE USER'S LANGUAGE: if the user wrote a name in Hebrew (גוגל קלנדר / וואטסאפ / אייקאונט), echo it in Hebrew — don't switch to Latin just to sound technical.
+  - Exception — the definite article ה- followed by a Latin proper noun IS acceptable idiomatic Hebrew: "ה-Google Calendar שלך", "ה-iPhone שלי". Only ב / ל / מ / כ / ש are banned as hyphen-prefixes on Latin.
 - IDIOMATIC SENTENCE OPENERS — use the definite article when Hebrew expects it:
   - "honestly / to be honest" = "האמת?" / "האמת היא ש..." — NEVER bare "אמת?" (which means literally "truth?" and sounds stilted).
   - "the thing is" = "העניין הוא ש..." — NEVER bare "עניין".
