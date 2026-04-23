@@ -306,6 +306,7 @@ Message → Pre-filter (skip media/bot msgs) → Haiku Classifier ($0.0003) → 
 - WhatsApp mock on welcome screen: force `direction: ltr` on bubble layout (WhatsApp always shows your msgs on right), inner text gets `direction: rtl` for Hebrew
 - CSS logical properties: use `padding-inline-end` not `padding-right`, `inset-inline-end` not `right`
 - **Arrows in WhatsApp messages:** ASCII arrows (`->`, `<-`, `→`, `←`) render unpredictably in RTL. Use numbered steps instead.
+- **Hebrew single-letter prefix + hyphen + URL / Latin noun is BANNED** (2026-04-23): `ב-sheli.ai`, `ל-Google Calendar`, `מ-WhatsApp`, `כ-iCount` all render broken in RTL and can break URL auto-linking in WhatsApp. Worse — the pattern corrupts Sonnet's own output (2026-04-23 live: Sheli typed `בכ-sheli.ai`, a concat artifact of the `ב` letter stuttering at the prefix). Use one of three fixes: (1) URL on its own line with no prefix (`הכל פה:\nsheli.ai`), (2) Hebrew CARRIER WORD instead of a single letter (`באתר sheli.ai`, `ביומן Google`, `באפליקציית WhatsApp`), (3) reword so the URL / proper noun starts the clause (`sheli.ai מרכז את הכל`). Exception: `ה-` (definite article) before a Latin name is idiomatic and allowed (`ה-iPhone שלי`). Only `ב / ל / מ / כ / ש` + hyphen are banned. Rule also lives in `SHARED_HEBREW_GRAMMAR` so it's applied in both 1:1 and group Sonnet replies.
 - **Section titles in Hebrew:** Use Heebo font (not Cormorant Garamond). Cormorant Garamond is ONLY for the English "Sheli" wordmark.
 
 ## Landing Page

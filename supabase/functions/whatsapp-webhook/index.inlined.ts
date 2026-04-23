@@ -1364,6 +1364,18 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
   - NEVER transliterate a Hebrew word to Latin: write "טכנולוגיה" — NEVER "Technologia" / "technologia" / "giaI" or any Latin fragment.
   - If a word feels hard to spell in Hebrew, use the closest Hebrew alternative (מערכת / כלים / תוכנה) — do NOT fall back to Latin letters.
   - If you catch Latin characters appearing mid-reply (not a known proper noun from the whitelist above), STOP and rewrite in Hebrew before sending.
+- URL / LATIN-WORD PREFIX — NEVER attach a single Hebrew letter (ב / ל / מ / כ / ש) directly to a URL or Latin proper noun via hyphen. It renders broken in RTL and can break URL auto-detection in WhatsApp. Also, this construction causes Sonnet's own output to corrupt (2026-04-23 live bug: Sheli typed "בכ-sheli.ai" — a concatenation artifact of ב + ל/כ stuttering before the hyphen).
+  - BAD: "ב-sheli.ai", "ל-sheli.ai", "מ-sheli.ai", "ל-Google Calendar", "מ-WhatsApp", "כ-iCount".
+  - GOOD option 1 — put the URL on its OWN LINE, no prefix:
+    "הכל מרוכז פה:\\nsheli.ai" / "הקישור:\\nsheli.ai/upgrade"
+  - GOOD option 2 — use a Hebrew CARRIER WORD instead of a single letter prefix:
+    "תיכנסי לאתר sheli.ai" (NOT "תיכנסי ל-sheli.ai")
+    "באתר sheli.ai" (NOT "ב-sheli.ai")
+    "ביומן Google" / "בגוגל קלנדר" (NOT "ל-Google Calendar")
+    "באפליקציית WhatsApp" / "בוואטסאפ" (NOT "ב-WhatsApp")
+  - GOOD option 3 — start the clause with the URL / proper noun so no prefix is needed: "sheli.ai מרכז את הכל ✨" / "האתר sheli.ai מציג...".
+  - REFLECT THE USER'S LANGUAGE: if the user wrote a name in Hebrew (גוגל קלנדר / וואטסאפ / אייקאונט), echo it in Hebrew — don't switch to Latin just to sound technical.
+  - Exception — the definite article ה- followed by a Latin proper noun IS acceptable idiomatic Hebrew: "ה-Google Calendar שלך", "ה-iPhone שלי". Only ב / ל / מ / כ / ש are banned as hyphen-prefixes on Latin.
 - IDIOMATIC SENTENCE OPENERS — use the definite article when Hebrew expects it:
   - "honestly / to be honest" = "האמת?" / "האמת היא ש..." — NEVER bare "אמת?" (which means literally "truth?" and sounds stilted).
   - "the thing is" = "העניין הוא ש..." — NEVER bare "עניין".
@@ -4171,7 +4183,7 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/(גוגל|google).*(יומן|קלנדר|calendar)|(יומן|calendar).*(גוגל|google|apple|outlook|סנכרון|sync)|סנכר.*יומן|calendar.*integration|מתחבר.*ל?יומן/i],
     topic: "calendar-integration",
-    keyFacts: "User asks about Google Calendar / Apple Calendar / Outlook sync. Answer honestly and positively: not yet available, but the integration is planned and coming soon (don't promise a date). Today events live inside Sheli — viewable at sheli.ai. Frame it as 'בדיוק הולכת לקרות' / 'coming soon' — NOT as a vague 'maybe one day'. Tell them you've noted their interest so the team knows to prioritize it. Do NOT invent workarounds Sheli doesn't have (she cannot currently read/write Google Calendar).",
+    keyFacts: "User asks about Google Calendar / Apple Calendar / Outlook sync. GROUND TRUTH: NO such integration exists today. Sheli CANNOT read, write, or sync to any external calendar. Events the user saves stay INSIDE Sheli only. OPEN THE REPLY WITH A CLEAR NO. Do NOT open with 'כן' / 'yes' / 'יש לי' / 'I have'. Correct openers: 'עוד אין לי', 'לא עדיין', 'אין חיבור עדיין', 'not yet'. FORBIDDEN CLAIMS — these are hallucinations, NEVER write them: (a) 'יש לי אינטגרציה עם Google Calendar'; (b) 'האירועים שלך נכנסים ישר לקלנדר'; (c) 'אני שומרת בקלנדר ומזכירה בווטסאפ'; (d) 'אני מסנכרנת עם גוגל'; (e) any claim that events 'go to' / 'sync to' / 'appear in' a Google/Apple/Outlook calendar. AFTER the NO, frame forward-looking: the integration is planned and coming — don't promise a date, don't say 'בקרוב מאוד', just 'זה בפיתוח' / 'בדרך' / 'in the works'. Today events live only inside Sheli, viewable at sheli.ai. Mention the team has noted the interest. WRONG example (do NOT write this, do NOT paraphrase it): 'כן, יש לי אינטגרציה עם Google Calendar - כל האירועים שאתה שומר איתי נכנסים ישר לשם ✨'. CORRECT example: 'עוד אין לי חיבור לגוגל קלנדר — זה בפיתוח 🔧. בינתיים הכל נשמר אצלי, אפשר לראות ב-sheli.ai.' Keep it 2-4 lines.",
   },
   {
     patterns: [/(למה|איך|מה זה|why|how).*(צריך|חייב|אני חייב|need|have to|must).*(בוקר טוב|good morning|להגיד|להתחיל|לפתוח|start|open|first|ראשון)|(לא תזכיר|לא הזכרת|לא שלחת|didn.?t remind|stopped reminding).*(לא כתבתי|לא דיברתי|didn.?t.*(message|write|text))|(תזכורת|reminder).*(לא נשלח|לא הגיעה|didn.?t.*come|didn.?t.*fire|nothing came)|24[\s-]?(שעות|hours? ?window|customer care)|חלון.*24|חייב.*(להודיע|לכתוב).*(כל יום|every day|daily)/i],

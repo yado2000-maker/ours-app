@@ -228,6 +228,39 @@ Sheli tried to transliterate "טכנולוגיה" → "Technologia" → got conf
 
 If an LLM reply contains Latin letters that aren't on the whitelist above, flag it for regeneration — this is a model output bug, not a valid style choice.
 
+### Hebrew single-letter prefix + hyphen + URL / Latin noun — BANNED
+
+Never attach a single Hebrew letter (**ב / ל / מ / כ / ש**) directly to a URL or Latin proper noun via hyphen. Two concrete problems:
+
+1. **Broken RTL rendering** — "ב-sheli.ai" looks garbled when read right-to-left; WhatsApp may also fail to detect the URL as clickable.
+2. **Corrupts Sonnet's own output** — the hyphen boundary causes the generation to stutter. Observed live 2026-04-23: asked about Google Calendar, Sheli typed `בכ-sheli.ai` — a concat artifact where the `ב` letter stuttered at the hyphen.
+
+| Wrong | Right |
+|-------|-------|
+| `ב-sheli.ai` | `באתר sheli.ai` OR URL on its own line |
+| `ל-Google Calendar` | `ביומן Google` / `בגוגל קלנדר` |
+| `מ-WhatsApp` | `בוואטסאפ` / `באפליקציית WhatsApp` |
+| `כ-iCount` | `כמו iCount` / `כפי ש-iCount עושה` (with a word) |
+
+Three fix patterns (pick the one that reads best):
+
+1. **URL / Latin noun on its own line, no prefix:**
+   ```
+   הכל מרוכז פה:
+   sheli.ai
+   ```
+
+2. **Hebrew carrier word instead of a single letter prefix:**
+   - `באתר sheli.ai` (NOT `ב-sheli.ai`)
+   - `ביומן Google` (NOT `ל-Google`)
+   - `באפליקציית WhatsApp` (NOT `ב-WhatsApp`)
+
+3. **Reword so the Latin noun starts the clause:** `sheli.ai מרכז את הכל` / `האתר sheli.ai מציג...`.
+
+**Also: mirror the user's language.** If they wrote the name in Hebrew (גוגל קלנדר / וואטסאפ), echo it in Hebrew — don't switch to Latin just to sound technical.
+
+**Exception:** the definite article `ה-` + Latin proper noun IS acceptable idiomatic Hebrew: `ה-iPhone שלי`, `ה-Google Calendar שלך`. Only `ב / ל / מ / כ / ש` + hyphen on Latin are banned.
+
 ## CTAs and Imperatives — Use Plural (gender-free)
 
 For UI buttons, landing page CTAs, and marketing copy addressing an unknown visitor, **always use masculine plural** — it reads as gender-neutral in modern Hebrew UX:
