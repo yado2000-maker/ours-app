@@ -41,9 +41,15 @@ interface IncomingMessage {
   type: "text" | "image" | "sticker" | "voice" | "video" | "document" | "reaction" | "other";
   timestamp: number;
   chatType: "group" | "direct";
-  mediaUrl?: string;      // Audio file URL (for voice messages)
+  mediaUrl?: string;      // Audio/image file URL (for voice + image messages)
   mediaId?: string;       // Whapi media ID (for downloading via API)
   mediaDuration?: number;  // Duration in seconds (for voice messages)
+  mediaMimeType?: string;  // MIME of the attached media (for images: image/jpeg etc.)
+  imageCaption?: string;   // Raw caption text the sender typed under the image
+  imageOcrMode?: "plain" | "rotation_table"; // set after ocrImage() runs
+  imageOcrConfidence?: "high" | "medium" | "low"; // self-reported by vision model; non-high gates high-stakes actions behind a confirmation
+  imageOcrUncertainFields?: string[]; // categories the model flagged as uncertain (amount, date, ...)
+  imageRotations?: Array<{ title: string; days_to_members: Record<string, string> }>;
   quotedText?: string;    // Text of the quoted/replied-to message (WhatsApp reply feature)
   reactionEmoji?: string;      // emoji used in reaction ("👍", "❤️", etc.)
   reactionTargetId?: string;   // whatsapp_message_id of the message being reacted to
@@ -300,9 +306,17 @@ class WhapiProvider implements WhatsAppProvider {
 
       // Extract media info for voice messages (ptt = push-to-talk, audio = audio file)
       const audioData = (msg.ptt || msg.audio || msg.voice) as Record<string, unknown> | undefined;
-      const mediaUrl = (audioData?.link as string | undefined) || undefined;
-      const mediaId = audioData?.id as string | undefined;
+      // Extract media info for images — Whapi puts caption under msg.image.caption,
+      // media link under msg.image.link, id under msg.image.id, mime under msg.image.mime_type.
+      const imageData = msg.image as Record<string, unknown> | undefined;
+      const mediaUrl = (audioData?.link as string | undefined)
+        || (imageData?.link as string | undefined)
+        || undefined;
+      const mediaId = (audioData?.id as string | undefined)
+        || (imageData?.id as string | undefined);
       const mediaDuration = (audioData?.seconds ?? audioData?.duration) as number | undefined;
+      const mediaMimeType = (imageData?.mime_type as string | undefined) || undefined;
+      const imageCaption = (imageData?.caption as string | undefined) || undefined;
 
       // Extract reaction info — Whapi sends reactions as type:"action" with action.type:"reaction"
       // NOT as type:"reaction" with msg.reaction. See: support.whapi.cloud/help-desk/receiving/webhooks/incoming-webhooks-format
@@ -343,18 +357,25 @@ class WhapiProvider implements WhatsAppProvider {
       };
       const resolvedType: IncomingMessage["type"] = (type === "action" && isReactionAction) ? "reaction" : (typeMap[type] || "other");
 
+      // For image messages, the user-visible "text" is the caption (if any).
+      // Keep it in both text (for downstream text-based flow) and imageCaption
+      // (preserved so the OCR merger can distinguish caption from OCR output).
+      const resolvedText = (resolvedType === "image" && !text && imageCaption) ? imageCaption : text;
+
       return {
         messageId: id,
         groupId,
         senderPhone: from.replace("@s.whatsapp.net", ""),
         senderName: fromName,
-        text: text,
+        text: resolvedText,
         type: resolvedType,
         timestamp,
         chatType,
         mediaUrl,
         mediaId,
         mediaDuration,
+        mediaMimeType: mediaMimeType || undefined,
+        imageCaption: imageCaption || undefined,
         quotedText: quotedText || undefined,
         reactionEmoji: reactionEmoji || undefined,
         reactionTargetId: reactionTargetId || undefined,
@@ -1289,7 +1310,7 @@ NEVER say "אין לי אתר" or "אין אפליקציה" — there IS one.`;
 
 const SHARED_SHELI_QUESTIONS = (isHe: boolean) => isHe
   ? `QUESTIONS ABOUT SHELI HERSELF: When asked about privacy, data, learning, or how you work:
-- פרטיות: "אני לא שומרת תמונות או וידאו. אני כן שומעת הודעות קוליות קצרות — תקליטו לי רשימת קניות או מטלות בדיוק כמו הודעה רגילה. אני לא שומרת את ההקלטה, רק את התוכן. הכל נמחק אוטומטית אחרי 30 יום."
+- פרטיות: "אני קוראת תמונות ששולחים אליי רק כדי לחלץ מהן טקסט — את התמונה עצמה אני לא שומרת, רק את הטקסט שזיהיתי. וידאו עדיין לא נתמך. אני שומעת הודעות קוליות קצרות — תקליטו לי רשימת קניות או מטלות בדיוק כמו הודעה רגילה. אני לא שומרת את ההקלטה, רק את התוכן. הכל נמחק אוטומטית אחרי 30 יום."
 - למידה: "אני לומדת את הסגנון שלכם! כינויים, מוצרים, שעות — ככל שתשתמשו יותר, אבין אתכם טוב יותר."
 - מי רואה: "רק בני הבית שלכם. כל בית מנותק לחלוטין."
 - להפסיק: "פשוט תוציאו אותי מהקבוצה. הכל נמחק אוטומטית, בלי התחייבות."
@@ -1309,7 +1330,7 @@ TECH IDENTITY — ABSOLUTE RULE:
 
 Paraphrase naturally — never repeat the exact same wording twice.`
   : `QUESTIONS ABOUT SHELI HERSELF: When asked about privacy, data, learning, or how you work:
-- Privacy: "I don't store photos or videos. I can listen to short voice messages — record your shopping list or tasks just like a text. I don't save the recording, only its content. Everything is auto-deleted after 30 days."
+- Privacy: "I read photos you send me only to extract text — the image itself isn't stored, just the text I recognised. Video isn't supported yet. I can listen to short voice messages — record your shopping list or tasks just like a text. I don't save the recording, only its content. Everything is auto-deleted after 30 days."
 - Learning: "I learn your style! Nicknames, products, schedules, the more you use me, the better I understand you."
 - Who sees data: "Only your household members. Each home is completely isolated."
 - Stopping: "Just remove me from the group. All data is auto-deleted, no commitment."
@@ -4004,7 +4025,8 @@ function getOnboardingWelcome(senderName?: string): string {
   return `${greeting}
 
 אני יודעת לנהל רשימת קניות, לרשום מטלות, לעקוב אחרי הוצאות ולהזכיר דברים חשובים.
-אפשר גם לשלוח לי הודעה קולית, אני מבינה! 🎤
+
+אפשר לכתוב לי טקסט, להקליט הודעה קולית, או לשלוח תמונה — קבלה מהסופר, רשימת קניות שרשמתם על פתק, או לוח תורנויות שתליתם בבית. אני אקרא מה כתוב שם ואוסיף בשבילכם 🎤 📷
 
 יש בבית ילדים? אפשר גם להוסיף אותי לקבוצת הווטסאפ שלכם ואני אעזור לעשות סדר במשפחה 🏠
 
@@ -4098,12 +4120,12 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/מה את יודעת|מה את עוש|מה אפשר|יכולות|פיצ׳רים|features|what can you/i],
     topic: "capabilities",
-    keyFacts: "Shopping lists (say item name), tasks (assign to person+time), events (date+title), voice messages (up to 30s transcribed), reminders, rotations/turns. Works in 1:1 chat and groups. Also web app at sheli.ai.",
+    keyFacts: "Shopping lists (say item name), tasks (assign to person+time), events (date+title), voice messages (up to 30s transcribed), images (Sheli reads the text — shopping lists, receipts, chore charts, screenshots — and acts on it; no video), reminders, rotations/turns. Works in 1:1 chat and groups. Also web app at sheli.ai.",
   },
   {
     patterns: [/בטיחות|פרטיות|privacy|secure|קוראת.*הודעות|מקשיבה|שומרת.*מידע|data|כמה.*בטוח|זה.*בטוח|האם.*בטוח/i],
     topic: "privacy",
-    keyFacts: "No photos/video stored. Voice transcribed then deleted. All data auto-deleted after 30 days. Only your household sees data. No one outside, including our team.",
+    keyFacts: "Images read but not stored (Sheli extracts text then discards the image itself). Video unsupported. Voice transcribed then deleted. All data auto-deleted after 30 days. Only your household sees data. No one outside, including our team.",
   },
   {
     patterns: [/לומדת|משתפר|improving|learn|חכמה יותר|מבינה יותר/i],
@@ -4186,12 +4208,12 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
   {
     patterns: [/(לשלוח|send|שולח|upload).*(תמונ|image|photo|picture|קובץ|file|pdf|מסמך|document|סריקה|scan|screenshot)|(תמונ|קובץ|file|photo).*(את יכולה|תוכלי|שולחים|לסרוק|תקרא|read|ocr)|(קבלה|receipt).*(תמונ|photo|image)/i],
     topic: "photos-files",
-    keyFacts: "User asks about sending photos/files. Answer: Not today — Sheli reads text and short voice messages (up to 30s), but NOT images, PDFs, or documents. For a shopping list or receipt photo, ask them to type or voice-record the content instead. Image understanding is on the roadmap.",
+    keyFacts: "User asks about sending photos/files. Answer: YES — Sheli reads text from photos (receipts, shopping lists, handwritten chore charts, screenshots). She OCRs the image with Hebrew + English, treats the text like any typed message, and then discards the image itself (she doesn't store photos). If you send a chore-rotation grid, she can even auto-create the weekly rotations from the table. PDFs and other documents aren't supported yet. Video is never supported. Encourage them to try sending one.",
   },
   {
     patterns: [/(מה|what).*(ההבדל|שוני|הבדל|different|difference|versus|vs|compared)[^?]{0,50}(any\.?do|any-?do|גוגל קיפ|google keep|todoist|cozi|סירי|siri|alexa|אלקסה|אלכסה|אלקסא|reminder.?bot|boti|בוטי|reminders app)/i],
     topic: "compare-competitor",
-    keyFacts: "User compares Sheli to Any.do / Google Keep / Siri / Alexa / Boti / Reminder Bot. Answer: Sheli is WhatsApp-first (no separate app to open), Hebrew-native (understands slang, compound names, voice), and family-aware (coordinates across family members in a shared group). Other tools are English-first, require opening a separate app, or are single-user. Confident, no trash-talk, 2-3 lines max.",
+    keyFacts: "User compares Sheli to Any.do / Google Keep / Siri / Alexa / Boti / Reminder Bot. Answer: Sheli is WhatsApp-first (no separate app to open), Hebrew-native (understands slang, compound names, voice, and reads text from photos too), and family-aware (coordinates across family members in a shared group). Other tools are English-first, require opening a separate app, or are single-user. Confident, no trash-talk, 2-3 lines max.",
   },
   {
     patterns: [/(חשבונית|קבלה|invoice|receipt|עוסק מורשה|עוסק פטור|business use|for (my )?business|עסקי|לעסק|הכנסות|מע[״\".]?מ|vat|tax invoice)/i],
@@ -4227,6 +4249,11 @@ const ONBOARDING_QA: Array<{ patterns: RegExp[]; topic: string; keyFacts: string
     patterns: [/הודע.*קולי|הקלט|קולית|שומעת.*הודעות|מקשיבה.*הודעות|voice.*message|can you hear|listen.*voice|מבינה.*קול/i],
     topic: "voice-privacy",
     keyFacts: "Yes, Sheli transcribes short voice messages (up to 30 seconds) and processes them the same as typed text. Longer voice notes are skipped — they're usually personal family conversations, not requests. Audio itself isn't stored; only the transcribed text is kept, and all conversation data auto-deletes after 30 days.",
+  },
+  {
+    patterns: [/(תמונ|image|photo|picture).*(שומר|פרטיות|privacy|מוחק|נמחק|store|save|keep|deleted)|(פרטיות|privacy).*(תמונ|image|photo)|(OCR|ocr|קורא.*תמונ|קראה את התמונ|מזהה.*בתמונ)/i],
+    topic: "image-privacy",
+    keyFacts: "User asks how Sheli handles images. Answer: Sheli reads the text from photos you send (Hebrew + English, even handwriting). She uses the extracted text like a normal message — adds items to the list, creates reminders, sets up chore rotations. She does NOT store the image itself — only the extracted text is kept (same 30-day auto-delete as text messages). Video isn't supported. PDFs and documents aren't supported yet.",
   },
 ];
 
@@ -4280,6 +4307,7 @@ CAPABILITIES YOU CAN DEMONSTRATE:
   Multi-currency: default ILS. "יורו"/"EUR" → EUR, "דולר"/"$" → USD.
 - Expense queries: "כמה שילמנו החודש?" or "תסכמי הוצאות" → use the EXPENSE HISTORY section (if provided in context) to answer. Group by currency. Never fabricate totals.
 - Voice messages: user can send a voice note (up to 30s) and you understand it! Mention this ONLY on the designated hint message (every 3rd message). Do NOT force it into messages 1-2.
+- Images (OCR): user can send a photo (shopping list, receipt, handwritten chore grid, screenshot) and you read the text from it. The image itself is not stored — only the extracted text. Mention this on a later hint message alongside voice, not in the first 2 turns. If the user sends a rotation/chore table image, you auto-create the weekly rotations from it.
 
 FORMATTING (WhatsApp RTL):
 - NEVER use bullet characters (•, ☐, -, *) for lists — they stretch left in Hebrew RTL and look broken.
@@ -4711,9 +4739,18 @@ async function execute1on1Actions(params: {
   convoContext?: any;
   logPrefix?: string;
   resolveHousehold?: () => Promise<string>;
-}): Promise<{ actions: any[]; visibleReply: string; triedCaps: string[] }> {
+  // Optional image-OCR context. When set and the OCR confidence is non-high,
+  // high-stakes actions are staged as pending_confirmations instead of executing.
+  message?: IncomingMessage;
+  prov?: WhatsAppProvider;
+}): Promise<{ actions: any[]; visibleReply: string; triedCaps: string[]; confirmationStaged?: boolean }> {
   const { raw, text, phone, userName, convoContext, logPrefix = "[1:1]" } = params;
   let householdId = params.householdId;
+  // Set by the inline expense case (or the mappedActions-path helper) when an
+  // image-derived high-stakes action has been staged as pending_confirmations.
+  // When true, the function returns visibleReply:"" so Sonnet's "רשמתי" auto-ack
+  // doesn't double up on our confirmation ask.
+  let ocrConfirmationStaged = false;
 
   // 1. Observability
   console.log(`${logPrefix} Sonnet raw (${raw.length}c): ${raw.slice(0, 400)}`);
@@ -4952,6 +4989,32 @@ async function execute1on1Actions(params: {
                        : attribution === "speaker" ? userName
                        : null;
 
+          // Image-OCR confirmation gate: when a 1:1 expense was derived from an
+          // image, ALWAYS ask the user to confirm the amount + description before
+          // inserting. Handwriting OCR is unreliable enough that silently logging
+          // wrong money is worse than one extra tap. Bypasses the inline DB
+          // insert; the insert happens via executeActions() on 👍 confirmation.
+          if (params.message?.imageOcrMode === "plain" && params.prov && householdId) {
+            const stagingAction = {
+              type: "add_expense",
+              data: {
+                amount_minor: amountMinor,
+                expense_currency: currency,
+                expense_description: action.description || "הוצאה",
+                expense_category: action.category || action.description || "אחר",
+                expense_paid_by_name: paidBy || undefined,
+                expense_attribution: attribution,
+              },
+            };
+            const staged = await maybeAskImageOcrConfirmation(
+              params.message, householdId, [stagingAction], params.prov,
+            );
+            if (staged) {
+              ocrConfirmationStaged = true;
+              break;
+            }
+          }
+
           const { error: expErr } = await supabase.from("expenses").insert({
             household_id: householdId,
             amount_minor: amountMinor,
@@ -5034,6 +5097,22 @@ async function execute1on1Actions(params: {
 
     // Execute mapped add-actions via the real executor
     if (mappedActions.length > 0) {
+      // OCR low-confidence gate: if this turn came from an ambiguous image AND
+      // includes a high-stakes action, stage a pending_confirmation instead of
+      // executing. Suppress Sonnet's visibleReply so the user sees only our
+      // confirmation ask (otherwise Sonnet's "רשמתי" doubles up).
+      if (params.message && params.prov && householdId) {
+        const staged = await maybeAskImageOcrConfirmation(
+          params.message,
+          householdId,
+          mappedActions,
+          params.prov,
+        );
+        if (staged) {
+          console.log(`${logPrefix} Image OCR confirmation staged (mappedActions) — skipping execute + Sonnet reply`);
+          return { actions, visibleReply: "", triedCaps, confirmationStaged: true };
+        }
+      }
       try {
         const { summary } = await executeActions(householdId, mappedActions, userName);
         console.log(`${logPrefix} Executed ${summary.length} actions for ${phone}:`, summary);
@@ -5041,6 +5120,13 @@ async function execute1on1Actions(params: {
         console.error(`${logPrefix} executeActions error:`, err);
       }
     }
+  }
+
+  // If the inline expense case staged a confirmation, suppress Sonnet's
+  // "רשמתי הוצאה של ₪X" auto-ack so the user only sees our confirmation ask.
+  if (ocrConfirmationStaged) {
+    console.log(`${logPrefix} Image OCR confirmation staged (inline expense) — suppressing Sonnet reply`);
+    return { actions, visibleReply: "", triedCaps, confirmationStaged: true };
   }
 
   return { actions, visibleReply, triedCaps };
@@ -5706,6 +5792,33 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
     return;
   }
 
+  // --- Rotation-table image short-circuit ---
+  // The top-level 3a-image handler already ran OCR and detected a structured
+  // rotation grid. Ensure this user has a household, then bulk-insert the
+  // rotations via the shared executor and confirm. Bypasses forwarded-task
+  // extraction and normal classification.
+  if (message.imageOcrMode === "rotation_table" && message.imageRotations && message.imageRotations.length > 0) {
+    try {
+      const userName = (convo.context as Record<string, string> | null)?.name
+        || hebrewizeName(senderName)
+        || senderName
+        || "";
+      const hhId = await ensureOnboardingHousehold(
+        phone,
+        convo as Record<string, unknown>,
+        userName,
+      );
+      const handled = await executeRotationTableFromImage(message, hhId, prov);
+      if (handled) {
+        logExit("dm-image-rotation-table", null, message, { rotations: message.imageRotations.length });
+        return;
+      }
+    } catch (err) {
+      console.error("[1:1] Rotation-table image handling failed:", err);
+      // Fall through to plain-mode flow if available
+    }
+  }
+
   // --- Forward-to-task short-circuit (Option 1 plan Task 11) ---
   // When a user forwards a WhatsApp message to Sheli in 1:1, we bypass the
   // normal Sonnet path and go through a narrow Haiku extraction that writes
@@ -5722,12 +5835,13 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   //   - Media-only forwards (text empty, type=image/video/document): short
   //     circuit reply asking for text. OCR is Phase 2.
   if (message.forwarded === true && await isForwardEnabled()) {
-    // Media-only forward (no text body) → ask for text, don't burn a Haiku call
+    // Media-only forward (no text body) → reached here means 3a-image OCR
+    // didn't run (disabled / unsupported mime / failed). Ask for text.
     if (!text) {
       const nameSuffix = convo.context?.name ? ` ${convo.context.name}` : "";
       await sendAndLog(prov, {
         groupId: message.groupId,
-        text: `אני עוד לא קוראת תמונות 🙈${nameSuffix} - שלחי לי את הפרטים כטקסט ואוסיף ✅`,
+        text: `לא הצלחתי לקרוא את מה שהעברת${nameSuffix} 🙈 אפשר לכתוב לי את הפרטים בטקסט ואוסיף ✅`,
       }, {
         householdId: convo?.household_id || "unknown",
         groupId: message.groupId,
@@ -5879,7 +5993,11 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   if (message.type === "voice" && !triedCaps.includes("voice")) {
     triedCaps.push("voice");
   }
-  const allCaps = ["shopping", "task", "rotation", "reminder", "event", "voice"];
+  // Auto-mark image as tried if user sent an OCR-processed image
+  if (message.type === "image" && message.imageOcrMode && !triedCaps.includes("image")) {
+    triedCaps.push("image");
+  }
+  const allCaps = ["shopping", "task", "rotation", "reminder", "event", "voice", "image"];
   const untriedCaps = allCaps.filter(c => !triedCaps.includes(c));
   const msgCount = (convo.message_count || 0) + 1;
 
@@ -6057,6 +6175,8 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
       convoContext: convo.context,
       logPrefix: "[1:1]",
       resolveHousehold: () => ensureOnboardingHousehold(phone, convo as Record<string, unknown>, userName),
+      message,
+      prov,
     });
 
     const newTried = parsedTried.length > 0 ? parsedTried : triedCaps;
@@ -6217,6 +6337,8 @@ CONVERSATION CONTINUITY — CRITICAL:
       userName: userName || senderName,
       convoContext: convo?.context,
       logPrefix: "[1:1 personal]",
+      message,
+      prov,
     });
 
     if (visibleReply) {
@@ -6257,10 +6379,12 @@ CONVERSATION CONTINUITY — CRITICAL:
 const INTRO_MESSAGE = `היי! 👋 אני שלי, העוזרת החכמה שלכם בווטסאפ.
 
 אני יכולה לעזור עם:
-✅ משימות - "צריך לאסוף את הילדים ב-4"
+✅ מטלות - "צריך לאסוף את הילדים ב-4"
 🛒 קניות - "חלב, ביצים ולחם"
 📅 אירועים - "יום שישי ארוחה אצל סבא וסבתא"
 ❓ שאלות - "מה צריך לעשות היום?"
+
+אפשר לכתוב, להקליט הודעה קולית, או לשלוח תמונה — קבלה, רשימת קניות על פתק, או לוח תורנויות שתליתם בבית. אני אקרא ואוסיף בשבילכם 🎤 📷
 
 אם אני מפריעה באיזשהו רגע, פשוט תגידו "שלי שקט" ואני אלמד 🤫
 
@@ -7445,6 +7569,154 @@ Deno.serve(async (req: Request) => {
       console.log(`[Webhook] Transcribed voice: "${transcribed.slice(0, 80)}" → final: "${cleanTranscript.slice(0, 80)}"`);
     }
 
+    // 3a-image. Handle images: OCR them (1:1 always; groups only when Sheli is
+    // addressed by caption, by the message immediately before, or by the next
+    // follow-up text within 60s). Structured rotation tables synthesise
+    // create_rotation actions downstream.
+    if (message.type === "image") {
+      const isGroupChat = message.chatType === "group";
+      const caption = (message.imageCaption || message.text || "").trim();
+      const botLidImg = Deno.env.get("BOT_WHATSAPP_LID") || "138844095676524";
+
+      if (!(await isOcrEnabled())) {
+        console.log(`[Webhook] OCR disabled via bot_settings, skipping image from ${message.senderName}`);
+        await logMessage(message, "image_skipped_disabled");
+        return new Response("OK", { status: 200 });
+      }
+
+      // MIME gate — accept JPEG/PNG/WEBP/HEIC only
+      const mime = (message.mediaMimeType || "").split(";")[0].trim().toLowerCase();
+      if (mime && !OCR_SUPPORTED_MIME.test(mime)) {
+        console.log(`[Webhook] Image skipped (unsupported mime=${mime}) from ${message.senderName}`);
+        await logMessage(message, "image_skipped_type");
+        return new Response("OK", { status: 200 });
+      }
+
+      // Route decision
+      let shouldOcr = !isGroupChat; // 1:1 always OCRs
+      let addressingReason: string = isGroupChat ? "unaddressed" : "direct";
+      if (isGroupChat) {
+        if (caption && isTextAddressedToSheli(caption, botPhone, botLidImg)) {
+          shouldOcr = true;
+          addressingReason = "caption";
+        } else {
+          const priorAddressed = await findPrecedingAddressedMessage(
+            message.groupId,
+            message.senderPhone,
+            60,
+            botPhone,
+            botLidImg,
+          );
+          if (priorAddressed) {
+            shouldOcr = true;
+            addressingReason = "prior_msg";
+          }
+        }
+      }
+
+      if (!shouldOcr) {
+        // Buffer for the "message immediately after" case. We insert a row with
+        // classification=image_pending_ocr and the media pointers in classification_data.
+        // A subsequent addressed text within 60s will resolve this buffered image.
+        console.log(`[Webhook] Group image buffered (pending OCR) from ${message.senderName}`);
+        const { error: insErr } = await supabase.from("whatsapp_messages").insert({
+          household_id: "unknown",
+          group_id: message.groupId,
+          sender_phone: message.senderPhone,
+          sender_name: message.senderName,
+          message_text: caption || "",
+          message_type: message.type,
+          whatsapp_message_id: message.messageId,
+          classification: "image_pending_ocr",
+          classification_data: {
+            image: {
+              mediaUrl: message.mediaUrl || null,
+              mediaId: message.mediaId || null,
+              mimeType: mime || null,
+              caption: caption || "",
+            },
+          },
+        });
+        if (insErr) console.error("[Webhook] image buffer insert error:", insErr.message);
+        return new Response("OK", { status: 200 });
+      }
+
+      // Decided to OCR. Run vision now.
+      console.log(`[Webhook] OCR-ing image from ${message.senderName} (reason=${addressingReason})`);
+      const ocrResult = await ocrImage(message.mediaUrl, message.mediaId);
+
+      if (!ocrResult) {
+        console.log(`[Webhook] OCR failed for image from ${message.senderName}`);
+        if (!isGroupChat) {
+          try {
+            await sendAndLog(provider, {
+              groupId: message.groupId,
+              text: "לא הצלחתי לקרוא את התמונה 🙈 אפשר לנסות שוב או לכתוב בטקסט?",
+            }, {
+              householdId: "unknown",
+              groupId: message.groupId,
+              inReplyTo: message.messageId,
+              replyType: "image_ocr_failed_reply",
+            });
+          } catch (e) { console.error("[OCR] failure reply failed:", e); }
+        }
+        await logMessage(message, "image_ocr_failed");
+        return new Response("OK", { status: 200 });
+      }
+
+      const ocrText = (ocrResult.text || "").trim();
+
+      // Empty OCR (e.g. face photo) — silent in group, soft nudge in 1:1
+      if (!ocrText && ocrResult.mode !== "rotation_table") {
+        if (!isGroupChat) {
+          try {
+            await sendAndLog(provider, {
+              groupId: message.groupId,
+              text: "לא הצלחתי לקרוא טקסט בתמונה, תוכל/י לכתוב או להסביר לי מה כתוב?",
+            }, {
+              householdId: "unknown",
+              groupId: message.groupId,
+              inReplyTo: message.messageId,
+              replyType: "image_ocr_empty_reply",
+            });
+          } catch (e) { console.error("[OCR] empty reply failed:", e); }
+        }
+        await logMessage(message, "image_ocr_empty");
+        return new Response("OK", { status: 200 });
+      }
+
+      // Attacker-controlled OCR text must pass the injection deflect
+      if (ocrText && isIdentityProbeOrInjection(ocrText)) {
+        console.log(`[Webhook] Image OCR contained injection from ${message.senderPhone}: "${ocrText.slice(0, 80)}"`);
+        try {
+          await sendAndLog(provider, { groupId: message.groupId, text: pickDeflect() }, {
+            householdId: "unknown",
+            groupId: message.groupId,
+            inReplyTo: message.messageId,
+            replyType: "image_injection_deflect",
+          });
+        } catch (e) { console.error("[OCR] injection deflect reply failed:", e); }
+        await logMessage(message, "image_ocr_injection_blocked");
+        return new Response("OK", { status: 200 });
+      }
+
+      // Success — annotate message and fall through.
+      message.imageOcrConfidence = ocrResult.confidence || "medium";
+      if (ocrResult.uncertain_fields && ocrResult.uncertain_fields.length > 0) {
+        message.imageOcrUncertainFields = ocrResult.uncertain_fields;
+      }
+      if (ocrResult.mode === "rotation_table" && ocrResult.rotations && ocrResult.rotations.length > 0) {
+        message.imageOcrMode = "rotation_table";
+        message.imageRotations = ocrResult.rotations;
+        message.text = (caption ? caption + "\n" : "") + "[טבלת סבבים מהתמונה]";
+        console.log(`[Webhook] Image → rotation_table with ${ocrResult.rotations.length} rotations (reason=${addressingReason}, confidence=${message.imageOcrConfidence})`);
+      } else {
+        message.imageOcrMode = "plain";
+        message.text = (caption ? caption + "\n" : "") + "[תמונה]: " + ocrText;
+        console.log(`[Webhook] Image → plain OCR, ${ocrText.length} chars (reason=${addressingReason}, confidence=${message.imageOcrConfidence}, uncertain=${(message.imageOcrUncertainFields || []).join(",")})`);
+      }
+    }
+
     // 3a-reaction. Handle emoji reactions to Sheli's messages
     if (message.type === "reaction" && message.reactionEmoji && message.reactionTargetId) {
       const CONFIRM_EMOJI = /^(👍|💪|✅|👌|❤️|🔥)$/;
@@ -7529,8 +7801,14 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    // 3b. Skip all non-text/non-voice messages (photos, stickers, video, etc.)
-    if (message.type !== "text" && message.type !== "voice") {
+    // 3b. Skip all non-text/non-voice/non-image messages (stickers, video, docs, etc.)
+    // Images are allowed through here only AFTER 3a-image has injected OCR text
+    // into message.text and annotated message.imageOcrMode.
+    if (
+      message.type !== "text"
+      && message.type !== "voice"
+      && !(message.type === "image" && message.imageOcrMode)
+    ) {
       console.log(`[Webhook] Skipping ${message.type} message from ${message.senderName}`);
       await logMessage(message, "skipped_non_text");
       return new Response("OK", { status: 200 });
@@ -7631,6 +7909,14 @@ Deno.serve(async (req: Request) => {
 
     // 5. Log the raw message
     await logMessage(message, "received", householdId);
+
+    // 5a. Rotation-table image: when 3a-image detected a structured table and
+    // the image was addressed (caption or prior msg), execute N create_rotation
+    // actions now that householdId is known, then short-circuit.
+    if (message.imageOcrMode === "rotation_table") {
+      const handled = await executeRotationTableFromImage(message, householdId, provider);
+      if (handled) return new Response("OK", { status: 200 });
+    }
 
     // 6. Update member mapping (learn who's who by phone number)
     await upsertMemberMapping(householdId, message.senderPhone, message.senderName);
@@ -7756,6 +8042,22 @@ Deno.serve(async (req: Request) => {
 
     if (directAddress) {
       console.log(`[Webhook] Layer 1: Direct address detected from ${message.senderName} (first=${sheliFirstWord}, greeting=${sheliAfterGreeting}, thanks=${sheliAfterThanks}, end=${sheliStandaloneEnd}, @=${atMention}, en=${englishMention}, voiceFuzzy=${voiceFuzzyMatch}, imperative=${imperativeFirstWord ? firstWordOnly : false})`);
+    }
+
+    // 6b-image-resolve. If this addressed text came shortly after an image
+    // that was buffered (image_pending_ocr), fetch + OCR that image now and
+    // merge its content with this text as a single turn. Rotation tables are
+    // executed inline via the shared helper; plain OCR text is appended to
+    // message.text and falls through to classification.
+    if (directAddress && message.type === "text" && !message.imageOcrMode) {
+      const resolution = await resolvePendingImageOnAddressedText(message, householdId, provider);
+      if (resolution === "handled") {
+        return new Response("OK", { status: 200 });
+      }
+      if (message.imageOcrMode === "rotation_table") {
+        const handled = await executeRotationTableFromImage(message, householdId, provider);
+        if (handled) return new Response("OK", { status: 200 });
+      }
     }
 
     // 6b-cooldown. Phase 3 Task 3.4: honor quiet_until after a correction phrase.
@@ -8611,6 +8913,14 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // If this message came from an image OCR with non-high confidence AND the
+    // action is high-stakes (expense, reminder, event), stage a confirmation
+    // instead of executing silently. Prevents the "wrong ₪2860 logged silently"
+    // failure mode seen in the Yaron 2026-04-23 handwriting test.
+    if (await maybeAskImageOcrConfirmation(message, householdId, actions, provider)) {
+      return new Response("OK", { status: 200 });
+    }
+
     const { summary } = await executeActions(householdId, actions, message.senderName);
     console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
 
@@ -9233,6 +9543,686 @@ RULES:
     console.error("[VoiceFix] Error:", err);
     return text; // fallback to original
   }
+}
+
+// ─── Image OCR (Claude vision, Haiku 4.5) ───
+//
+// Two modes:
+//   "plain"          → just return the extracted text. Falls back into the
+//                      normal Haiku classifier pipeline as if the user typed it.
+//   "rotation_table" → vision detected a weekly rotation grid (rows = duties,
+//                      columns = weekdays, handwritten/printed names in cells).
+//                      Returns structured rotations so the caller can synthesise
+//                      create_rotation actions directly (bypasses the classifier).
+//
+// Runs a SINGLE Anthropic vision call with a dual-purpose prompt — the model
+// decides mode internally and always returns text too (so rotation_table
+// detection never loses the raw OCR if parsing fails downstream).
+
+interface ImageOcrResult {
+  mode: "plain" | "rotation_table";
+  text: string; // always present, verbatim OCR
+  confidence: "high" | "medium" | "low"; // self-reported by vision model
+  has_handwriting?: boolean; // set by model — even a single handwritten cell counts
+  uncertain_fields?: string[]; // e.g. ["amount", "date", "name"] — specific fields the model couldn't read confidently
+  rotations?: Array<{
+    title: string;
+    days_to_members: Record<string, string>; // {"sun":"אורטל","mon":"ירון",...}
+  }>;
+  rotation_notes?: string;
+}
+
+const OCR_SUPPORTED_MIME = /^image\/(jpeg|jpg|png|webp|heic|heif)$/i;
+const OCR_MAX_BYTES = 10 * 1024 * 1024; // 10MB — Whapi also caps here
+
+async function downloadImageAsBase64(
+  mediaUrl: string | undefined,
+  mediaId: string | undefined,
+): Promise<{ data: string; mimeType: string } | null> {
+  try {
+    let blob: Blob;
+    let mimeType = "image/jpeg";
+    if (mediaUrl) {
+      const resp = await fetch(mediaUrl);
+      if (!resp.ok) {
+        console.error("[OCR] Failed to download image from link:", resp.status);
+        return null;
+      }
+      blob = await resp.blob();
+      mimeType = resp.headers.get("content-type") || blob.type || mimeType;
+    } else if (mediaId) {
+      const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
+      const token = Deno.env.get("WHAPI_TOKEN") || "";
+      const resp = await fetch(`${apiUrl}/media/${mediaId}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "image/*" },
+      });
+      if (!resp.ok) {
+        console.error("[OCR] Whapi media download failed:", resp.status, await resp.text());
+        return null;
+      }
+      blob = await resp.blob();
+      mimeType = resp.headers.get("content-type") || blob.type || mimeType;
+    } else {
+      return null;
+    }
+    if (blob.size > OCR_MAX_BYTES) {
+      console.log(`[OCR] Image too large: ${blob.size} bytes`);
+      return null;
+    }
+    // Normalize mime type (Whapi sometimes returns image/jpeg; charset=... or similar)
+    mimeType = mimeType.split(";")[0].trim().toLowerCase();
+    if (!OCR_SUPPORTED_MIME.test(mimeType)) {
+      console.log(`[OCR] Unsupported mime: ${mimeType}`);
+      return null;
+    }
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    // btoa needs a binary-string input; chunk to avoid stack overflow on large images
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < buf.length; i += chunk) {
+      binary += String.fromCharCode(...buf.subarray(i, Math.min(i + chunk, buf.length)));
+    }
+    const base64 = btoa(binary);
+    return { data: base64, mimeType };
+  } catch (err) {
+    console.error("[OCR] downloadImageAsBase64 error:", err);
+    return null;
+  }
+}
+
+async function ocrImage(
+  mediaUrl: string | undefined,
+  mediaId: string | undefined,
+): Promise<ImageOcrResult | null> {
+  const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  if (!ANTHROPIC_API_KEY) {
+    console.error("[OCR] ANTHROPIC_API_KEY not set");
+    return null;
+  }
+
+  const img = await downloadImageAsBase64(mediaUrl, mediaId);
+  if (!img) return null;
+
+  const systemPrompt = "You are an OCR + table-structure extractor for a Hebrew/English family assistant named Sheli. " +
+    "Your job: read the image and return ONE JSON object only — no prose, no code fences, no explanation.\n\n" +
+    "OUTPUT SHAPE:\n" +
+    "{\n" +
+    '  "mode": "plain" | "rotation_table",\n' +
+    '  "text": "<faithful OCR of everything visible — always populate>",\n' +
+    '  "confidence": "high" | "medium" | "low",\n' +
+    '  "has_handwriting": true | false,\n' +
+    '  "uncertain_fields": ["amount" | "date" | "time" | "name" | "description" | "merchant"],\n' +
+    '  "rotations": [{"title":"<row header>","days_to_members":{"sun":"<name>","mon":"<name>",...}}],\n' +
+    '  "rotation_notes": "<any handwritten rules printed under/next to the table, optional>"\n' +
+    "}\n\n" +
+    "has_handwriting: set to true if the image contains ANY handwritten text whatsoever — " +
+    "even a single cell, a single signature, a handwritten amount, or a handwritten name on an " +
+    "otherwise printed form. Be liberal: the downstream system uses this to ask the user to " +
+    "confirm, which is better than silently logging the wrong data. ONLY set false when the entire " +
+    "image is unambiguously typed/printed (POS receipts, digital screenshots, typed documents).\n\n" +
+    "WHEN TO USE mode=rotation_table:\n" +
+    "- The image shows a table with >=2 rows AND >=2 columns.\n" +
+    "- Column headers are weekday names in Hebrew (ראשון שני שלישי רביעי חמישי שישי שבת) " +
+    "or English (Sunday Monday Tuesday Wednesday Thursday Friday Saturday) or short forms.\n" +
+    "- Each populated cell contains a PERSON NAME (printed or handwritten).\n" +
+    "- The leftmost column (RTL Hebrew) or rightmost column is the row header = rotation title " +
+    "(e.g. פינוי מדיח, שאיבת רצפה, תליית כביסה).\n\n" +
+    "DAY CODE MAPPING (always use these 3-letter lowercase codes in days_to_members keys):\n" +
+    "ראשון=sun, שני=mon, שלישי=tue, רביעי=wed, חמישי=thu, שישי=fri, שבת=sat.\n\n" +
+    "CONFIDENCE SELF-REPORT (critical — this drives whether Sheli asks the user to confirm):\n" +
+    "- high = fully typed/printed, crisp photo; every word and number unambiguous. " +
+    "Typed POS receipts, digital screenshots, clear tables with printed cells. " +
+    "No handwriting, or handwriting is isolated labels you read with zero doubt.\n" +
+    "- medium = mixed printed-form + handwriting; cursive but legible; some strokes ambiguous; " +
+    "a few digits or letters you had to guess. ANY handwritten amount or date = medium at best.\n" +
+    "- low = mostly handwriting, smudged, tilted, faded pen on pre-printed form; " +
+    "the printed template is clearer than the handwritten content; you are guessing shapes. " +
+    "Example: a cheque with printed legal boilerplate dominating and cursive payer/amount lines — " +
+    "that is low, not high. When in doubt, downgrade.\n\n" +
+    "uncertain_fields: list the CATEGORIES you are unsure about — use lowercase English tokens " +
+    'like "amount", "date", "time", "name", "description", "merchant". Omit or leave empty if none.\n\n' +
+    "RULES:\n" +
+    "1. If unsure whether it is a rotation table, OUTPUT mode=plain and leave rotations empty. NEVER invent rotations.\n" +
+    "2. If a cell is unreadable/scribbled/crossed-out, put the literal string ? as the name (one question mark) " +
+    "AND drop confidence to medium or low.\n" +
+    "3. Merge multiple mini-tables on the same page that share row titles (e.g. weeks 1-3 + weeks 4-6) " +
+    "into ONE entry per title when the names agree. If the names differ between mini-tables, " +
+    "drop to mode=plain — a week-1/week-2 cycle is not expressible in our schema yet.\n" +
+    "4. In mode=rotation_table the text field still contains the full OCR as a fallback.\n" +
+    "5. Strip leading/trailing punctuation and hyphens from name cells (e.g. ' - ירון' becomes 'ירון').\n" +
+    "6. Preserve original Hebrew/English script of names and content — do NOT translate.\n" +
+    "7. Keep text under 2000 chars. If longer, summarise to the main content.\n" +
+    "8. HONESTY over confidence: it is far better to say low and be corrected than to say high and be wrong. " +
+    "A wrong high-confidence read on an amount leads to a wrong expense getting logged silently. " +
+    "If there is ANY doubt about a digit in an amount, a date, or a person's name, downgrade.\n" +
+    "9. Output RAW JSON only. No markdown fences, no leading text.";
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: img.mimeType, data: img.data } },
+            { type: "text", text: "Extract per the system prompt." },
+          ],
+        }],
+      }),
+    });
+
+    if (!res.ok) {
+      console.error("[OCR] Anthropic API error:", res.status, await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    const raw = (data.content?.[0]?.text || "").trim();
+    if (!raw) return null;
+
+    // Strip accidental code fences if the model ignored rule 9
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+    let parsed: ImageOcrResult;
+    try {
+      parsed = JSON.parse(cleaned) as ImageOcrResult;
+    } catch (parseErr) {
+      console.error("[OCR] JSON parse failed, treating as plain text:", parseErr);
+      return { mode: "plain", text: cleaned.slice(0, 2000), confidence: "low" };
+    }
+
+    // Defensive normalization
+    if (parsed.mode !== "rotation_table") parsed.mode = "plain";
+    if (typeof parsed.text !== "string") parsed.text = "";
+    parsed.text = parsed.text.slice(0, 2000);
+    // Confidence: accept high/medium/low; default to medium (safer than assuming high).
+    const rawConf = String((parsed as { confidence?: string }).confidence || "").toLowerCase();
+    parsed.confidence = (rawConf === "high" || rawConf === "medium" || rawConf === "low")
+      ? rawConf as "high" | "medium" | "low"
+      : "medium";
+    // has_handwriting: coerce to boolean. Default to false only when explicitly false.
+    parsed.has_handwriting = (parsed as { has_handwriting?: unknown }).has_handwriting === true;
+    // Hard gate: handwriting caps confidence at medium, regardless of model self-report.
+    // Rationale — on the Yaron 2026-04-23 test, Sonnet read amounts correctly but
+    // invented plausible-sounding Hebrew names around them and still returned
+    // confidence="high". Handwriting detection is structurally easier than
+    // handwriting honesty, so we trust detection and override self-report.
+    if (parsed.has_handwriting === true && parsed.confidence === "high") {
+      console.log("[OCR] Forcing confidence high→medium due to has_handwriting=true");
+      parsed.confidence = "medium";
+    }
+    if (Array.isArray(parsed.uncertain_fields)) {
+      parsed.uncertain_fields = parsed.uncertain_fields
+        .filter((f): f is string => typeof f === "string" && f.trim().length > 0)
+        .map((f) => f.trim().toLowerCase());
+      if (parsed.uncertain_fields.length === 0) delete parsed.uncertain_fields;
+    } else {
+      delete parsed.uncertain_fields;
+    }
+    if (parsed.mode === "rotation_table") {
+      if (!Array.isArray(parsed.rotations) || parsed.rotations.length === 0) {
+        parsed.mode = "plain";
+        delete parsed.rotations;
+      } else {
+        // Sanity check each rotation; drop malformed ones
+        const cleanRotations = parsed.rotations.filter((r) => {
+          return r && typeof r.title === "string" && r.title.trim().length > 0
+            && r.days_to_members && typeof r.days_to_members === "object"
+            && Object.keys(r.days_to_members).length >= 1;
+        });
+        if (cleanRotations.length === 0) {
+          parsed.mode = "plain";
+          delete parsed.rotations;
+        } else {
+          parsed.rotations = cleanRotations;
+        }
+      }
+    }
+    return parsed;
+  } catch (err) {
+    console.error("[OCR] ocrImage error:", err);
+    return null;
+  }
+}
+
+// Shared pure helper — is this free-text addressed to Sheli by name?
+// Covers the high-confidence name patterns from the group handler: @mentions,
+// first-word/after-greeting/after-thanks שלי, English Sheli/Shelly variants,
+// and feminine-imperative first-word cues. Used by image captions and by the
+// "prior message addressed Sheli" lookback.
+function isTextAddressedToSheli(text: string, botPhone: string, botLid: string): boolean {
+  if (!text) return false;
+  const txt = text.trim();
+  if (!txt) return false;
+  if (txt.includes(`@${botPhone}`) || txt.includes(`@${botLid}`)) return true;
+  if (/@שלי/.test(txt)) return true;
+  if (/(?:^|[\s,])@?she(?:li|lly|lli|ly|lei|ley|lee)(?:[\s,:!?.)]|$)/i.test(txt)) return true;
+  if (/^\s*שלי[\s,!?]/.test(txt)) return true;
+  if (/^(היי|הי|שלום|יו|הלו|בוקר טוב|ערב טוב)\s+שלי\b/i.test(txt)) return true;
+  if (/תודה\s+שלי\b/.test(txt)) return true;
+  if (/[?!]\s+שלי[?!.\s]*$/.test(txt)) return true;
+  const SHELI_IMPERATIVES = new Set([
+    "תזכירי", "תזכרי", "תוסיפי", "תרשמי", "תכתבי", "תגידי", "תאמרי",
+    "תספרי", "תבדקי", "תראי", "תפתחי", "תסגרי", "תעדכני", "תמחקי",
+    "תבטלי", "תסירי", "תוציאי", "תכניסי", "תיצרי", "תקבעי", "תסדרי",
+    "תספקי", "תעני", "תעזרי", "תנסי", "תחזרי", "תמצאי", "תפרטי",
+    "תסבירי", "תאשרי", "תקראי", "תחפשי", "תעבירי", "תשלחי",
+  ]);
+  const trimmedTxt = txt.replace(/^[\s!?.,]+/, "");
+  const firstWord = trimmedTxt.split(/[\s,.:;!?\n]/)[0];
+  if (SHELI_IMPERATIVES.has(firstWord)) return true;
+  return false;
+}
+
+// Look up the most-recent user message in the same group from the same sender
+// within the last `windowSeconds` seconds that addresses Sheli. Used by the
+// image handler to detect the "prior message said שלי" case.
+async function findPrecedingAddressedMessage(
+  groupId: string,
+  senderPhone: string,
+  windowSeconds: number,
+  botPhone: string,
+  botLid: string,
+): Promise<boolean> {
+  try {
+    const cutoff = new Date(Date.now() - windowSeconds * 1000).toISOString();
+    const { data } = await supabase
+      .from("whatsapp_messages")
+      .select("message_text, created_at, message_type")
+      .eq("group_id", groupId)
+      .eq("sender_phone", senderPhone)
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    if (!data || data.length === 0) return false;
+    return data.some((m: { message_text: string | null; message_type: string }) =>
+      m.message_text && isTextAddressedToSheli(m.message_text, botPhone, botLid));
+  } catch (err) {
+    console.error("[OCR] findPrecedingAddressedMessage error:", err);
+    return false;
+  }
+}
+
+// Look up a pending (buffered) image sent by the same user in the same chat
+// within the last `windowSeconds` seconds. Returns the row so the caller can
+// fetch media + OCR + merge with the current (addressed) text.
+async function findPendingImage(
+  groupId: string,
+  senderPhone: string,
+  windowSeconds: number,
+): Promise<{ id: string; whatsapp_message_id: string; classification_data: Record<string, unknown> | null } | null> {
+  try {
+    const cutoff = new Date(Date.now() - windowSeconds * 1000).toISOString();
+    const { data } = await supabase
+      .from("whatsapp_messages")
+      .select("id, whatsapp_message_id, classification_data")
+      .eq("group_id", groupId)
+      .eq("sender_phone", senderPhone)
+      .eq("classification", "image_pending_ocr")
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as { id: string; whatsapp_message_id: string; classification_data: Record<string, unknown> | null } | null) || null;
+  } catch (err) {
+    console.error("[OCR] findPendingImage error:", err);
+    return null;
+  }
+}
+
+// OCR feature kill switch — default ENABLED (opt-out).
+// To disable: UPDATE bot_settings SET value='false' WHERE key='ocr_enabled';
+async function isOcrEnabled(): Promise<boolean> {
+  try {
+    const { data } = await supabase
+      .from("bot_settings")
+      .select("value")
+      .eq("key", "ocr_enabled")
+      .maybeSingle();
+    if (!data) return true;
+    return String(data.value).toLowerCase() !== "false";
+  } catch {
+    return true;
+  }
+}
+
+// Per-household daily OCR cap. Prevents runaway vision cost if someone
+// spam-sends images. Default 50/day (≈ $0.20-0.40/day/household worst case).
+async function ocrDailyCapReached(householdId: string): Promise<boolean> {
+  try {
+    const { data: settings } = await supabase
+      .from("bot_settings")
+      .select("value")
+      .eq("key", "ocr_daily_cap_per_household")
+      .maybeSingle();
+    const cap = settings?.value ? parseInt(String(settings.value), 10) : 50;
+    if (!Number.isFinite(cap) || cap <= 0) return false;
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from("whatsapp_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("household_id", householdId)
+      .in("classification", ["image_ocr_direct", "image_ocr_resolved"])
+      .gte("created_at", cutoff);
+    return (count || 0) >= cap;
+  } catch (err) {
+    console.error("[OCR] ocrDailyCapReached error:", err);
+    return false;
+  }
+}
+
+// Shared executor for OCR'd rotation tables. Synthesises one create_rotation
+// action per row, runs them through executeActions (which already handles
+// title-dedup-on-update + bulk), and sends a single confirmation reply.
+// Returns true if it fully handled the message (caller should short-circuit).
+async function executeRotationTableFromImage(
+  message: IncomingMessage,
+  householdId: string,
+  prov: WhatsAppProvider,
+): Promise<boolean> {
+  if (message.imageOcrMode !== "rotation_table" || !message.imageRotations || message.imageRotations.length === 0) {
+    return false;
+  }
+
+  if (await ocrDailyCapReached(householdId)) {
+    console.log(`[OCR] Daily cap reached for household ${householdId}, skipping rotation-table import`);
+    await logMessage(message, "image_skipped_cap", householdId);
+    if (message.chatType === "direct") {
+      try {
+        await sendAndLog(prov, {
+          groupId: message.groupId,
+          text: "הגעתם היום למגבלת קריאת התמונות (50) 🙈 נסו שוב מחר, או כתבו לי את הרשימה בטקסט.",
+        }, {
+          householdId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "image_cap_reply",
+        });
+      } catch (e) { console.error("[OCR] cap reply failed:", e); }
+    }
+    return true;
+  }
+
+  const unreadable: string[] = [];
+  const actions: Array<{ type: string; data: Record<string, unknown> }> = [];
+  for (const rot of message.imageRotations) {
+    if (!rot.title || !rot.days_to_members) continue;
+    const title = rot.title.trim().replace(/^[-–—\s:]+|[-–—\s:]+$/g, "");
+    if (!title) continue;
+
+    // Walk the day keys in week-order so the members[] array aligns with the weekly rotation.
+    const DAY_ORDER = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    const days: string[] = [];
+    const members: string[] = [];
+    for (const d of DAY_ORDER) {
+      const name = rot.days_to_members[d];
+      if (name && typeof name === "string" && name.trim()) {
+        const cleanName = name.trim().replace(/^[-–—\s:]+|[-–—\s:]+$/g, "");
+        if (cleanName === "?") {
+          unreadable.push(`${title} / ${d}`);
+        } else if (cleanName) {
+          days.push(d);
+          members.push(cleanName);
+        }
+      }
+    }
+    if (days.length === 0 || members.length === 0) continue;
+
+    actions.push({
+      type: "create_rotation",
+      data: {
+        title,
+        rotation_type: "duty",
+        members,
+        frequency: { type: "weekly", days },
+      },
+    });
+  }
+
+  if (actions.length === 0) {
+    console.log(`[OCR] rotation_table had ${message.imageRotations.length} rows but none usable`);
+    await logMessage(message, "image_ocr_rotation_unusable", householdId);
+    return false; // let plain-mode style flow take over
+  }
+
+  try {
+    const { summary } = await executeActions(householdId, actions, message.senderName);
+    console.log(`[OCR] rotation_table executed: ${summary.join(", ")}`);
+  } catch (err) {
+    console.error("[OCR] rotation_table execute error:", err);
+    await logMessage(message, "image_ocr_rotation_failed", householdId);
+    return false;
+  }
+
+  // Compose confirmation — ask for clarification if any cells were unreadable.
+  const rotationTitles = actions.map((a) => (a.data as { title: string }).title);
+  let replyText: string;
+  if (unreadable.length > 0) {
+    replyText = "קלטתי טבלת סבבים מהתמונה ✨ הוספתי: " + rotationTitles.join(", ")
+      + "\nלא הצלחתי לזהות חלק מהשמות (" + unreadable.slice(0, 3).join(", ")
+      + ") — תוכל/י לכתוב לי מי אמור להיות שם?";
+  } else {
+    replyText = "קלטתי! הוספתי " + actions.length + " סבבים: " + rotationTitles.join(", ")
+      + ". תרצו שאגיד לכל אחד/ת מה התור שלו בכל בוקר?";
+  }
+
+  try {
+    await sendAndLog(prov, { groupId: message.groupId, text: replyText }, {
+      householdId,
+      groupId: message.groupId,
+      inReplyTo: message.messageId,
+      replyType: "image_rotation_table_reply",
+    });
+  } catch (e) { console.error("[OCR] rotation confirmation reply failed:", e); }
+
+  await logMessage(message, "image_ocr_rotation_table", householdId);
+  return true;
+}
+
+// Resolve a buffered pending-OCR image when a follow-up text addresses Sheli.
+// Called from the group flow once we've determined directAddress=true. If a
+// buffered image is found within the window, fetch the media, OCR it, and
+// merge its text with the current (addressed) text so the rest of the pipeline
+// classifies them as one turn.
+async function resolvePendingImageOnAddressedText(
+  message: IncomingMessage,
+  householdId: string,
+  prov: WhatsAppProvider,
+): Promise<"handled" | "merged" | "none"> {
+  const pending = await findPendingImage(message.groupId, message.senderPhone, 60);
+  if (!pending) return "none";
+  const imgMeta = (pending.classification_data as { image?: Record<string, unknown> } | null)?.image as
+    | { mediaUrl?: string | null; mediaId?: string | null; mimeType?: string | null; caption?: string | null }
+    | undefined;
+  if (!imgMeta) {
+    return "none";
+  }
+
+  if (await ocrDailyCapReached(householdId)) {
+    await logMessage(message, "image_skipped_cap", householdId);
+    return "none";
+  }
+
+  console.log(`[OCR] Resolving buffered image ${pending.whatsapp_message_id} for addressed text from ${message.senderName}`);
+  const result = await ocrImage(imgMeta.mediaUrl || undefined, imgMeta.mediaId || undefined);
+
+  // Mark the pending row as resolved regardless of outcome so we don't try again
+  await supabase.from("whatsapp_messages")
+    .update({ classification: "image_ocr_resolved" })
+    .eq("id", pending.id);
+
+  if (!result) return "none";
+  const ocrText = (result.text || "").trim();
+
+  // Injection guard on OCR text
+  if (ocrText && isIdentityProbeOrInjection(ocrText)) {
+    console.log(`[OCR] Resolved image contained injection — deflecting`);
+    try {
+      await sendAndLog(prov, { groupId: message.groupId, text: pickDeflect() }, {
+        householdId,
+        groupId: message.groupId,
+        inReplyTo: message.messageId,
+        replyType: "image_injection_deflect",
+      });
+    } catch (e) { console.error("[OCR] resolved injection deflect failed:", e); }
+    return "handled";
+  }
+
+  message.imageOcrConfidence = result.confidence || "medium";
+  if (result.uncertain_fields && result.uncertain_fields.length > 0) {
+    message.imageOcrUncertainFields = result.uncertain_fields;
+  }
+
+  if (result.mode === "rotation_table" && result.rotations && result.rotations.length > 0) {
+    // Attach structure to the CURRENT message and let the caller's rotation-table
+    // branch handle execution (shared code path, single confirmation reply).
+    message.imageOcrMode = "rotation_table";
+    message.imageRotations = result.rotations;
+    return "merged";
+  }
+
+  if (ocrText) {
+    const caption = imgMeta.caption ? String(imgMeta.caption) : "";
+    const pieces: string[] = [];
+    if (caption) pieces.push(caption);
+    pieces.push("[תמונה]: " + ocrText);
+    pieces.push(message.text);
+    message.text = pieces.filter(Boolean).join("\n");
+    message.imageOcrMode = "plain";
+    return "merged";
+  }
+
+  return "none";
+}
+
+// High-stakes intents that should NOT be auto-executed when derived from a
+// non-high-confidence OCR. Users would rather read "Sheli isn't sure, confirm?"
+// than discover a wrong ₪2860 expense silently logged.
+const IMAGE_OCR_CONFIRM_INTENTS = new Set([
+  "add_expense",
+  "add_reminder",
+  "add_event",
+]);
+
+// Format a single action for the user-facing confirmation prompt.
+// Only covers the three high-stakes intents; callers gate by IMAGE_OCR_CONFIRM_INTENTS.
+function formatActionForImageOcrConfirm(
+  action: { type: string; data: Record<string, unknown> },
+): string {
+  const d = action.data || {};
+  if (action.type === "add_expense") {
+    const amountMinor = Number(d.amount_minor ?? 0);
+    const currency = String(d.expense_currency || d.currency || "ILS").toUpperCase();
+    const symbol = currency === "ILS" ? "₪" : currency === "EUR" ? "€" : currency === "USD" ? "$" : currency === "GBP" ? "£" : currency === "JPY" ? "¥" : currency;
+    // JPY has no minor unit (1 yen = 1 unit); everything else uses 100
+    const minorUnit = currency === "JPY" ? 1 : 100;
+    const amountDisplay = (amountMinor / minorUnit).toLocaleString("he-IL");
+    const desc = String(d.expense_description || d.description || "הוצאה");
+    const payerRaw = (d.expense_paid_by_name || d.paid_by) as string | undefined;
+    const paidBy = payerRaw ? ` (${payerRaw})` : "";
+    return `הוצאה: ${desc} — ${symbol}${amountDisplay}${paidBy}`;
+  }
+  if (action.type === "add_reminder") {
+    const text = String(d.reminder_text || d.text || "תזכורת");
+    const when = String(d.time_iso || d.send_at || "");
+    const whenDisplay = when ? ` ל-${when.slice(0, 16).replace("T", " ")}` : "";
+    return `תזכורת: ${text}${whenDisplay}`;
+  }
+  if (action.type === "add_event") {
+    const title = String(d.event_title || d.title || "אירוע");
+    const when = String(d.scheduled_for || d.datetime_iso || "");
+    const whenDisplay = when ? ` ב-${when.slice(0, 16).replace("T", " ")}` : "";
+    return `אירוע: ${title}${whenDisplay}`;
+  }
+  return action.type;
+}
+
+// Gate for image-OCR-derived actions: if the OCR model wasn't confident AND the
+// intended action is high-stakes (money / time-sensitive), stage it as a
+// pending_confirmation instead of executing. The user sees what Sheli read and
+// accepts with 👍 / rejects with 👎 (or any of the existing correction phrases).
+// Returns true when the caller should SKIP executeActions (a confirmation was
+// staged); false to proceed normally.
+async function maybeAskImageOcrConfirmation(
+  message: IncomingMessage,
+  householdId: string,
+  actions: Array<{ type: string; data: Record<string, unknown> }>,
+  prov: WhatsAppProvider,
+): Promise<boolean> {
+  if (!message.imageOcrMode || message.imageOcrMode !== "plain") return false;
+  if (!actions || actions.length === 0) return false;
+
+  const confirmAction = actions.find((a) => IMAGE_OCR_CONFIRM_INTENTS.has(a.type));
+  if (!confirmAction) return false;
+
+  // add_expense: ALWAYS confirm when derived from an image, regardless of self-reported
+  // confidence. Sonnet's self-report isn't reliable when amounts read cleanly but
+  // surrounding text (description/payer) is invented — and money-stuff is the one
+  // category where "confident but wrong" is genuinely costly. One extra tap > silent
+  // wrong expense. (Yaron 2026-04-23: ₪2860 mis-logged on first test, correct ₪280
+  // but invented "שמש נלך"/"רין" on second test.)
+  //
+  // add_reminder / add_event: keep confidence-gated — lower-stakes when wrong, and
+  // adding a confirmation tap for every typed-screenshot reminder would be friction.
+  if (confirmAction.type !== "add_expense") {
+    if (message.imageOcrConfidence === "high" || !message.imageOcrConfidence) return false;
+  }
+
+  const preview = formatActionForImageOcrConfirm(confirmAction);
+  // Translate Sonnet's stable English uncertain_fields tokens to Hebrew for the
+  // user-facing confirmation. Unknown tokens pass through unchanged.
+  const UNCERTAIN_FIELD_HE: Record<string, string> = {
+    amount: "סכום",
+    date: "תאריך",
+    time: "שעה",
+    name: "שם",
+    description: "תיאור",
+    merchant: "בית עסק",
+  };
+  const uncertainHe = (message.imageOcrUncertainFields || [])
+    .map((f) => UNCERTAIN_FIELD_HE[f] || f);
+  const uncertainSuffix = uncertainHe.length > 0
+    ? `\n(לא בטוחה ב: ${uncertainHe.join(", ")})`
+    : "";
+  const confText = `לא בטוחה שקראתי נכון בתמונה 🙈\n${preview}${uncertainSuffix}\nלאשר? 👍 / 👎 — או כתבו לי את הפרטים הנכונים.`;
+
+  const sendResult = await sendAndLog(prov, { groupId: message.groupId, text: confText }, {
+    householdId,
+    groupId: message.groupId,
+    inReplyTo: message.messageId,
+    replyType: "image_ocr_confirm_ask",
+  });
+
+  const confId = Math.random().toString(36).slice(2, 10);
+  const { error: confErr } = await supabase.from("pending_confirmations").insert({
+    id: confId,
+    household_id: householdId,
+    group_id: message.groupId,
+    action_type: confirmAction.type,
+    action_data: confirmAction.data,
+    confirmation_text: confText,
+    created_by: message.senderName,
+    expires_at: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+    status: "pending",
+    bot_message_id: sendResult?.messageId || null,
+  });
+  if (confErr) {
+    console.error("[OCR] pending_confirmations insert error:", confErr);
+    // Safer to execute than to silently lose the action — fall back to normal flow.
+    return false;
+  }
+
+  console.log(`[OCR] image confirmation staged: id=${confId} action=${confirmAction.type} confidence=${message.imageOcrConfidence}`);
+  await logMessage(message, "image_ocr_awaiting_confirmation", householdId);
+  return true;
 }
 
 // ─── Error Notification — DM the admin when something breaks ───

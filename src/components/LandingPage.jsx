@@ -47,7 +47,8 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "יומן ואירועים", subtitle: "שלי מזהה תאריכים ומארגנת את היומן שלכם" },
       { Icon: ChoresFeatureIcon, title: "ניהול משימות ומטלות - גם לילדים!", subtitle: "תור מי לפנות מדיח? ומי אוסף מהחוג? מושלם להורים עסוקים" },
       { Icon: ExpenseFeatureIcon, title: "מעקב הוצאות", subtitle: "\u0022שילמתי 85 על פיצה\u0022 — ושלי רושמת. עוקבת אחרי הוצאות ומעדכנת אתכם כשתרצו" },
-      { Icon: ForwardFeatureIcon, title: "העברה אליי בלחיצה", subtitle: "לחצו \u0022העבר\u0022 על כל הודעה עם תאריך, רשימה או פרטי אירוע - ואני אוסיף אוטומטית. בלי להקליד מחדש" },
+      // TODO(design): swap ForwardFeatureIcon → dedicated multi-modal ingestion SVG (camera + mic + arrow) when the designer delivers one. Using ForwardFeatureIcon as the closest existing placeholder.
+      { Icon: ForwardFeatureIcon, title: "שולחים — ושלי קוראת", subtitle: "הודעה שהעבירו אליכם, הקלטה מהדרך, תמונה של קבלה או לוח תורנויות — שלחו לשלי ואני אקרא ואוסיף אוטומטית" },
     ],
     familyTitle: "שלי לכל המשפחה",
     familyItems: [
@@ -57,7 +58,7 @@ const CONTENT = {
     ],
     stepsTitle: "איך זה עובד?",
     steps: [
-      { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "טקסט או הודעה קולית, שלי מבינה הכל" },
+      { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "טקסט, הודעה קולית או תמונה — שלי מבינה הכל" },
       { title: "כתבו בעברית פשוטה", subtitle: "\u0022חלב ולחם\u0022 וזה ברשימת הקניות. \u0022תזכירי לי מחר\u0022 והתזכורת מופעלת. בלי אפליקציות מיותרות" },
       { title: "הקליטו מהדרך", subtitle: "בדרך לסופר? \u0022שלי, מה ברשימה היום?\u0022 והיא עונה מיד" },
     ],
@@ -66,7 +67,7 @@ const CONTENT = {
       { q: "איך שלי עובדת?", a: "שלי היא פיתוח ישראלי שמארגן לכם את הבית דרך ווטסאפ - רשימות קניות, תזכורות, מטלות, יומן והוצאות, הכל במקום אחד. כתבו \u0022חלב\u0022 והיא תוסיף לרשימה, \u0022תזכירי לי...\u0022 והיא תזכיר בזמן. שלי עובדת בצ\u0027אט אישי ובקבוצות, לבד או עם כל מי שגר בבית. היא זוכרת את הסגנון שלכם עם הזמן: כינויים, מוצרים קבועים, הרגלים." },
       { q: "אפליקציה לצפייה נוחה בכל הרשימות שלכם", a: "רשימת הקניות, המטלות, התזכורות, התקציב ולוח האירועים מתעדכנים בזמן אמת, גם מהווטסאפ וגם מהאפליקציה - אין יותר נוח מזה!" },
       { q: "כמה זה עולה?", a: "חינם לגמרי עד 40 פעולות בחודש, כל חודש!\nצריכים יותר? הצטרפו לשלי פרימיום ללא הגבלה ב-14.90 \u20AA לחודש בלבד\nאו 149 \u20AA לשלי פרימיום לשנה שלמה (חודשיים במתנה!)" },
-      { q: "מה עם הפרטיות?", a: "שלי שומרת למשך 30 יום את הודעות הטקסט ואת ההודעות הקוליות הקצרות שתשלחו אליה. היא לא שומרת תמונות או וידאו. לאחר 30 יום, כל המידע נמחק אלא אם תבקשו אחרת משלי. המידע שלכם שמור ומאובטח ורק אתם רואים אותו. אף אחד אחר לא - כולל אותנו." },
+      { q: "מה עם הפרטיות?", a: "שלי שומרת למשך 30 יום את הודעות הטקסט ואת ההודעות הקוליות הקצרות שתשלחו אליה. תמונות שתשלחו היא קוראת רק כדי לחלץ מהן טקסט, את התמונה עצמה היא לא שומרת. וידאו עדיין לא נתמך. לאחר 30 יום, כל המידע נמחק אלא אם תבקשו אחרת משלי. המידע שלכם שמור ומאובטח ורק אתם רואים אותו. אף אחד אחר לא - כולל אותנו." },
       { q: "איך מתחילים? ואיך מפסיקים?", a: "שלחו הודעה לשלי בווטסאפ, היא מתחילה לעזור מיד. רוצים שכולם בבית ישתתפו? הוסיפו אותה לקבוצת ווטסאפ. רוצים להפסיק? פשוט תפסיקו לכתוב. כל המידע נמחק אוטומטית, בלי התחייבות." },
       { q: "למי שלי מתאימה?", a: "לכולם! גרים לבד? שלי מנהלת לכם קניות, תזכורות וסידורים. עם שותפים? הוסיפו אותה לקבוצת הדירה והיא תתאם מי קונה, מי מנקה, הכל. משפחה? שלי מנהלת את כל הבית." },
     ],
@@ -100,7 +101,8 @@ const CONTENT = {
       { Icon: CalendarFeatureIcon, title: "Calendar & events", subtitle: "Sheli spots dates and organizes your schedule" },
       { Icon: ChoresFeatureIcon, title: "Tasks & chores \u2014 for kids too!", subtitle: "Whose turn to empty the dishwasher? Who picks up from practice? Perfect for busy parents" },
       { Icon: ExpenseFeatureIcon, title: "Expense tracking", subtitle: "\u0022I paid 85 for pizza\u0022 — and Sheli logs it. Tracks expenses and updates you when you want" },
-      { Icon: ForwardFeatureIcon, title: "Forward it to Sheli", subtitle: "Tap \u0022Forward\u0022 on any message with a date, list, or event details — I'll add it automatically. No retyping" },
+      // TODO(design): swap ForwardFeatureIcon → dedicated multi-modal ingestion SVG when available.
+      { Icon: ForwardFeatureIcon, title: "Send anything — Sheli reads it", subtitle: "A forwarded message, a voice note on the go, a photo of a receipt or chore chart — send it to Sheli and I'll read and add it automatically" },
     ],
     familyTitle: "Sheli for the whole family",
     familyItems: [
@@ -110,7 +112,7 @@ const CONTENT = {
     ],
     stepsTitle: "How does it work?",
     steps: [
-      { title: "Send Sheli a message on WhatsApp", subtitle: "Text or voice message, Sheli understands both" },
+      { title: "Send Sheli a message on WhatsApp", subtitle: "Text, voice, or a photo — Sheli gets it all" },
       { title: "Just type naturally", subtitle: "\u0022Milk and bread\u0022 and it's on the shopping list. \u0022Remind me tomorrow\u0022 and the reminder is set. No extra apps needed" },
       { title: "Send a voice note on the go", subtitle: "Driving to the store? \u0022Sheli, what's on my list?\u0022 and she answers right away" },
     ],
@@ -119,7 +121,7 @@ const CONTENT = {
       { q: "How does Sheli work?", a: "Sheli is a family task coordination helper on WhatsApp — shopping lists, reminders, chores, calendar and expenses, all in one place. Say \u0022milk\u0022 and it's on the list, say \u0022remind me...\u0022 and she'll remind you on time. Sheli works in private chat and in groups, alone or with everyone in your home. She remembers your style over time: nicknames, regular products, routines." },
       { q: "An app for easy viewing of all your lists", a: "Your shopping list, tasks, reminders, budget and calendar sync in real time, from both WhatsApp and the app \u2014 it doesn't get easier than this!" },
       { q: "How much does it cost?", a: "40 actions per month for free, every month!\nNeed more? Join Sheli Premium — unlimited for just 14.90 \u20AA/month\nor 149 \u20AA for a full year of Sheli Premium (2 months free!)" },
-      { q: "What about privacy?", a: "Sheli stores text messages and short voice messages you send her for 30 days. She doesn't store photos or videos. After 30 days, all data is deleted unless you ask Sheli otherwise. Your data is secure and only you can see it. Nobody else \u2014 including us." },
+      { q: "What about privacy?", a: "Sheli stores text messages and short voice messages you send her for 30 days. Photos you send are read only to extract text \u2014 the image itself isn't stored. Video isn't supported yet. After 30 days, all data is deleted unless you ask Sheli otherwise. Your data is secure and only you can see it. Nobody else \u2014 including us." },
       { q: "How do I start? And stop?", a: "Send Sheli a message on WhatsApp, she starts helping right away. Want everyone at home to join? Add her to a WhatsApp group. Want to stop? Just stop writing. All data is deleted automatically, no strings attached." },
       { q: "Who is Sheli for?", a: "Everyone! Living alone? Sheli manages your shopping, reminders and daily tasks. Roommates? Add her to the apartment group and she'll coordinate who buys, who cleans, everything. Family? Sheli manages the whole household." },
     ],
