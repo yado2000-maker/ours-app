@@ -4945,6 +4945,118 @@ const ITEMS_BASED_TYPES = new Set([
   "name_correction", "expense",
 ]);
 
+// --- Shared CRUD helper used by 1:1 inline dispatch AND group correction handler ---
+// Extracted from execute1on1Actions in Task 1 (update_event/update_reminder plan).
+// Accepts either a direct target_id (authoritative — Sonnet-structured path) OR a
+// fuzzy search string (legacy 1:1 path — Sonnet emits old_text/old_title).
+// Returns {ok, summary, error} so callers can build user-facing replies.
+type CrudAction = {
+  type: "update_event" | "update_reminder" | "update_task" | "update_shopping"
+       | "remove_event" | "remove_reminder" | "remove_task" | "remove_shopping";
+  target_id?: string;
+  old_name?: string; old_text?: string; old_title?: string;
+  name?: string; text?: string; title?: string;
+  new_name?: string; new_text?: string; new_title?: string;
+  new_send_at?: string; new_date?: string; new_time?: string;
+  new_scheduled_for?: string;
+};
+
+async function executeCrudAction(
+  householdId: string,
+  action: CrudAction,
+  logPrefix: string,
+): Promise<{ ok: boolean; summary: string; error?: string }> {
+  const CRUD_MAP: Record<string, { table: string; matchCol: string; activeFilter?: Record<string, any> }> = {
+    update_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
+    update_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
+    update_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
+    update_event:     { table: "events",          matchCol: "title" },
+    remove_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
+    remove_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
+    remove_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
+    remove_event:     { table: "events",          matchCol: "title" },
+  };
+  const cfg = CRUD_MAP[action.type];
+  if (!cfg) return { ok: false, summary: "", error: "unknown_action_type" };
+  const isRemove = action.type.startsWith("remove_");
+
+  // Resolve target row. Prefer direct id (authoritative — Task 2 structured path).
+  let match: { id: string; scheduled_for?: string | null } | null = null;
+  if (action.target_id) {
+    let q = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).eq("id", action.target_id);
+    if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) q = q.eq(k, v);
+    const { data, error } = await q.limit(1).maybeSingle();
+    if (!error && data) match = data as any;
+  }
+  // Fall back to fuzzy match (legacy 1:1 path — Sonnet emits old_text/old_title).
+  if (!match) {
+    const searchText = isRemove
+      ? (action.name || action.text || action.title)
+      : (action.old_name || action.old_text || action.old_title);
+    if (!searchText) return { ok: false, summary: "", error: "no_target" };
+    let exactQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).eq(cfg.matchCol, searchText);
+    if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) exactQ = exactQ.eq(k, v);
+    let { data: exact } = await exactQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!exact) {
+      let fuzzyQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
+      if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fuzzyQ = fuzzyQ.eq(k, v);
+      const { data: fuzzy } = await fuzzyQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+      exact = fuzzy;
+    }
+    match = (exact as any) || null;
+  }
+  if (!match) return { ok: false, summary: "", error: "not_found" };
+
+  if (isRemove) {
+    if (cfg.table === "reminder_queue") {
+      // Soft-cancel: preserve audit trail.
+      const { error: updErr } = await supabase
+        .from(cfg.table)
+        .update({ sent: true, metadata: { cancelled_by_user: true, cancelled_at: new Date().toISOString() } })
+        .eq("id", match.id)
+        .eq("household_id", householdId);
+      if (updErr) { console.error(`${logPrefix} ${action.type} soft-cancel error:`, updErr); return { ok: false, summary: "", error: "db_error" }; }
+    } else {
+      const { error: delErr } = await supabase.from(cfg.table).delete().eq("id", match.id).eq("household_id", householdId);
+      if (delErr) { console.error(`${logPrefix} ${action.type} delete error:`, delErr); return { ok: false, summary: "", error: "db_error" }; }
+    }
+    console.log(`${logPrefix} Removed ${cfg.table}: ${match.id}`);
+    return { ok: true, summary: `בוטלה ${cfg.table === "events" ? "אירוע" : cfg.table === "reminder_queue" ? "תזכורת" : "שורה"}` };
+  }
+
+  // For reminder updates, verify the row is still unsent (activeFilter already checks this,
+  // but an explicit second fetch catches the race where a reminder fired between gather + update).
+  if (cfg.table === "reminder_queue") {
+    const { data: freshRow } = await supabase.from(cfg.table).select("sent").eq("id", match.id).eq("household_id", householdId).maybeSingle();
+    if (freshRow?.sent === true) return { ok: false, summary: "", error: "already_sent" };
+  }
+
+  // UPDATE
+  const updates: Record<string, any> = {};
+  if (action.new_name) updates.name = action.new_name;
+  if (action.new_text) updates[cfg.matchCol] = action.new_text;
+  if (action.new_title) updates.title = action.new_title;
+  if (action.new_send_at) updates.send_at = new Date(action.new_send_at).toISOString();
+  if (action.new_scheduled_for) updates.scheduled_for = new Date(action.new_scheduled_for).toISOString();
+  if (action.new_date) {
+    updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
+  } else if (action.new_time && match.scheduled_for) {
+    const d = new Date(match.scheduled_for);
+    const israelDate = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+    updates.scheduled_for = `${israelDate}T${action.new_time}:00+03:00`;
+  }
+  if (Object.keys(updates).length === 0) return { ok: false, summary: "", error: "no_changes" };
+
+  const { error: updErr } = await supabase
+    .from(cfg.table)
+    .update(updates)
+    .eq("id", match.id)
+    .eq("household_id", householdId);
+  if (updErr) { console.error(`${logPrefix} ${action.type} error:`, updErr); return { ok: false, summary: "", error: "db_error" }; }
+  console.log(`${logPrefix} Updated ${cfg.table}: ${match.id}`);
+  return { ok: true, summary: `עדכנתי ${cfg.table === "events" ? "אירוע" : cfg.table === "reminder_queue" ? "תזכורת" : "שורה"}` };
+}
+
 async function execute1on1Actions(params: {
   raw: string;
   text: string;
@@ -5285,62 +5397,11 @@ async function execute1on1Actions(params: {
           else console.log(`${logPrefix} Expense logged: ${amountMinor} ${currency} "${action.description}" by ${paidBy || "household"}`);
           break;
         }
-        // --- UPDATE / REMOVE actions (table-driven) ---
+        // --- UPDATE / REMOVE actions (delegated to shared helper) ---
         case "update_shopping": case "update_task": case "update_reminder": case "update_event":
         case "remove_shopping": case "remove_task": case "remove_reminder": case "remove_event": {
-          const CRUD_MAP: Record<string, { table: string; matchCol: string; activeFilter?: Record<string, any> }> = {
-            update_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
-            update_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
-            update_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
-            update_event:     { table: "events",          matchCol: "title" },
-            remove_shopping:  { table: "shopping_items",  matchCol: "name",         activeFilter: { got: false } },
-            remove_task:      { table: "tasks",           matchCol: "title",        activeFilter: { done: false } },
-            remove_reminder:  { table: "reminder_queue",  matchCol: "message_text", activeFilter: { sent: false } },
-            remove_event:     { table: "events",          matchCol: "title" },
-          };
-          const cfg = CRUD_MAP[action.type];
-          const isRemove = action.type.startsWith("remove_");
-          // Determine the search text (updates use old_name/old_text/old_title; removes use name/text/title)
-          const searchText = isRemove
-            ? (action.name || action.text || action.title)
-            : (action.old_name || action.old_text || action.old_title);
-          if (!searchText) break;
-          // Find matching row (include scheduled_for for time-only event updates)
-          // Try exact match first, fall back to substring (ilike). Order by most recent to prefer latest.
-          let query = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId);
-          if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) query = query.eq(k, v);
-          // Prefer exact match
-          let { data: match, error: findErr } = await query.eq(cfg.matchCol, searchText).order("created_at", { ascending: false }).limit(1).single();
-          if (!match) {
-            // Fall back to substring match
-            let fallbackQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
-            if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fallbackQ = fallbackQ.eq(k, v);
-            ({ data: match, error: findErr } = await fallbackQ.order("created_at", { ascending: false }).limit(1).single());
-          }
-          if (findErr || !match) { console.warn(`${logPrefix} ${action.type}: not found for "${searchText}"`); break; }
-          if (isRemove) {
-            const { error: delErr } = await supabase.from(cfg.table).delete().eq("id", match.id);
-            if (delErr) console.error(`${logPrefix} ${action.type} error:`, delErr);
-            else console.log(`${logPrefix} Removed ${cfg.table}: "${searchText}"`);
-          } else {
-            // Build update payload
-            const updates: Record<string, any> = {};
-            if (action.new_name) updates.name = action.new_name;
-            if (action.new_text) updates[cfg.matchCol] = action.new_text;
-            if (action.new_title) updates.title = action.new_title;
-            if (action.new_send_at) updates.send_at = new Date(action.new_send_at).toISOString();
-            if (action.new_date) {
-              updates.scheduled_for = `${action.new_date}${action.new_time ? "T" + action.new_time + ":00+03:00" : "T18:00:00+03:00"}`;
-            } else if (action.new_time && match.scheduled_for) {
-              // Time-only update: keep existing date (in Israel timezone), replace time
-              const d = new Date(match.scheduled_for);
-              const israelDate = d.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" }); // YYYY-MM-DD
-              updates.scheduled_for = `${israelDate}T${action.new_time}:00+03:00`;
-            }
-            const { error: updErr } = await supabase.from(cfg.table).update(updates).eq("id", match.id);
-            if (updErr) console.error(`${logPrefix} ${action.type} error:`, updErr);
-            else console.log(`${logPrefix} Updated ${cfg.table}: "${searchText}"`);
-          }
+          if (!householdId) break;
+          await executeCrudAction(householdId, action as CrudAction, logPrefix);
           break;
         }
         default:

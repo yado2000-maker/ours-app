@@ -1812,3 +1812,26 @@ class TestPrivateDmReminders(unittest.TestCase):
                     if p.get("delivery_mode") == "dm"
                     and p.get("recipient_phones") == ["972500000113"]]
         self.assertGreaterEqual(len(upgraded), 1, f"expected upgraded row, got {rows}")
+
+
+# ─── Task 1: executeCrudAction helper regression test ───
+# Baseline: the 1:1 update_shopping path (which drove the extraction) must not
+# regress. Test is skipped until Task 7 deploy — runs in the Task 8 smoke sweep.
+
+@unittest.skip("Task 1 refactor not deployed yet — un-skip in Task 7 smoke sweep")
+class TestCrudHelper(unittest.TestCase):
+    def test_01_update_shopping_still_works_1on1(self):
+        # Sends via the 1:1 DM path to exercise executeCrudAction fuzzy branch.
+        _dm_send("תוסיפי פסטה לרשימה")
+        time.sleep(3)
+        _dm_send("תתקני לפסטה פנה")
+        time.sleep(3)
+        params = {
+            "household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}",
+            "got": "eq.false",
+            "select": "name",
+        }
+        rows = sb_get("shopping_items", params) or []
+        pasta_rows = [r for r in rows if "פסטה" in (r.get("name") or "")]
+        self.assertEqual(len(pasta_rows), 1, f"expected one pasta row, got: {pasta_rows}")
+        self.assertEqual(pasta_rows[0]["name"], "פסטה פנה")
