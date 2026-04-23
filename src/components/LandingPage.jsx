@@ -48,7 +48,7 @@ const CONTENT = {
       { Icon: ChoresFeatureIcon, title: "ניהול משימות ומטלות - גם לילדים!", subtitle: "תור מי לפנות מדיח? ומי אוסף מהחוג? מושלם להורים עסוקים" },
       { Icon: ExpenseFeatureIcon, title: "מעקב הוצאות", subtitle: "\u0022שילמתי 85 על פיצה\u0022 — ושלי רושמת. עוקבת אחרי הוצאות ומעדכנת אתכם כשתרצו" },
       // TODO(design): swap ForwardFeatureIcon → dedicated multi-modal ingestion SVG (camera + mic + arrow) when the designer delivers one. Using ForwardFeatureIcon as the closest existing placeholder.
-      { Icon: ForwardFeatureIcon, title: "שולחים — ושלי קוראת", subtitle: "הודעה שהעבירו אליכם, הקלטה מהדרך, תמונה של קבלה או לוח תורנויות — שלחו לשלי ואני אקרא ואוסיף אוטומטית" },
+      { Icon: ForwardFeatureIcon, title: "שולחים — ושלי קוראת", subtitle: "העבירו אל שלי הודעה ששלחו אליכם, הודעה קולית, תמונה של קבלה או לוח תורנויות — והיא תקרא ותוסיף אוטומטית" },
     ],
     familyTitle: "שלי לכל המשפחה",
     familyItems: [
@@ -61,6 +61,7 @@ const CONTENT = {
       { title: "שלחו הודעה לשלי בווטסאפ", subtitle: "טקסט, הודעה קולית או תמונה — שלי מבינה הכל" },
       { title: "כתבו בעברית פשוטה", subtitle: "\u0022חלב ולחם\u0022 וזה ברשימת הקניות. \u0022תזכירי לי מחר\u0022 והתזכורת מופעלת. בלי אפליקציות מיותרות" },
       { title: "הקליטו מהדרך", subtitle: "בדרך לסופר? \u0022שלי, מה ברשימה היום?\u0022 והיא עונה מיד" },
+      { title: "צלמו במקום להקליד", subtitle: "קבלה מהסופר, רשימת קניות על פתק, לוח תורנויות על המקרר — שלחו תמונה ושלי תקרא ותוסיף" },
     ],
     faqTitle: "שאלות נפוצות",
     faq: [
@@ -102,7 +103,7 @@ const CONTENT = {
       { Icon: ChoresFeatureIcon, title: "Tasks & chores \u2014 for kids too!", subtitle: "Whose turn to empty the dishwasher? Who picks up from practice? Perfect for busy parents" },
       { Icon: ExpenseFeatureIcon, title: "Expense tracking", subtitle: "\u0022I paid 85 for pizza\u0022 — and Sheli logs it. Tracks expenses and updates you when you want" },
       // TODO(design): swap ForwardFeatureIcon → dedicated multi-modal ingestion SVG when available.
-      { Icon: ForwardFeatureIcon, title: "Send anything — Sheli reads it", subtitle: "A forwarded message, a voice note on the go, a photo of a receipt or chore chart — send it to Sheli and I'll read and add it automatically" },
+      { Icon: ForwardFeatureIcon, title: "Send anything — Sheli reads it", subtitle: "Forward Sheli a message someone sent you, a voice note, a photo of a receipt or a chore chart — and she'll read it and add it automatically" },
     ],
     familyTitle: "Sheli for the whole family",
     familyItems: [
@@ -115,6 +116,7 @@ const CONTENT = {
       { title: "Send Sheli a message on WhatsApp", subtitle: "Text, voice, or a photo — Sheli gets it all" },
       { title: "Just type naturally", subtitle: "\u0022Milk and bread\u0022 and it's on the shopping list. \u0022Remind me tomorrow\u0022 and the reminder is set. No extra apps needed" },
       { title: "Send a voice note on the go", subtitle: "Driving to the store? \u0022Sheli, what's on my list?\u0022 and she answers right away" },
+      { title: "Snap it, don't type it", subtitle: "A receipt from the store, a shopping list on paper, a chore chart on the fridge — send a photo and Sheli reads it and adds it" },
     ],
     faqTitle: "FAQ",
     faq: [
