@@ -1539,6 +1539,102 @@ Sheli: "הוספתי 15 ירקות" — forbidden.
 BAD (timid dodge):
 Sheli: "אילו ירקות?" — the user wants a SUGGESTION. Propose first, confirm second.`;
 
+// --- Correction Sonnet (Task 2 of update_event+update_reminder plan) ---
+// Produces structured JSON {action:update|remove|clarify, target_id, ...}
+// used by handleCorrection (Task 3) to dispatch via executeCrudAction.
+type CandidateRow = {
+  id: string;
+  kind: "event" | "reminder";
+  title: string;
+  whenLocal: string;
+};
+
+type SheliActionSummary = {
+  whenLocal: string;
+  text: string;
+};
+
+function buildCorrectionPrompt(
+  correctionText: string,
+  recentContext: Array<{ sender: string; text: string; whenLocal: string }>,
+  candidates: CandidateRow[],
+  recentSheliActions: SheliActionSummary[],
+): string {
+  const contextBlock = recentContext.length
+    ? recentContext.map((m) => "[" + m.whenLocal + "] " + m.sender + ": " + m.text).join("\n")
+    : "(אין הקשר אחרון)";
+  const sheliBlock = recentSheliActions.length
+    ? recentSheliActions.map((s) => "[" + s.whenLocal + "] " + s.text).join("\n")
+    : "(אין פעולות אחרונות)";
+  const candidateBlock = candidates.length
+    ? candidates.map((c) => "[" + c.id + "] " + (c.kind === "event" ? "אירוע" : "תזכורת") + ": \"" + c.title + "\" — " + c.whenLocal).join("\n")
+    : "(אין שורות מועמדות)";
+
+  return "את שלי. המשפחה תיקנה אותך. המטרה שלך: להבין מה הם רוצים לשנות ולהחזיר JSON אחד.\n\n" +
+    "הקשר אחרון (15 דקות):\n" + contextBlock + "\n\n" +
+    "פעולות אחרונות שלך:\n" + sheliBlock + "\n\n" +
+    "שורות מועמדות לעדכון (מקסימום 10):\n" + candidateBlock + "\n\n" +
+    "ההודעה המתקנת: \"" + correctionText + "\"\n\n" +
+    "כללים:\n" +
+    "- target_id חייב להיות מתוך הרשימה. אם לא מזהה — החזירי clarify.\n" +
+    "- new_scheduled_for / new_send_at ב-ISO 8601 עם offset מפורש (+03:00 בקיץ, +02:00 בחורף).\n" +
+    "- כללי רק שדות שבאמת משתנים. null או השמטה = לא לשנות.\n" +
+    "- clarify.ask הוא הטקסט בעברית שיישלח לקבוצה כשאלת הבהרה.\n\n" +
+    "החזירי JSON אחד בלבד, בלי טקסט נוסף. אחד משלושה:\n" +
+    '{"action":"update","target_id":"<id>","target_type":"event"|"reminder","new_scheduled_for":"<iso?>","new_send_at":"<iso?>","new_title":"<str?>","new_text":"<str?>"}\n' +
+    '{"action":"remove","target_id":"<id>","target_type":"event"|"reminder"}\n' +
+    '{"action":"clarify","reason":"<string>","ask":"<Hebrew question>"}';
+}
+
+type CorrectionSonnetResult =
+  | { action: "update"; target_id: string; target_type: "event" | "reminder"; new_scheduled_for?: string; new_send_at?: string; new_title?: string; new_text?: string }
+  | { action: "remove"; target_id: string; target_type: "event" | "reminder" }
+  | { action: "clarify"; reason?: string; ask: string };
+
+async function callCorrectionSonnet(prompt: string): Promise<CorrectionSonnetResult> {
+  // Test hook for Task 2 integration test (test_08 expects malformed fallback).
+  const mock = Deno.env.get("CORRECTION_SONNET_MOCK");
+  if (mock === "malformed") {
+    return { action: "clarify", reason: "mocked_malformed", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+  }
+
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) return { action: "clarify", reason: "no_api_key", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 512,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!res.ok) {
+      console.error("[correctionSonnet] HTTP", res.status, await res.text());
+      return { action: "clarify", reason: "http_error", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+    }
+    const body = await res.json();
+    const raw = (body?.content?.[0]?.text || "").trim();
+    // Strip optional markdown fences (json or bare) that Sonnet sometimes adds.
+    const fenceRegex = new RegExp("^" + "`".repeat(3) + "(?:json)?\\s*|\\s*" + "`".repeat(3) + "$", "g");
+    const jsonStr = raw.replace(fenceRegex, "").trim();
+    const parsed = JSON.parse(jsonStr);
+    if (parsed.action === "update" || parsed.action === "remove" || parsed.action === "clarify") {
+      return parsed as CorrectionSonnetResult;
+    }
+    return { action: "clarify", reason: "unknown_action", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+  } catch (err) {
+    console.error("[correctionSonnet] Parse/fetch error:", err);
+    return { action: "clarify", reason: "parse_error", ask: "לא הצלחתי להבין, תוכלי להגיד שוב?" };
+  }
+}
+
 function buildReplyPrompt(
   classification: ClassificationOutput,
   ctx: ReplyContext,

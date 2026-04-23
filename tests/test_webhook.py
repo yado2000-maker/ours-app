@@ -1835,3 +1835,22 @@ class TestCrudHelper(unittest.TestCase):
         pasta_rows = [r for r in rows if "פסטה" in (r.get("name") or "")]
         self.assertEqual(len(pasta_rows), 1, f"expected one pasta row, got: {pasta_rows}")
         self.assertEqual(pasta_rows[0]["name"], "פסטה פנה")
+
+
+# ─── Tasks 2-4: group-path correction (Sonnet-structured update/remove/clarify) ───
+# All 8 cases stay @pytest.mark.skip until the Edge Function is deployed in Task 7.
+
+@unittest.skip("TestCorrectBotV2 requires deployed Edge Function + CORRECTION_SONNET_MOCK — un-skip in Task 7")
+class TestCorrectBotV2(unittest.TestCase):
+    """Group-path correction with Sonnet-ACTIONS (update/remove/clarify).
+
+    Tests 1-7 use real Sonnet against the live Edge Function with seeded
+    events/reminders under TEST_HOUSEHOLD_ID. Test 8 requires
+    CORRECTION_SONNET_MOCK=malformed set on the function.
+    """
+
+    def test_08_malformed_sonnet_falls_back_to_clarify(self):
+        """Mocked Sonnet JSON parse failure → clarify reply, no DB change."""
+        # Wired as first-written (last-numbered) because it validates the
+        # plumbing exists before any real-Sonnet assertion can run.
+        pass  # Implementation in Task 7 — requires group fixtures from Task 5.
