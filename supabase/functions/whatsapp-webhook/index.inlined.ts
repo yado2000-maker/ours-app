@@ -154,6 +154,12 @@ interface ClassificationOutput {
     // Follow-up turn: when bot's last reply asked "איזו רשימה?", a bare
     // "קניות"/"מטלות"/"הכל" reply resolves to the corresponding target.
     clear_target?: "shopping" | "tasks" | "all" | null;
+    // Private DM reminders (2026-04-22). delivery_mode captures the privacy
+    // modifier from the user's phrasing ("בפרטי"/"גם בפרטי"/"בקבוצה"...).
+    // recipient_names carries named people; phone resolution is Sonnet's job
+    // via PHONE MAPPINGS context (Haiku doesn't see that context).
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_names?: string[];
     raw_text: string;
   };
 }
@@ -183,6 +189,7 @@ interface ReplyContext {
   currentRotations?: Array<{ id: string; title: string; type: string; members: string[]; current_index: number; frequency?: object | null }>;
   recentBotReplies?: string[];
   familyMemories?: string; // Formatted family memories for prompt injection
+  phoneMappings?: string; // Formatted "name → phone" pairs for private DM reminder resolution (2026-04-22)
 }
 
 interface ReplyResult {
@@ -690,6 +697,14 @@ HEBREW PATTERNS:
   - Time-only reminders ("תזכירי לי ב-4 להתקשר") = add_reminder, conf 0.95.
   - Third-person reminders ("תזכירי לאסנת לעשות רשימה") = add_reminder (NOT add_task). reminder_text should include the target name ("אסנת — לעשות רשימה").
   - Multi-reminder in one message ("תזכירי לי ב-4 להתקשר ובעוד שעה לאסוף את הילדים") → classify as add_reminder with FIRST reminder in entities + "needs_conversation_review": true. Sonnet creates both.
+  - PRIVACY MODIFIER: Detect and set entities.delivery_mode:
+      "בפרטי" / "תזכירי לי בפרטי" / "תזכירי לו בפרטי" / "privately" → delivery_mode="dm"
+      "גם בפרטי" / "also privately" / "also in DM" → delivery_mode="both"
+      "בפרטי בלבד" / "רק בפרטי" / "privately only" → delivery_mode="dm"
+      "בקבוצה" / "בקבוצתי" / "במשפחתי" / "בווטסאפ המשותף" / "in the group" → delivery_mode="group"
+      (no privacy phrase) → omit delivery_mode (Sonnet defaults to group)
+  - ROTATION SHORTCUT (set needs_conversation_review=true): "לפי התור" / "בתורות" / "בתורנות" / "תורנות" / "תורנים" / "מתחלפים" / "כל יום ילד אחר" / "כל יום מישהו אחר" / "לפי התורנות" / "מי שהתור שלו" — Sonnet expands to per-member recurring blocks.
+  - RECIPIENT NAMES: Extract named people into entities.recipient_names (array).
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
@@ -903,6 +918,10 @@ EXAMPLES:
 [אבא]: "תזכירי לאמא להביא חלב מחר ב-10" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"אמא — להביא חלב","time_raw":"מחר ב-10","raw_text":"תזכירי לאמא להביא חלב מחר ב-10"}}
 [אמא]: "תזכירי לי לפני השעה 16 לעשות קניות" → {"intent":"add_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"reminder_text":"לעשות קניות","time_raw":"לפני השעה 16","raw_text":"תזכירי לי לפני השעה 16 לעשות קניות"}}
 [אמיתי]: "ותזכיר לאסנת לעשות רשימה לפני 16" → {"intent":"add_reminder","confidence":0.80,"addressed_to_bot":true,"needs_conversation_review":true,"entities":{"reminder_text":"אסנת — לעשות רשימה","time_raw":"לפני 16","raw_text":"ותזכיר לאסנת לעשות רשימה לפני 16"}}
+[ניב]: "תזכירי לי בפרטי לשלם חשבון חשמל בחמישי" → {"intent":"add_reminder","confidence":0.95,"entities":{"reminder_text":"לשלם חשבון חשמל","time_raw":"חמישי","delivery_mode":"dm","recipient_names":["ניב"],"raw_text":"תזכירי לי בפרטי לשלם חשבון חשמל בחמישי"}}
+[ניב]: "תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר" → {"intent":"add_reminder","confidence":0.92,"entities":{"reminder_text":"יונתן — לשטוף כלים","time_raw":"רביעי 7:00","delivery_mode":"both","recipient_names":["יונתן"],"raw_text":"תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר"}}
+[ניב]: "תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7" → {"intent":"add_reminder","confidence":0.85,"needs_conversation_review":true,"entities":{"reminder_text":"לשטוף כלים","time_raw":"כל יום 7:00","delivery_mode":"dm","recipient_names":["הילדים"],"raw_text":"תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7"}}
+[ניב]: "תזכירי ביום חמישי במשפחתי להביא שמיכות" → {"intent":"add_reminder","confidence":0.88,"entities":{"reminder_text":"להביא שמיכות","time_raw":"חמישי","delivery_mode":"group","raw_text":"תזכירי ביום חמישי במשפחתי להביא שמיכות"}}
 [אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
@@ -1538,6 +1557,9 @@ Members: ${memberNames}
 Sender: ${sender}
 ISRAEL CONTEXT: Weekend = Friday + Saturday ONLY. Sunday (יום ראשון) is the first WORK day. Never say "סוף השבוע" for Sunday.
 
+PHONE MAPPINGS (use to fill recipient_phones in private reminders — see REMINDERS section):
+${ctx.phoneMappings || "(no mappings)"}
+
 ACTION JUST TAKEN: ${actionSummary}
 ${stateContext}${antiRepetition}
 
@@ -1639,6 +1661,28 @@ REMINDERS: When intent is add_reminder:
   "תזכירי לי לפני השעה 16 לעשות קניות" → reply "אזכיר לך ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"לעשות קניות","send_at":"<today>T15:00:00+03:00"}-->
   "תזכירי לאסנת לעשות רשימה לפני 16" (after earlier message mentioning "יום רביעי") → reply "אזכיר לאסנת לעשות רשימה יום רביעי ב-15:00, שעה לפני 16:00 ✓" + <!--REMINDER:{"reminder_text":"אסנת — לעשות רשימה","send_at":"<next Wednesday>T15:00:00+03:00"}-->
 
+PRIVATE DELIVERY (2026-04-22):
+If the classifier sets entities.delivery_mode, honor it. Otherwise infer from the user's phrasing:
+  "גם בפרטי" / "also privately" → delivery_mode="both"
+  bare "בפרטי" / "בפרטי בלבד" / "רק בפרטי" → delivery_mode="dm"
+  "בקבוצה" / "במשפחתי" / "בווטסאפ המשותף" → delivery_mode="group" (default)
+  no privacy marker → delivery_mode="group" (omit the field)
+
+Phone resolution — use PHONE MAPPINGS block above (earlier in this prompt):
+- Look up EACH named recipient in PHONE MAPPINGS by name (case-insensitive partial match).
+- If ALL named recipients resolve, emit an extended REMINDER with both fields:
+    <!--REMINDER:{"reminder_text":"...","send_at":"...","delivery_mode":"dm","recipient_phones":["972501111111"]}-->
+  For "both", include BOTH delivery_mode="both" AND the recipient_phones array.
+- If ONE OR MORE recipients are NOT in PHONE MAPPINGS, emit MISSING_PHONES instead of REMINDER:
+    <!--MISSING_PHONES:{"known":[{"name":"יונתן","phone":"972501111111"}],"unknown":["נגה"],"reminder_text":"...","delivery_mode":"dm","send_at_or_recurrence":{"send_at":"2026-04-22T07:00:00+03:00"}}-->
+  The server-side handler decides the fallback UX (refuse single-unknown / degrade rotation to group + tag). Do NOT write your own fallback reply text when emitting MISSING_PHONES — the handler will.
+- If you are emitting a MISSING_PHONES block, your visible reply text can be empty or a short "רגע..." — the handler overrides it.
+
+Examples (assuming PHONE MAPPINGS contains "יונתן → 972501111111"):
+  "תזכירי לי בפרטי לשלם חשמל חמישי ב-10" (sender in PHONE MAPPINGS as "ניב → 972500000100") → reply "אזכיר חמישי ב-10:00 בפרטי ✓" + <!--REMINDER:{"reminder_text":"לשלם חשמל","send_at":"<next Thursday>T10:00:00+03:00","delivery_mode":"dm","recipient_phones":["972500000100"]}-->
+  "תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7" → reply "אזכיר ליונתן רביעי 7:00 גם בפרטי ✓" + <!--REMINDER:{"reminder_text":"יונתן — לשטוף כלים","send_at":"<Wed>T07:00:00+03:00","delivery_mode":"both","recipient_phones":["972501111111"]}-->
+  "תזכירי לנגה בפרטי מחר ב-9" (נגה NOT in PHONE MAPPINGS) → short visible reply (or empty) + <!--MISSING_PHONES:{"known":[],"unknown":["נגה"],"reminder_text":"תזכורת","delivery_mode":"dm","send_at_or_recurrence":{"send_at":"<tomorrow>T09:00:00+03:00"}}-->
+
 RECURRING REMINDERS (2026-04-20 — first-class support):
 Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום ב-X", "כל סוף שבוע", weekly rotations ("בימי א׳ ג׳ ה׳ אריק, ב׳ ד׳ ו׳ עופרי"), daily chores, etc.
 - Days encoding: 0=ראשון (Sunday), 1=שני (Monday), 2=שלישי (Tuesday), 3=רביעי (Wednesday), 4=חמישי (Thursday), 5=שישי (Friday), 6=שבת (Saturday).
@@ -1651,6 +1695,27 @@ Use for repeating patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳",
   "בימי ראשון שלישי וחמישי אריק מפנה את המדיח, עד 15:00" → reply "רשמתי תזכורת קבועה לאריק בימי א׳ ג׳ ה׳ ב-14:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}-->
   "כל יום ב-7 בבוקר ויטמין לילדים" → reply "אזכיר כל יום ב-7:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}-->
 - When user asks for BOTH weekday rotations (e.g. "אריק בימי א׳ ג׳ ה׳, עופרי בימי ב׳ ד׳ ו׳"), emit TWO RECURRING_REMINDER blocks, one per person.
+
+PRIVATE DELIVERY + ROTATION SHORTCUT (2026-04-22):
+- Honor entities.delivery_mode exactly like one-shot reminders (see PRIVATE DELIVERY block above).
+- When delivery_mode is "dm" or "both", add recipient_phones to each RECURRING_REMINDER block:
+    <!--RECURRING_REMINDER:{"reminder_text":"...","days":[3],"time":"07:00","delivery_mode":"dm","recipient_phones":["972501111111"]}-->
+- ROTATION SHORTCUT — When the message contains "לפי התור" / "בתורות" / "בתורנות" / "מתחלפים" / "כל יום ילד אחר" AND the ACTIVE ROTATIONS / CURRENT STATE context has a matching rotation, emit ONE RECURRING_REMINDER PER member. Each block:
+    reminder_text = "<member> — <action>"
+    days = just that one member's days (from the rotation)
+    time = the rotation's time-of-day
+    recipient_phones = [that member's phone from PHONE MAPPINGS]
+    delivery_mode = from the user's phrasing (typically "dm")
+- If ANY rotation member has NO entry in PHONE MAPPINGS, do NOT emit per-member RECURRING_REMINDER blocks. Emit ONE MISSING_PHONES block instead, with send_at_or_recurrence set to the FULL rotation days + time; the server-side handler will slice per member and apply the Option D fallback.
+
+Examples — rotation kids Wed=יונתן (972501111111), Thu=איתן (972502222222), Fri=נגה (972503333333), all mapped:
+  "תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7"
+  reply "אזכיר לכל ילד ב-7:00 בתורו בפרטי ✓"
+  3 RECURRING_REMINDER blocks, one per child with their single day and phone.
+
+Same rotation but נגה MISSING from PHONE MAPPINGS:
+  reply (empty or short — handler writes the fallback)
+  <!--MISSING_PHONES:{"known":[{"name":"יונתן","phone":"972501111111"},{"name":"איתן","phone":"972502222222"}],"unknown":["נגה"],"reminder_text":"לשטוף כלים","delivery_mode":"dm","send_at_or_recurrence":{"days":[3,4,5],"time":"07:00"}}-->
 ${buildDayAnchor()}
 
 ${ctx.familyMemories ? `
@@ -1753,22 +1818,45 @@ async function generateEmojiReply(emoji: string, sender: string): Promise<string
 
 // ─── Reminder Extraction Helpers ───
 
-function extractRemindersFromReply(reply: string): { reminder_text: string; send_at: string }[] {
-  const jsonRegex = /<!--\s*REMINDER\s*:\s*(\{[^}]*\})/g;
-  const reminders: { reminder_text: string; send_at: string }[] = [];
-  let match;
-  while ((match = jsonRegex.exec(reply)) !== null) {
+function extractRemindersFromReply(reply: string): Array<{
+  reminder_text: string;
+  send_at: string;
+  delivery_mode?: "group" | "dm" | "both";
+  recipient_phones?: string[];
+}> {
+  const reminders: Array<{
+    reminder_text: string;
+    send_at: string;
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_phones?: string[];
+  }> = [];
+  for (const m of reply.matchAll(/<!--\s*REMINDER\s*:\s*(\{[^}]*\})/g)) {
     try {
-      const parsed = JSON.parse(match[1]);
-      if (parsed.send_at) reminders.push(parsed);
+      const parsed = JSON.parse(m[1]);
+      if (parsed.send_at) {
+        if (parsed.delivery_mode && !["group", "dm", "both"].includes(parsed.delivery_mode)) {
+          console.warn("[Reminder] Invalid delivery_mode, defaulting to group:", parsed.delivery_mode);
+          delete parsed.delivery_mode;
+        }
+        if (parsed.recipient_phones && !Array.isArray(parsed.recipient_phones)) {
+          console.warn("[Reminder] recipient_phones not an array, dropping:", parsed.recipient_phones);
+          delete parsed.recipient_phones;
+        }
+        reminders.push(parsed);
+      }
     } catch {
-      console.warn("[Reminder] Failed to parse REMINDER block:", match[1]);
+      console.warn("[Reminder] Failed to parse REMINDER block:", m[1]);
     }
   }
   return reminders;
 }
 
-function extractReminderFromReply(reply: string): { reminder_text: string; send_at: string } | null {
+function extractReminderFromReply(reply: string): {
+  reminder_text: string;
+  send_at: string;
+  delivery_mode?: "group" | "dm" | "both";
+  recipient_phones?: string[];
+} | null {
   const all = extractRemindersFromReply(reply);
   return all.length > 0 ? all[0] : null;
 }
@@ -1778,8 +1866,20 @@ function extractReminderFromReply(reply: string): { reminder_text: string; send_
 // for repeating weekly patterns. Parent rows are inserted with recurrence JSONB;
 // the materialize_recurring_reminders() PG function fills the next 7 days of
 // child rows daily via pg_cron.
-function extractRecurringRemindersFromReply(reply: string): Array<{ reminder_text: string; days: number[]; time: string }> {
-  const out: Array<{ reminder_text: string; days: number[]; time: string }> = [];
+function extractRecurringRemindersFromReply(reply: string): Array<{
+  reminder_text: string;
+  days: number[];
+  time: string;
+  delivery_mode?: "group" | "dm" | "both";
+  recipient_phones?: string[];
+}> {
+  const out: Array<{
+    reminder_text: string;
+    days: number[];
+    time: string;
+    delivery_mode?: "group" | "dm" | "both";
+    recipient_phones?: string[];
+  }> = [];
   for (const m of reply.matchAll(/<!--\s*RECURRING_REMINDER\s*:\s*(\{[^}]*\})\s*-*>/g)) {
     try {
       const parsed = JSON.parse(m[1]);
@@ -1788,10 +1888,28 @@ function extractRecurringRemindersFromReply(reply: string): Array<{ reminder_tex
         Array.isArray(parsed.days) && parsed.days.every((d: unknown) => typeof d === "number" && d >= 0 && d <= 6) &&
         typeof parsed.time === "string" && /^\d{1,2}:\d{2}$/.test(parsed.time)
       ) {
+        let deliveryMode: "group" | "dm" | "both" | undefined;
+        if (parsed.delivery_mode) {
+          if (["group", "dm", "both"].includes(parsed.delivery_mode)) {
+            deliveryMode = parsed.delivery_mode;
+          } else {
+            console.warn("[RecurringReminder] Invalid delivery_mode, defaulting to group:", parsed.delivery_mode);
+          }
+        }
+        let recipientPhones: string[] | undefined;
+        if (parsed.recipient_phones !== undefined) {
+          if (Array.isArray(parsed.recipient_phones)) {
+            recipientPhones = parsed.recipient_phones as string[];
+          } else {
+            console.warn("[RecurringReminder] recipient_phones not an array, dropping:", parsed.recipient_phones);
+          }
+        }
         out.push({
           reminder_text: parsed.reminder_text,
           days: parsed.days as number[],
           time: parsed.time,
+          ...(deliveryMode && { delivery_mode: deliveryMode }),
+          ...(recipientPhones && { recipient_phones: recipientPhones }),
         });
       } else {
         console.warn("[RecurringReminder] Invalid RECURRING_REMINDER block shape:", m[1]);
@@ -1822,9 +1940,49 @@ function extractEventsFromReply(
   return events;
 }
 
+// MISSING_PHONES block extractor (2026-04-22). Sonnet emits this when one or
+// more named recipients for a private-delivery reminder are not in PHONE MAPPINGS.
+// The rescue handler then drives the Option D fallback UX (refuse / partial +
+// group fallback) rather than inserting a broken reminder row.
+function extractMissingPhonesFromReply(reply: string): Array<{
+  known: Array<{ name: string; phone: string }>;
+  unknown: string[];
+  reminder_text: string;
+  delivery_mode: "dm" | "both";
+  send_at_or_recurrence: { send_at?: string } | { days: number[]; time: string };
+}> {
+  const out: Array<{
+    known: Array<{ name: string; phone: string }>;
+    unknown: string[];
+    reminder_text: string;
+    delivery_mode: "dm" | "both";
+    send_at_or_recurrence: { send_at?: string } | { days: number[]; time: string };
+  }> = [];
+  // Match until literal `-->` so nested braces inside send_at_or_recurrence don't
+  // truncate the JSON payload. Non-greedy on content, hard stop on HTML-comment close.
+  for (const m of reply.matchAll(/<!--\s*MISSING_PHONES\s*:\s*([\s\S]*?)\s*-->/g)) {
+    const raw = m[1].trim();
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.known) && Array.isArray(parsed.unknown)
+          && typeof parsed.reminder_text === "string"
+          && ["dm", "both"].includes(parsed.delivery_mode)
+          && parsed.send_at_or_recurrence) {
+        out.push(parsed);
+      } else {
+        console.warn("[MissingPhones] Invalid MISSING_PHONES block shape:", raw);
+      }
+    } catch {
+      console.warn("[MissingPhones] Failed to parse MISSING_PHONES block:", raw);
+    }
+  }
+  return out;
+}
+
 function cleanReminderFromReply(reply: string): string {
   return reply
     .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
+    .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
     .replace(/<!--\s*REMINDER[^>]*>/g, "")
@@ -1867,6 +2025,53 @@ function cleanReminderFromReply(reply: string): string {
 // verbs ("אזכיר"/"נזכיר"/"אזכור") + recurring-cadence phrases with a time.
 const COMMITMENT_PHRASE_REGEX = /(?:^|\s|\b)(?:אזכיר|נזכיר|אזכור|אני\s+אזכיר|אני\s+אזכור|I['\u2019]?ll\s+remind|I\s+will\s+remind)(?:\s|$|[.,!?])|(?:יומית|כל\s+יום|כל\s+ערב|כל\s+בוקר|בכל\s+יום|בכל\s+ערב|every\s+day|nightly|daily)\s+ב[-\s]?\d{1,2}/i;
 
+// Resolve free-form Hebrew/English recipient names to phone numbers via
+// whatsapp_member_mapping ilike lookup. Supports shortcuts (הילדים / המשפחה /
+// כולם) by expanding to every household_members.display_name. Names that don't
+// match a mapping row land in `missing` — the caller decides fallback UX.
+async function resolveRecipientNamesToPhones(
+  names: string[],
+  householdId: string,
+): Promise<{
+  resolved: Array<{ name: string; phone: string }>;
+  missing: string[];
+}> {
+  const resolved: Array<{ name: string; phone: string }> = [];
+  const missing: string[] = [];
+
+  const SHORTCUTS = ["הילדים", "המשפחה", "כולם", "כל המשפחה", "כל הילדים"];
+  const expanded: string[] = [];
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (SHORTCUTS.some((s) => trimmed.includes(s))) {
+      const { data: members } = await supabase
+        .from("household_members")
+        .select("display_name")
+        .eq("household_id", householdId);
+      for (const m of (members || []) as Array<{ display_name: string }>) {
+        if (m.display_name) expanded.push(m.display_name);
+      }
+    } else {
+      expanded.push(trimmed);
+    }
+  }
+  const uniqueNames = Array.from(new Set(expanded));
+
+  for (const name of uniqueNames) {
+    const lookupName = name.replace(/s$/i, "");
+    const { data } = await supabase
+      .from("whatsapp_member_mapping")
+      .select("phone_number, member_name")
+      .eq("household_id", householdId)
+      .ilike("member_name", `%${lookupName}%`)
+      .limit(1)
+      .maybeSingle();
+    if (data?.phone_number) resolved.push({ name, phone: data.phone_number });
+    else missing.push(name);
+  }
+  return { resolved, missing };
+}
+
 async function rescueRemindersAndStrip(
   reply: string,
   classification: ClassificationOutput,
@@ -1885,13 +2090,78 @@ async function rescueRemindersAndStrip(
   if (allReminders.length === 0 && classification.intent === "add_reminder") {
     const e = classification.entities;
     if (e?.reminder_text && e?.time_iso) {
-      allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+      const synth: {
+        reminder_text: string;
+        send_at: string;
+        delivery_mode?: "group" | "dm" | "both";
+        recipient_phones?: string[];
+      } = { reminder_text: e.reminder_text, send_at: e.time_iso };
+      if (e.delivery_mode) synth.delivery_mode = e.delivery_mode;
+      allReminders.push(synth);
       console.log(`[ReminderRescue] Haiku entities fallback (no Sonnet REMINDER block): "${e.reminder_text}" @ ${e.time_iso}`);
     }
   }
 
-  for (const reminderData of allReminders) {
+  // Defense-in-depth enrichment (2026-04-22). Sonnet sometimes emits a basic
+  // REMINDER block and omits delivery_mode / recipient_phones even when Haiku
+  // classified "בפרטי"/"גם בפרטי". Merge Haiku entities + resolve names here so
+  // the feature works regardless of which side drops the metadata.
+  //   - delivery_mode: prefer the block's value, fall back to Haiku's entities.
+  //   - recipient_phones: prefer the block, else resolve Haiku's recipient_names,
+  //     else (for dm with no names) self-reference the sender.
+  //   - If ALL named recipients resolve as missing → short-circuit with a refuse
+  //     reply (matches MISSING_PHONES Case 1/3) and skip the insert.
+  let refuseReplyFromEnrichment: string | null = null;
+  const haikuE = classification.entities;
+  const haikuDeliveryMode = haikuE?.delivery_mode;
+  const haikuRecipientNames = haikuE?.recipient_names || [];
+  const enrichedReminders: typeof allReminders = [];
+  for (const r of allReminders) {
+    if (!r.delivery_mode && haikuDeliveryMode) {
+      r.delivery_mode = haikuDeliveryMode;
+    }
+    if ((r.delivery_mode === "dm" || r.delivery_mode === "both")
+        && (!r.recipient_phones || r.recipient_phones.length === 0)) {
+      if (haikuRecipientNames.length > 0) {
+        const { resolved, missing } = await resolveRecipientNamesToPhones(haikuRecipientNames, householdId);
+        if (resolved.length === 0 && missing.length > 0) {
+          // All unknown → refuse (Case 1 or Case 3)
+          if (missing.length === 1) {
+            refuseReplyFromEnrichment = `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`;
+          } else {
+            refuseReplyFromEnrichment = `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+          }
+          console.log(`[ReminderRescue] Enrichment refuse: all ${missing.length} recipient(s) unknown for "${r.reminder_text}"`);
+          continue; // skip this reminder entirely
+        }
+        r.recipient_phones = resolved.map((x) => x.phone);
+        console.log(`[ReminderRescue] Enrichment resolved ${resolved.length} of ${resolved.length + missing.length} recipient(s)`);
+      } else if (r.delivery_mode === "dm" && message.senderPhone) {
+        // Self-reference: "תזכירי לי בפרטי" → sender's own phone
+        r.recipient_phones = [message.senderPhone];
+        console.log(`[ReminderRescue] Self-reference dm → ${message.senderPhone}`);
+      }
+    }
+    enrichedReminders.push(r);
+  }
+
+  if (refuseReplyFromEnrichment && enrichedReminders.length === 0) {
+    // Pure refuse case — no surviving reminders. Short-circuit before insert loop.
+    return refuseReplyFromEnrichment;
+  }
+
+  for (const reminderData of enrichedReminders) {
     if (!reminderData.send_at) continue;
+
+    const deliveryMode = reminderData.delivery_mode || "group";
+    const recipientPhones: string[] | null = reminderData.recipient_phones || null;
+
+    if ((deliveryMode === "dm" || deliveryMode === "both")
+        && (!recipientPhones || recipientPhones.length === 0)) {
+      console.warn(`[ReminderRescue] ${deliveryMode} mode but no recipient_phones — skipping: "${reminderData.reminder_text}"`);
+      continue;
+    }
+
     const { error } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -1901,10 +2171,15 @@ async function rescueRemindersAndStrip(
       reminder_type: "user",
       created_by_phone: message.senderPhone,
       created_by_name: message.senderName,
+      delivery_mode: deliveryMode,
+      recipient_phones: recipientPhones,
     });
     if (error) console.error("[ReminderRescue] Insert error:", error);
     else {
-      console.log(`[ReminderRescue] Saved from direct_address path: "${reminderData.reminder_text}" @ ${reminderData.send_at}`);
+      console.log(
+        `[ReminderRescue] Saved (${deliveryMode}): "${reminderData.reminder_text}" @ ${reminderData.send_at}`
+        + (recipientPhones ? ` → ${recipientPhones.length} recipients` : "")
+      );
       rescueSaveCount++;
     }
   }
@@ -1958,6 +2233,40 @@ async function rescueRemindersAndStrip(
   // the next 7 days of child rows.
   const recurring = extractRecurringRemindersFromReply(reply);
   for (const r of recurring) {
+    // Enrichment (2026-04-22) — same defense-in-depth as REMINDER above. If
+    // Sonnet omitted delivery_mode, inherit from Haiku entities; if dm/both
+    // and recipient_phones missing, resolve via Haiku recipient_names or
+    // self-reference to sender.
+    if (!r.delivery_mode && haikuDeliveryMode) {
+      r.delivery_mode = haikuDeliveryMode;
+    }
+    let recDeliveryMode = r.delivery_mode || "group";
+    let recRecipientPhones: string[] | null = r.recipient_phones || null;
+
+    if ((recDeliveryMode === "dm" || recDeliveryMode === "both")
+        && (!recRecipientPhones || recRecipientPhones.length === 0)) {
+      if (haikuRecipientNames.length > 0) {
+        const { resolved, missing } = await resolveRecipientNamesToPhones(haikuRecipientNames, householdId);
+        if (resolved.length === 0 && missing.length > 0) {
+          if (!refuseReplyFromEnrichment) {
+            refuseReplyFromEnrichment = missing.length === 1
+              ? `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`
+              : `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+          }
+          console.log(`[RecurringReminderRescue] Enrichment refuse: all ${missing.length} recipient(s) unknown`);
+          continue;
+        }
+        recRecipientPhones = resolved.map((x) => x.phone);
+        console.log(`[RecurringReminderRescue] Enrichment resolved ${resolved.length} recipient(s)`);
+      } else if (recDeliveryMode === "dm" && message.senderPhone) {
+        recRecipientPhones = [message.senderPhone];
+        console.log(`[RecurringReminderRescue] Self-reference dm → ${message.senderPhone}`);
+      } else {
+        console.warn(`[RecurringReminderRescue] ${recDeliveryMode} mode but no recipient_phones — skipping: "${r.reminder_text}"`);
+        continue;
+      }
+    }
+
     const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -1969,19 +2278,129 @@ async function rescueRemindersAndStrip(
       created_by_phone: message.senderPhone,
       created_by_name: message.senderName,
       recurrence: { days: r.days, time: r.time },
+      delivery_mode: recDeliveryMode,
+      recipient_phones: recRecipientPhones,
       metadata: { recurring_parent: true, source: "sonnet_rescue" },
     }).select("id").single();
     if (recErr) {
       console.error("[RecurringReminderRescue] Insert error:", recErr);
       continue;
     }
-    console.log(`[RecurringReminderRescue] Parent row created: "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`);
+    console.log(
+      `[RecurringReminderRescue] Parent row created (${recDeliveryMode}): "${r.reminder_text}" days=${JSON.stringify(r.days)} @ ${r.time} (id=${parent?.id})`
+      + (recRecipientPhones ? ` → ${recRecipientPhones.length} recipients` : "")
+    );
     rescueSaveCount++;
     // Immediately materialize the next 7 days so the first instance fires even before
     // the daily cron picks it up. The PG function is idempotent per (parent_id, date).
     const { data: count, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
     if (matErr) console.warn("[RecurringReminderRescue] Immediate materialize failed:", matErr.message);
     else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
+  }
+
+  // If the enrichment pass generated a refuse reply AND nothing was saved,
+  // short-circuit with the refuse text. (recurring path may set this after
+  // the one-shot pass already ran without a refuse.)
+  if (refuseReplyFromEnrichment && rescueSaveCount === 0) {
+    return refuseReplyFromEnrichment;
+  }
+
+  // MISSING_PHONES handler (Option D fallback, 2026-04-22). When Sonnet cannot
+  // resolve every named recipient to a phone via PHONE MAPPINGS, it emits a
+  // MISSING_PHONES block instead of a REMINDER/RECURRING_REMINDER block. This
+  // handler enacts the hybrid Option D policy: refuse single-unknown requests,
+  // degrade rotation-with-missing-phones to group fallback tagged with
+  // metadata.missing_phone_for, and overrides the reply with a transparent
+  // explanation. Early-returns so COMMITMENT-EMISSION check + cleanReminder
+  // don't get a chance to mangle the fallback text.
+  const missingBlocks = extractMissingPhonesFromReply(reply);
+  let missingPhoneFallbackReply: string | null = null;
+
+  for (const block of missingBlocks) {
+    const { known, unknown, reminder_text, delivery_mode, send_at_or_recurrence } = block;
+
+    // Case 1: single unknown, zero known → refuse, no DB row.
+    if (unknown.length === 1 && known.length === 0) {
+      missingPhoneFallbackReply = `אין לי את הטלפון של ${unknown[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`;
+      rescueSaveCount++;
+      continue;
+    }
+
+    // Case 3: all missing, multi-person → refuse listing all, no DB row.
+    if (known.length === 0 && unknown.length > 1) {
+      missingPhoneFallbackReply = `אין לי את מספרי הטלפון של ${unknown.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+      rescueSaveCount++;
+      continue;
+    }
+
+    // Case 2: mixed — insert known as dm, unknown as group-fallback with tag.
+    const isRecurring = "days" in send_at_or_recurrence && "time" in send_at_or_recurrence;
+
+    for (const m of known) {
+      const baseRow: Record<string, unknown> = {
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: reminder_text,
+        sent: isRecurring,
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: delivery_mode,
+        recipient_phones: [m.phone],
+        metadata: { source: "missing_phones_handler", for_member: m.name },
+      };
+      if (isRecurring) {
+        baseRow.send_at = new Date().toISOString();
+        baseRow.sent_at = new Date().toISOString();
+        const rec = send_at_or_recurrence as { days: number[]; time: string };
+        baseRow.recurrence = { days: rec.days, time: rec.time };
+        (baseRow.metadata as Record<string, unknown>).recurring_parent = true;
+      } else {
+        baseRow.send_at = (send_at_or_recurrence as { send_at: string }).send_at;
+      }
+      const { error } = await supabase.from("reminder_queue").insert(baseRow);
+      if (error) console.error(`[MissingPhonesHandler] dm insert error for ${m.name}:`, error);
+      else rescueSaveCount++;
+    }
+
+    for (const u of unknown) {
+      const baseRow: Record<string, unknown> = {
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: `${u} — ${reminder_text}`,
+        sent: isRecurring,
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: "group",
+        recipient_phones: null,
+        metadata: { source: "missing_phones_handler", missing_phone_for: u },
+      };
+      if (isRecurring) {
+        baseRow.send_at = new Date().toISOString();
+        baseRow.sent_at = new Date().toISOString();
+        const rec = send_at_or_recurrence as { days: number[]; time: string };
+        baseRow.recurrence = { days: rec.days, time: rec.time };
+        (baseRow.metadata as Record<string, unknown>).recurring_parent = true;
+      } else {
+        baseRow.send_at = (send_at_or_recurrence as { send_at: string }).send_at;
+      }
+      const { error } = await supabase.from("reminder_queue").insert(baseRow);
+      if (error) console.error(`[MissingPhonesHandler] group-fallback insert error for ${u}:`, error);
+      else rescueSaveCount++;
+    }
+
+    if (isRecurring) {
+      await supabase.rpc("materialize_recurring_reminders");
+    }
+
+    const knownNames = known.map((k) => k.name).join(", ");
+    const unknownNames = unknown.join(", ");
+    missingPhoneFallbackReply = `רשמתי ל${knownNames} בפרטי. ל${unknownNames} אין לי מספר — אזכיר בקבוצה בימים שלו/ה. אם תשלח/י לי פעם אחת הודעה פרטית, אעביר גם אותו/ה לתזכורות פרטיות ✓`;
+  }
+
+  if (missingPhoneFallbackReply) {
+    return missingPhoneFallbackReply;
   }
 
   // COMMITMENT-EMISSION safety net (2026-04-21). If Sonnet's visible reply contains
@@ -5021,6 +5440,24 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       // Refresh the local reference so the rest of this message's processing
       // sees the mapping as present.
       mapping = { household_id: convo.household_id };
+      // Private DM reconciliation (2026-04-22) — a pre-existing household may
+      // have MISSING_PHONES group-fallback reminders tagged for this member.
+      const healedName = (convo.context as Record<string, unknown>)?.name as string | undefined
+        || senderName || null;
+      if (healedName) {
+        try {
+          const { data: upgraded } = await supabase.rpc("upgrade_group_fallback_reminders", {
+            p_household_id: convo.household_id,
+            p_member_name: healedName,
+            p_phone: phone,
+          });
+          if (upgraded && Number(upgraded) > 0) {
+            console.log(`[1:1] Self-heal upgraded ${upgraded} group-fallback reminder(s) to dm for ${healedName}`);
+          }
+        } catch (err) {
+          console.warn("[1:1] upgrade_group_fallback_reminders failed:", (err as Error).message);
+        }
+      }
     }
   }
 
@@ -5407,6 +5844,23 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
   const ambiguousOptions = isAmbiguousName(message.senderName || "");
   const nameAskedAlready = convo.context?.name_spelling_asked === true;
 
+  // PHONE MAPPINGS for private DM reminders (2026-04-22). Only relevant once a
+  // household exists (pre-household users have nobody to DM but themselves).
+  let phoneMappingsStr = "(no mappings)";
+  if (convo.household_id) {
+    const { data: mappings } = await supabase
+      .from("whatsapp_member_mapping")
+      .select("phone_number, member_name")
+      .eq("household_id", convo.household_id);
+    const arr = (mappings || []) as Array<{ member_name: string; phone_number: string }>;
+    if (arr.length > 0) {
+      phoneMappingsStr = arr
+        .filter((m) => m.member_name && m.phone_number)
+        .map((m) => `${m.member_name} → ${m.phone_number}`)
+        .join("\n") || "(no mappings)";
+    }
+  }
+
   // Build context for Sonnet
   const botPhoneDisplay = `+${(Deno.env.get("BOT_PHONE_NUMBER") || "972555175553").replace(/^\+/, "").replace(/^(\d{3})(\d{2})(\d{3})(\d{4})$/, "$1 $2-$3-$4")}`;
   const contextBlock = `
@@ -5420,6 +5874,9 @@ CONVERSATION STATE:
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
+
+PHONE MAPPINGS (use to fill recipient_phones in private reminders — see REMINDERS section):
+${phoneMappingsStr}
 
 ${buildDayAnchor()}
 ${msgCount > 1 ? `
@@ -5624,6 +6081,22 @@ async function handlePersonalChannelMessage(
     const userName = convo?.context?.name || hebrewizeName(senderName) || "";
     const userGender = convo?.context?.gender || null;
 
+    // PHONE MAPPINGS for private DM reminders (2026-04-22).
+    let phoneMappingsStrPersonal = "(no mappings)";
+    {
+      const { data: mappings } = await supabase
+        .from("whatsapp_member_mapping")
+        .select("phone_number, member_name")
+        .eq("household_id", householdId);
+      const arr = (mappings || []) as Array<{ member_name: string; phone_number: string }>;
+      if (arr.length > 0) {
+        phoneMappingsStrPersonal = arr
+          .filter((m) => m.member_name && m.phone_number)
+          .map((m) => `${m.member_name} → ${m.phone_number}`)
+          .join("\n") || "(no mappings)";
+      }
+    }
+
     const botPhoneDisplay = `+${(Deno.env.get("BOT_PHONE_NUMBER") || "972555175553").replace(/^\+/, "").replace(/^(\d{3})(\d{2})(\d{3})(\d{4})$/, "$1 $2-$3-$4")}`;
     const contextBlock = `
 PERSONAL CHANNEL MODE: This user already has Sheli in a group (household: ${householdId}). This 1:1 chat is their personal line. Handle requests normally — shopping, tasks, reminders all work here and go to the shared household. For shared items, gently suggest writing in the group so everyone sees it.
@@ -5634,6 +6107,9 @@ CONVERSATION STATE:
 - User name: ${userName || "unknown"}
 - User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Items collected so far: ${JSON.stringify(existingItems)}
+
+PHONE MAPPINGS (use to fill recipient_phones in private reminders — see REMINDERS section):
+${phoneMappingsStrPersonal}
 
 ${buildDayAnchor()}
 
@@ -7854,16 +8330,26 @@ Deno.serve(async (req: Request) => {
     // "מחר נעמי" → Sonnet helpfully schedules a tomorrow reminder). Previously we only
     // processed+cleaned reminders when intent==add_reminder, which leaked raw JSON to users
     // for other intents. Memory handling already follows this "always process" pattern.
-    const allReminders: { reminder_text: string; send_at: string }[] = reply
-      ? extractRemindersFromReply(reply)
-      : [];
+    //
+    // 2026-04-22: carries delivery_mode + recipient_phones + Haiku-entity enrichment +
+    // all-unknown refuse short-circuit so the private DM reminder feature works on the
+    // actionable path (parallel to rescueRemindersAndStrip on the direct_address_reply path).
+    const extractedReminders = reply ? extractRemindersFromReply(reply) : [];
+    const allReminders: Array<{
+      reminder_text: string;
+      send_at: string;
+      delivery_mode?: "group" | "dm" | "both";
+      recipient_phones?: string[];
+    }> = [...extractedReminders];
 
     // Haiku-entities fallback: only runs for add_reminder intent, since that's the only
     // classification that guarantees reminder_text + time_iso in entities.
     if (allReminders.length === 0 && classification.intent === "add_reminder") {
       const e = classification.entities;
       if (e?.reminder_text && e?.time_iso) {
-        allReminders.push({ reminder_text: e.reminder_text, send_at: e.time_iso });
+        const synth: typeof allReminders[number] = { reminder_text: e.reminder_text, send_at: e.time_iso };
+        if (e.delivery_mode) synth.delivery_mode = e.delivery_mode;
+        allReminders.push(synth);
         console.log(`[Reminder] Sonnet produced no REMINDER block — falling back to Haiku entities`);
         // If Sonnet also produced no visible reply, synthesize a minimal confirmation so the user knows it landed
         if (!reply) {
@@ -7880,8 +8366,51 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    for (const reminderData of allReminders) {
-      if (reminderData.send_at) {
+    // Enrichment pass — merge Haiku entities (delivery_mode + recipient_names) so the
+    // feature works even when Sonnet drops the extended fields. Same logic as in
+    // rescueRemindersAndStrip. Self-reference defaults to sender for dm w/ no names.
+    // If EVERY recipient is unknown, short-circuit with a refuse reply (MISSING_PHONES
+    // Case 1/3 behavior) instead of inserting broken rows.
+    const haikuE_ = classification.entities;
+    const haikuDm_ = haikuE_?.delivery_mode;
+    const haikuNames_ = haikuE_?.recipient_names || [];
+    let refuseReply_: string | null = null;
+    const enrichedReminders_: typeof allReminders = [];
+    for (const r of allReminders) {
+      if (!r.delivery_mode && haikuDm_) r.delivery_mode = haikuDm_;
+      if ((r.delivery_mode === "dm" || r.delivery_mode === "both")
+          && (!r.recipient_phones || r.recipient_phones.length === 0)) {
+        if (haikuNames_.length > 0) {
+          const { resolved, missing } = await resolveRecipientNamesToPhones(haikuNames_, householdId);
+          if (resolved.length === 0 && missing.length > 0) {
+            refuseReply_ = missing.length === 1
+              ? `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`
+              : `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+            console.log(`[Reminder] Enrichment refuse: all ${missing.length} recipient(s) unknown`);
+            continue;
+          }
+          r.recipient_phones = resolved.map((x) => x.phone);
+          console.log(`[Reminder] Enrichment resolved ${resolved.length} recipient(s)`);
+        } else if (r.delivery_mode === "dm" && message.senderPhone) {
+          r.recipient_phones = [message.senderPhone];
+          console.log(`[Reminder] Self-reference dm → ${message.senderPhone}`);
+        }
+      }
+      enrichedReminders_.push(r);
+    }
+
+    if (refuseReply_ && enrichedReminders_.length === 0) {
+      // Pure refuse — replace Sonnet's reply with the explanation, insert nothing.
+      reply = refuseReply_;
+    } else {
+      for (const reminderData of enrichedReminders_) {
+        if (!reminderData.send_at) continue;
+        const dm_ = reminderData.delivery_mode || "group";
+        const rp_: string[] | null = reminderData.recipient_phones || null;
+        if ((dm_ === "dm" || dm_ === "both") && (!rp_ || rp_.length === 0)) {
+          console.warn(`[Reminder] ${dm_} mode but no recipient_phones — skipping`);
+          continue;
+        }
         const { error: remErr } = await supabase.from("reminder_queue").insert({
           household_id: householdId,
           group_id: message.groupId,
@@ -7891,11 +8420,91 @@ Deno.serve(async (req: Request) => {
           reminder_type: "user",
           created_by_phone: message.senderPhone,
           created_by_name: message.senderName,
+          delivery_mode: dm_,
+          recipient_phones: rp_,
         });
         if (remErr) console.error("[Reminder] Insert error:", remErr);
-        else console.log(`[Reminder] Created for ${reminderData.send_at}: "${reminderData.reminder_text}" (intent=${classification.intent})`);
+        else console.log(`[Reminder] Created (${dm_}) for ${reminderData.send_at}: "${reminderData.reminder_text}" (intent=${classification.intent})`);
       }
     }
+    // 13b'. RECURRING_REMINDER (2026-04-22). Sonnet emits for weekly patterns,
+    // rotations, and "כל יום X"-style schedules. Previously only the rescue path
+    // (direct_address_reply) processed these — the actionable path silently
+    // dropped them. Now: extract + enrich + insert parent rows + materialize.
+    // Split-by-phone: when delivery_mode is dm/both and enrichment resolves
+    // MULTIPLE recipient phones (e.g. from "הילדים" shortcut), create one parent
+    // per phone so each member gets their own private dm row.
+    const recurringBlocks = reply ? extractRecurringRemindersFromReply(reply) : [];
+    for (const rec of recurringBlocks) {
+      // Merge Haiku delivery_mode if Sonnet omitted it
+      if (!rec.delivery_mode && haikuDm_) rec.delivery_mode = haikuDm_;
+
+      let recPhones: string[] | null = rec.recipient_phones || null;
+      if ((rec.delivery_mode === "dm" || rec.delivery_mode === "both")
+          && (!recPhones || recPhones.length === 0)) {
+        if (haikuNames_.length > 0) {
+          const { resolved, missing } = await resolveRecipientNamesToPhones(haikuNames_, householdId);
+          if (resolved.length === 0) {
+            if (missing.length > 0 && !refuseReply_) {
+              refuseReply_ = missing.length === 1
+                ? `אין לי את הטלפון של ${missing[0]}. תבקשו ממנו/ה לשלוח לי הודעה פרטית פעם אחת ואז תוכלו לבקש שוב 🙏`
+                : `אין לי את מספרי הטלפון של ${missing.join(", ")}. תבקשו מהם לשלוח לי הודעה פרטית פעם אחת, ואז נסו שוב 🙏`;
+            }
+            continue;
+          }
+          recPhones = resolved.map((x) => x.phone);
+        } else if (rec.delivery_mode === "dm" && message.senderPhone) {
+          recPhones = [message.senderPhone];
+        }
+      }
+
+      // Split-by-phone: one parent per recipient (plan's "ONE RECURRING_REMINDER
+      // PER member" rule applied server-side so Sonnet's shortcut-resolution
+      // still yields per-member rows).
+      const phoneGroups: Array<string[] | null> =
+        (rec.delivery_mode === "dm" || rec.delivery_mode === "both") && recPhones && recPhones.length > 1
+          ? recPhones.map((p) => [p])
+          : [recPhones];
+
+      for (const grp of phoneGroups) {
+        const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
+          household_id: householdId,
+          group_id: message.groupId,
+          message_text: rec.reminder_text,
+          send_at: new Date().toISOString(),
+          sent: true,
+          sent_at: new Date().toISOString(),
+          reminder_type: "user",
+          created_by_phone: message.senderPhone,
+          created_by_name: message.senderName,
+          recurrence: { days: rec.days, time: rec.time },
+          delivery_mode: rec.delivery_mode || "group",
+          recipient_phones: grp,
+          metadata: { recurring_parent: true, source: "actionable_path" },
+        }).select("id").single();
+        if (recErr) {
+          console.error("[RecurringReminder] Insert error:", recErr);
+          continue;
+        }
+        console.log(
+          `[RecurringReminder] Parent (${rec.delivery_mode || "group"}): "${rec.reminder_text}" days=${JSON.stringify(rec.days)} @ ${rec.time} (id=${parent?.id})`
+          + (grp ? ` → ${grp.length} recipient(s)` : "")
+        );
+      }
+    }
+    // Materialize once after all parents are inserted (idempotent per parent+date)
+    if (recurringBlocks.length > 0) {
+      const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
+      if (matErr) console.warn("[RecurringReminder] Immediate materialize failed:", matErr.message);
+      else console.log(`[RecurringReminder] Immediate materialize inserted ${matCount} child row(s)`);
+    }
+
+    // If enrichment (one-shot OR recurring) produced a refuse but no rows got inserted,
+    // override Sonnet's reply with the explanation.
+    if (refuseReply_ && enrichedReminders_.length === 0 && recurringBlocks.length > 0) {
+      reply = refuseReply_;
+    }
+
     // ALWAYS clean hidden REMINDER blocks from reply — defense in depth, never leak JSON to user.
     if (reply) reply = cleanReminderFromReply(reply);
 
@@ -8413,6 +9022,23 @@ async function upsertMemberMapping(householdId: string, phone: string, name: str
       { onConflict: "household_id,phone_number" }
     );
     if (mapErr) console.error("[upsertMemberMapping] Supabase upsert error:", mapErr.message);
+    else {
+      // Private DM reconciliation (2026-04-22). If prior reminders were created
+      // as group fallbacks for this member (MISSING_PHONES Case 2), upgrade them
+      // to dm now that the phone is known.
+      try {
+        const { data: upgraded } = await supabase.rpc("upgrade_group_fallback_reminders", {
+          p_household_id: householdId,
+          p_member_name: name,
+          p_phone: phone,
+        });
+        if (upgraded && Number(upgraded) > 0) {
+          console.log(`[upsertMemberMapping] Upgraded ${upgraded} group-fallback reminder(s) to dm for ${name}`);
+        }
+      } catch (err) {
+        console.warn("[upsertMemberMapping] upgrade_group_fallback_reminders failed:", (err as Error).message);
+      }
+    }
 
     // 2. Auto-add to household_members if not already there (so AI knows the family)
     const { data: existing } = await supabase
@@ -8873,6 +9499,16 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
     }
   }
 
+  // PHONE MAPPINGS for private DM reminders (2026-04-22). Sonnet uses this to
+  // fill recipient_phones when the user names someone for a dm/both reminder.
+  const mappingsArr = (mappingRes.data || []) as Array<{ member_name: string; phone_number: string }>;
+  const phoneMappings = mappingsArr.length === 0
+    ? "(no mappings)"
+    : mappingsArr
+        .filter((m) => m.member_name && m.phone_number)
+        .map((m) => `${m.member_name} → ${m.phone_number}`)
+        .join("\n");
+
   return {
     householdName: household?.name || "הבית",
     members: (membersRes.data || []).map((m) => m.display_name),
@@ -8887,6 +9523,7 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
     })),
     recentBotReplies: (botMsgsRes.data || []).map((m: any) => m.message_text),
     familyMemories,
+    phoneMappings,
   };
 }
 

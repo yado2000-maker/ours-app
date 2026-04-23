@@ -1320,3 +1320,258 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ─── Private DM Reminders (2026-04-22) — Integration Tests ────────────────────
+#
+# Uses unittest (not the TestCase framework above) because these cases need
+# richer DB assertions (delivery_mode, recipient_phones, metadata.missing_phone_for)
+# than check_db_item's ilike-pattern supports.
+#
+# Run: python -m unittest tests.test_webhook.TestPrivateDmReminders -v
+# Prereq: Edge Function deployed with the Task 3-9 changes + drain v4 migration.
+
+import unittest
+
+DM_TEST_HOUSEHOLD_ID = "hh_dm_reminders_test"
+DM_TEST_GROUP_CHAT_ID = "120363888888888888@g.us"
+DM_TEST_SENDER_PHONE = "972500000100"
+DM_TEST_SENDER_NAME = "ניב"
+DM_PHONE_YONATAN = "972500000111"
+DM_PHONE_EITAN = "972500000112"
+
+
+def _dm_reset_household():
+    for table in ["reminder_queue", "tasks", "shopping_items", "events", "whatsapp_messages"]:
+        try:
+            sb_delete(table, {"household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+    for table, params in [
+        ("rotations", {"household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}"}),
+        ("whatsapp_config", {"group_id": f"eq.{DM_TEST_GROUP_CHAT_ID}"}),
+        ("whatsapp_member_mapping", {"household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}"}),
+        ("household_members", {"household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}"}),
+        ("households_v2", {"id": f"eq.{DM_TEST_HOUSEHOLD_ID}"}),
+    ]:
+        try:
+            sb_delete(table, params)
+        except Exception:
+            pass
+
+
+def _dm_create_household():
+    sb_post("households_v2", {"id": DM_TEST_HOUSEHOLD_ID, "name": "DM Test Family", "lang": "he"})
+    sb_post("whatsapp_config", {
+        "group_id": DM_TEST_GROUP_CHAT_ID,
+        "household_id": DM_TEST_HOUSEHOLD_ID,
+        "bot_active": True,
+        "language": "he",
+        "group_message_count": 50,
+    })
+
+
+def _dm_create_member(name, phone=None, gender="male"):
+    sb_post("household_members", {
+        "household_id": DM_TEST_HOUSEHOLD_ID,
+        "display_name": name,
+        "gender": gender,
+    })
+    if phone:
+        sb_post("whatsapp_member_mapping", {
+            "household_id": DM_TEST_HOUSEHOLD_ID,
+            "phone_number": phone,
+            "member_name": name,
+        })
+
+
+def _dm_send(text, msg_id=None):
+    if msg_id is None:
+        msg_id = generate_msg_id("dm")
+    send_webhook(text, msg_id=msg_id, sender_phone=DM_TEST_SENDER_PHONE, group_id=DM_TEST_GROUP_CHAT_ID)
+    time.sleep(5)  # let Sonnet + rescue path complete
+    return msg_id
+
+
+def _dm_fetch_reminders(recurring_only=False):
+    params = {
+        "household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}",
+        "select": "id,message_text,delivery_mode,recipient_phones,recurrence,sent,metadata,send_at",
+        "order": "send_at.desc",
+        "limit": "50",
+    }
+    if recurring_only:
+        params["recurrence"] = "not.is.null"
+    return sb_get("reminder_queue", params)
+
+
+def _dm_poll_bot_reply_text(msg_id, timeout=15):
+    """Return the bot's reply message_text for the most recent bot message
+    in the test group after msg_id was sent. Returns '' if no reply found."""
+    # Poll for any bot reply in test group within timeout window
+    deadline = time.time() + timeout
+    after_iso = datetime.now(timezone.utc).isoformat()
+    # use a slightly-in-past cutoff so our just-sent msg counts
+    after_iso = (datetime.now(timezone.utc) - timedelta(seconds=15)).isoformat()
+    while time.time() < deadline:
+        rows = sb_get("whatsapp_messages", {
+            "group_id": f"eq.{DM_TEST_GROUP_CHAT_ID}",
+            "sender_phone": f"eq.{BOT_PHONE}",
+            "created_at": f"gt.{after_iso}",
+            "select": "message_text,created_at",
+            "order": "created_at.desc",
+            "limit": "1",
+        })
+        if rows:
+            return rows[0].get("message_text") or ""
+        time.sleep(2)
+    return ""
+
+
+@unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
+class TestPrivateDmReminders(unittest.TestCase):
+    """Integration tests — private DM reminders (2026-04-22).
+    Requires deployed Edge Function with fan-out support."""
+
+    @classmethod
+    def setUpClass(cls):
+        _dm_reset_household()
+        _dm_create_household()
+        _dm_create_member(DM_TEST_SENDER_NAME, DM_TEST_SENDER_PHONE, "male")
+        _dm_create_member("יונתן", DM_PHONE_YONATAN, "male")
+        _dm_create_member("איתן", DM_PHONE_EITAN, "male")
+        _dm_create_member("נגה", None, "female")  # intentionally no phone
+
+    @classmethod
+    def tearDownClass(cls):
+        _dm_reset_household()
+
+    def setUp(self):
+        # Clear reminder_queue between tests to isolate assertions
+        try:
+            sb_delete("reminder_queue", {"household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+
+    def test_01_self_dm_reminder(self):
+        _dm_send("תזכירי לי בפרטי לשלם חשבון חמישי ב-10")
+        rows = _dm_fetch_reminders()
+        self.assertGreaterEqual(len(rows), 1, "expected at least one reminder row")
+        dm_rows = [r for r in rows if r.get("delivery_mode") == "dm"]
+        self.assertGreaterEqual(len(dm_rows), 1, f"expected dm row, got {rows}")
+        self.assertEqual(dm_rows[0]["recipient_phones"], [DM_TEST_SENDER_PHONE])
+
+    def test_02_third_person_both(self):
+        _dm_send("תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר")
+        rows = _dm_fetch_reminders()
+        self.assertGreaterEqual(len(rows), 1)
+        both_rows = [r for r in rows if r.get("delivery_mode") == "both"]
+        self.assertGreaterEqual(len(both_rows), 1, f"expected both row, got {rows}")
+        self.assertIn(DM_PHONE_YONATAN, both_rows[0]["recipient_phones"])
+
+    def test_03_rotation_all_mapped(self):
+        # Seed rotation first
+        sb_post("rotations", {
+            "id": f"rot_dm_test_{uuid.uuid4().hex[:8]}",
+            "household_id": DM_TEST_HOUSEHOLD_ID,
+            "title": "שטיפת כלים",
+            "type": "duty",
+            "members": ["יונתן", "איתן"],
+            "current_index": 0,
+            "frequency": {"type": "weekly", "days": ["wed", "thu"]},
+            "active": True,
+        })
+        time.sleep(1)
+        _dm_send("תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7")
+        parents = _dm_fetch_reminders(recurring_only=True)
+        dm_parents = [p for p in parents if p.get("delivery_mode") == "dm"]
+        self.assertGreaterEqual(len(dm_parents), 2, f"expected 2+ dm recurring rows, got {parents}")
+        for p in dm_parents:
+            self.assertIsNotNone(p.get("recipient_phones"))
+            self.assertEqual(len(p["recipient_phones"]), 1)
+
+    def test_04_rotation_missing_phone(self):
+        sb_post("rotations", {
+            "id": f"rot_dm_test_{uuid.uuid4().hex[:8]}",
+            "household_id": DM_TEST_HOUSEHOLD_ID,
+            "title": "שטיפת כלים",
+            "type": "duty",
+            "members": ["יונתן", "איתן", "נגה"],
+            "current_index": 0,
+            "frequency": {"type": "weekly", "days": ["wed", "thu", "fri"]},
+            "active": True,
+        })
+        time.sleep(1)
+        msg_id = _dm_send("תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7")
+        reply = _dm_poll_bot_reply_text(msg_id)
+        self.assertTrue("נגה" in reply or "בקבוצה" in reply,
+                        f"expected fallback mentioning נגה or בקבוצה; got: {reply!r}")
+        parents = _dm_fetch_reminders(recurring_only=True)
+        dm_rows = [p for p in parents if p.get("delivery_mode") == "dm"]
+        group_rows = [p for p in parents
+                      if p.get("delivery_mode") == "group"
+                      and (p.get("metadata") or {}).get("missing_phone_for") == "נגה"]
+        self.assertGreaterEqual(len(dm_rows), 2, f"expected 2+ dm rows, got {parents}")
+        self.assertGreaterEqual(len(group_rows), 1, f"expected 1+ group fallback row, got {parents}")
+
+    def test_05_single_unknown_refuses(self):
+        msg_id = _dm_send("תזכירי לנגה בפרטי מחר ב-9")
+        reply = _dm_poll_bot_reply_text(msg_id)
+        self.assertIn("אין לי את הטלפון של נגה", reply,
+                      f"expected refuse reply mentioning נגה; got: {reply!r}")
+        rows = _dm_fetch_reminders()
+        # No dm rows referencing נגה should be created
+        for r in rows:
+            phones = r.get("recipient_phones") or []
+            self.assertNotIn("נגה", str(r.get("message_text", "")),
+                             f"unexpected row for נגה: {r}")
+
+    def test_06_explicit_group_override(self):
+        _dm_send("תזכירי ביום חמישי במשפחתי להביא שמיכות")
+        rows = _dm_fetch_reminders()
+        self.assertGreaterEqual(len(rows), 1)
+        blanket_row = next((r for r in rows if "שמיכות" in (r.get("message_text") or "")), None)
+        self.assertIsNotNone(blanket_row, f"no row matching 'שמיכות' in {rows}")
+        self.assertEqual(blanket_row.get("delivery_mode") or "group", "group")
+        self.assertIsNone(blanket_row.get("recipient_phones"))
+
+    def test_07_legacy_no_privacy_word(self):
+        _dm_send("תזכירי לי מחר ב-10 להתקשר לסבתא")
+        rows = _dm_fetch_reminders()
+        self.assertGreaterEqual(len(rows), 1)
+        row = next((r for r in rows if "סבתא" in (r.get("message_text") or "")), None)
+        self.assertIsNotNone(row, f"no row matching 'סבתא' in {rows}")
+        self.assertEqual(row.get("delivery_mode") or "group", "group")
+
+    def test_08_reconciliation_on_mapping_add(self):
+        # Seed a group-fallback row for נגה (pass dicts directly — json.dumps causes
+        # double-encoding that stores a JSON string into the jsonb column and breaks
+        # `metadata->>'missing_phone_for'` lookups in the RPC).
+        sb_post("reminder_queue", {
+            "household_id": DM_TEST_HOUSEHOLD_ID,
+            "group_id": DM_TEST_GROUP_CHAT_ID,
+            "message_text": "נגה — לשטוף כלים",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,  # parent
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "delivery_mode": "group",
+            "recurrence": {"days": [5], "time": "07:00"},
+            "metadata": {"recurring_parent": True, "missing_phone_for": "נגה"},
+        })
+        # Add mapping + invoke reconciliation
+        sb_post("whatsapp_member_mapping", {
+            "household_id": DM_TEST_HOUSEHOLD_ID,
+            "phone_number": "972500000113",
+            "member_name": "נגה",
+        })
+        sb_rpc("upgrade_group_fallback_reminders", {
+            "p_household_id": DM_TEST_HOUSEHOLD_ID,
+            "p_member_name": "נגה",
+            "p_phone": "972500000113",
+        })
+        rows = _dm_fetch_reminders(recurring_only=True)
+        upgraded = [p for p in rows
+                    if p.get("delivery_mode") == "dm"
+                    and p.get("recipient_phones") == ["972500000113"]]
+        self.assertGreaterEqual(len(upgraded), 1, f"expected upgraded row, got {rows}")
