@@ -2609,7 +2609,12 @@ async function rescueRemindersAndStrip(
 }
 
 function extractPendingAction(reply: string): { action_type: string; action_data: Record<string, unknown> } | null {
-  const match = reply.match(/<!--PENDING_ACTION:(.*?)-->/);
+  // Bug 9 (2026-04-23): must use [\s\S]*? not .*? — Sonnet sometimes emits multi-line
+  // JSON for nested action_data (e.g. time_slots on create_rotation, אוריאל/הודיה/אביגיל
+  // household incident). `.` doesn't match newlines by default in JS regex, so the
+  // extract silently returned null AND the sibling stripper left the block in the
+  // user-visible reply.
+  const match = reply.match(/<!--PENDING_ACTION:([\s\S]*?)-->/);
   if (!match) return null;
   try {
     return JSON.parse(match[1]);
@@ -2620,7 +2625,8 @@ function extractPendingAction(reply: string): { action_type: string; action_data
 }
 
 function cleanPendingAction(reply: string): string {
-  return reply.replace(/<!--PENDING_ACTION:.*?-->/, "").trim();
+  // See extractPendingAction note — [\s\S]*? matches across newlines.
+  return reply.replace(/<!--PENDING_ACTION:[\s\S]*?-->/, "").trim();
 }
 
 // ─── Memory Extraction Helpers ───
@@ -2650,8 +2656,10 @@ function extractUsedMemory(reply: string): string | null {
 
 function stripMemoryBlocks(reply: string): string {
   return reply
-    .replace(/<!--\s*MEMORY\s*:\s*\{[^}]*\}\s*-->/g, "")
-    .replace(/<!--\s*USED_MEMORY\s*:.*?-->/g, "")
+    // MEMORY JSON body can technically contain nested objects; tolerate both
+    // single-brace and nested shapes. [\s\S]*? is newline-safe. (Bug 9 audit, 2026-04-23.)
+    .replace(/<!--\s*MEMORY\s*:\s*\{[\s\S]*?\}\s*-->/g, "")
+    .replace(/<!--\s*USED_MEMORY\s*:[\s\S]*?-->/g, "")
     .trim();
 }
 
