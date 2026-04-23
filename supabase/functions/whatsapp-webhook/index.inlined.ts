@@ -723,6 +723,16 @@ HEBREW PATTERNS:
 - BARE INFINITIVE + "?" = IGNORE (not add_task, not question-to-answer). Hebrew bare-infinitive questions ("לאסוף את X?", "להביא Y?", "לקנות Z?", "לבשל W?", "לעצור ב-Y?") mean "should I/we [verb]?" — these are family DELIBERATIONS between humans. The speaker is asking a spouse/parent/child for input, NOT Sheli. Sheli has no basis to answer (she doesn't know their schedules, preferences, or external context). Classify as ignore at confidence 0.85. The trailing "?" is decisive — the SAME words WITHOUT "?" can be a task ("לקנות מתנה" = add_task; "לקנות מתנה?" = ignore). Exceptions — keep original intent when: (a) message is EXPLICITLY addressed to שלי/@שלי, (b) starts with an explicit trigger ("תזכירי לי לקנות X?" = add_reminder; "נוסיף חלב?" = add_shopping).
 - "אני [verb]" matching an open task = claim_task
 - Past tense matching open task ("שטפתי כלים") = complete_task
+- CHORE PARAPHRASE MATCHING for complete_task (CRITICAL — household chores have many synonymous verbs; OPEN TASKS titles are authoritative, match them creatively):
+  - Dishwasher cluster — these all describe the SAME chore: "פינה/פיניתי מדיח", "רוקנתי מדיח", "הוצאתי מהמדיח", "סיימתי מדיח", "הדחתי", "פתחתי מדיח", "emptied the dishwasher", "cleared the dishwasher", "unloaded dishwasher". If any open task is about מדיח, match it.
+  - Dishes/sink cluster: "שטפתי כלים", "רחצתי כלים", "הדחתי כלים", "סיימתי כלים", "פיניתי סינק", "ניקיתי סינק", "עשיתי כלים", "did the dishes", "washed the dishes", "finished the dishes", "cleared the sink" all match any open task about כלים/סינק/dishes.
+  - Trash cluster: "הוצאתי זבל", "זרקתי זבל", "פיניתי זבל", "took out the trash", "emptied the trash", "took the trash out" all match any open task about זבל/trash.
+  - Laundry cluster: "תליתי כביסה", "קיפלתי כביסה", "הכנסתי כביסה", "הוצאתי כביסה", "סיימתי כביסה", "גיהצתי", "did the laundry", "folded laundry", "hung laundry" all match any open task about כביסה/גיהוץ/laundry.
+  - Cleaning cluster: "ניקיתי X", "שטפתי X", "סיימתי לנקות X", "סידרתי X", "cleaned X", "tidied X" all match "ניקיון X" / "לנקות X" / "לסדר X" tasks.
+  - Cooking/food cluster: "בישלתי", "הכנתי ארוחה", "סיימתי לבשל", "cooked dinner" match "להכין ארוחה" / "בישול" tasks.
+  - Pickup/errand cluster: "אספתי את X", "הבאתי את X", "לקחתי את X מ-", "picked up X" match "לאסוף X" tasks.
+  Rule: if the message verb+object overlaps an open task by SEMANTIC meaning (same object/area/activity), emit complete_task with that task_id at confidence ≥0.85 — even if the verb is different. When 2+ open tasks could match, pick the best fit; if truly ambiguous, set confidence 0.55-0.65 + needs_conversation_review:true.
+- THIRD-PERSON COMPLETION REPORT ("X עדכן שביצע Y", "X עשה Y", "X סיים Y", "X did Y", "X handled Y") = complete_task against the matching open task. The reporter may not be the doer — still credit the task as done. If Haiku can identify the doer's name, include entities.completed_by_name (optional). Example: "אריק עדכן שפינה את המדיח" → match the dishwasher task. Do NOT classify as ignore just because it's third-person.
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
 - QUOTE-REPLY TO BOT SHOPPING-ADD: When the quoted message is a bot shopping confirmation starting with "🛒 הוספתי..." or listing items bot just added, and the reply says "זה כבר קנינו", "כבר קנינו", "כבר קניתי", "יש לנו בבית", "יש כבר", "לקחתי", "זה יש" → complete_shopping with the items from the QUOTED message. Extract the item names from the quote into entities.items_from_quote (array of names). Do NOT emit add_shopping.
 - QUOTE-REPLY completion ("הושלם", "בוצע", "סיימתי", "טיפלתי") to a bot message listing TASKS = complete_task with all task_ids from the quoted text. Mark ALL tasks in the quote as done unless the reply excludes specific ones.
@@ -888,6 +898,13 @@ EXAMPLES:
 [אבא]: "צריך לקנות מתנה ליום הולדת, לתאם עם המורה, ולשלם חשבון חשמל" → {"intent":"add_task","confidence":0.75,"needs_conversation_review":true,"entities":{"title":"לקנות מתנה ליום הולדת","raw_text":"צריך לקנות מתנה ליום הולדת, לתאם עם המורה, ולשלם חשבון חשמל"}}
 [אבא]: "שטפתי את הכלים" → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"t1a2","raw_text":"שטפתי את הכלים"}}
 [אמא]: "שטפתי כלים" → {"intent":"complete_task","confidence":0.90,"entities":{"raw_text":"שטפתי כלים"}}
+[אריק]: "פיניתי את המדיח" (OPEN TASKS includes {id:"t9x3", title:"להוציא את המדיח"}) → {"intent":"complete_task","confidence":0.92,"entities":{"task_id":"t9x3","raw_text":"פיניתי את המדיח"}}
+[אריק]: "רוקנתי מדיח" (OPEN TASKS includes {id:"t9x3", title:"לרוקן מדיח"}) → {"intent":"complete_task","confidence":0.92,"entities":{"task_id":"t9x3","raw_text":"רוקנתי מדיח"}}
+[עינת]: "אריק עדכן שפינה את המדיח" (OPEN TASKS includes {id:"t9x3", title:"להוציא את המדיח"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"t9x3","completed_by_name":"אריק","raw_text":"אריק עדכן שפינה את המדיח"}}
+[אמא]: "סיימתי את הכלים" (OPEN TASKS includes {id:"k2a7", title:"שטיפת כלים"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"k2a7","raw_text":"סיימתי את הכלים"}}
+[אבא]: "did the dishes" (OPEN TASKS includes {id:"k2a7", title:"שטיפת כלים"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"k2a7","raw_text":"did the dishes"}}
+[נועה]: "הוצאתי זבל" (OPEN TASKS includes {id:"z4b1", title:"להוציא זבל"}) → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"z4b1","raw_text":"הוצאתי זבל"}}
+[יובל]: "קיפלתי את הכביסה" (OPEN TASKS includes {id:"l7c2", title:"כביסה"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"l7c2","raw_text":"קיפלתי את הכביסה"}}
 [אבא]: "לפרוק מדיח" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לפרוק מדיח","raw_text":"לפרוק מדיח"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}
 [אבא]: "תור מי?" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"תור מי?"}}
@@ -1359,6 +1376,9 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
   - Truly unknown gender in 1:1 (name not recognized, no text signal yet): plural fallback until gender is detected.
   - CTA-style imperatives in marketing copy / UI strings to unknown visitors: "הירשמו" / "התחברו" / "נסו".
   - Hebrew has NO plural-for-respect (unlike French "vous"). Plural to one known person = distant, robotic, wrong.
+- SLASH-GENDER FORM — BANNED. NEVER use construct-slash pairs like "את/ה", "תשלח/י", "מתכוון/ת", "משתמש/ת", "יודע/ת", "צריך/ה". They look like a form-field draft, not a warm reply. 2026-04-23 live incident (Einat Netzer group): Sheli replied "לא מצאתי בדיוק למה את/ה מתכוון/ת" — a hardcoded-string leak, but Sonnet must NOT regenerate this pattern in its own replies.
+  - For 1:1 with KNOWN gender: use the gender-locked singular form (see GENDER LOCK rule above).
+  - For groups or unknown gender: use gender-neutral constructions — INFINITIVE ("אפשר לפרט?" not "תוכל/י לפרט?"), IMPERSONAL PASSIVE ("על מה מדובר?" not "למה את/ה מתכוון/ת?"), PLURAL when addressing the whole group ("מה הכוונה?" / "תעדכנו אותי"). The gender-neutral pronouns לך / אותך / איתך / בשבילך are safe in any context.
 - NEVER insert Latin letters mid-Hebrew sentence. Hebrew reply stays Hebrew.
   - Proper nouns that are Latin-native are OK: "WhatsApp", "Google", "API", "Claude", "iCount", URLs.
   - NEVER transliterate a Hebrew word to Latin: write "טכנולוגיה" — NEVER "Technologia" / "technologia" / "giaI" or any Latin fragment.
@@ -8613,9 +8633,31 @@ Deno.serve(async (req: Request) => {
     // Instead, escalate to Sonnet for better entity extraction, or ask for clarification.
     if (actions.length === 0 && ["complete_task", "complete_shopping", "claim_task"].includes(classification.intent)) {
       console.log(`[Webhook] H7: ${classification.intent} with no actionable entities — asking for clarification`);
-      const clarifyMsg = (config.language === "he")
-        ? `לא מצאתי בדיוק למה את/ה מתכוון/ת 🤔 אפשר לפרט?`
-        : `I'm not sure which one you mean 🤔 Can you be more specific?`;
+      let clarifyMsg: string;
+      if (config.language === "he") {
+        if (classification.intent === "complete_task") {
+          // Lexical matcher (isSameTask) misses paraphrases — "פינה את המדיח" won't match
+          // "להוציא את המדיח". Listing the open tasks lets the user pick instead of guess.
+          const { data: openTasks } = await supabase
+            .from("tasks")
+            .select("title")
+            .eq("household_id", householdId)
+            .eq("done", false)
+            .order("created_at", { ascending: true })
+            .limit(10);
+          const titles = (openTasks || []).map((t: { title: string }) => t.title).filter(Boolean);
+          if (titles.length === 0) {
+            clarifyMsg = "אין כרגע מטלות פתוחות 🤔 אפשר לפרט?";
+          } else {
+            const list = titles.map((t: string) => `• ${t}`).join("\n");
+            clarifyMsg = `רגע, על איזו מטלה מדובר? 🤔\nאלה המטלות הפתוחות:\n${list}`;
+          }
+        } else {
+          clarifyMsg = "רגע, לא הבנתי בדיוק — אפשר לפרט? 🤔";
+        }
+      } else {
+        clarifyMsg = "I'm not sure which one you mean 🤔 Can you be more specific?";
+      }
       await sendAndLog(provider, { groupId: message.groupId, text: clarifyMsg }, {
         householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "clarification"
       });
