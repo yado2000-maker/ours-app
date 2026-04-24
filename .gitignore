@@ -53,3 +53,6 @@ SHELI/
 .obsidian/
 recovery_exports/*.txt
 recovery_exports/manifest.json
+
+# Raw WhatsApp chat exports (local scratch)
+Sheli group chats/

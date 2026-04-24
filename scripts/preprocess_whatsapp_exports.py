@@ -35,6 +35,9 @@ KNOWN_GROUPS: dict[str, tuple[str, str]] = {
     "משפחה 🥰": ("120363379191370875@g.us", "hh_cngmjuy9"),
     "משפחת יגלום": ("120363424817327011@g.us", "yg7k2m4x"),
     "משימות": ("120363042618177223@g.us", "hh_apbhifrb"),
+    # Added 2026-04-19 (weekend flood batch):
+    "הקבוצה של שלי": ("120363426336834114@g.us", "hh_ru7u7f1v"),
+    "רומא":         ("120363417763547953@g.us", "hh_4m87fhvn"),
 }
 
 # Files to skip entirely (tests/junk).
