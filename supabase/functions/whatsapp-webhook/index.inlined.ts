@@ -2341,6 +2341,23 @@ async function rescueRemindersAndStrip(
       continue;
     }
 
+    // Bug 1 dedup (2026-04-24): rescue and action-path can both fire on the
+    // same Sonnet reply, producing 34 ms double-inserts. Skip if an identical
+    // reminder was inserted in the last ~2 minutes.
+    const dup = await findDuplicateReminder(
+      message.groupId,
+      reminderData.reminder_text,
+      reminderData.send_at,
+      5,
+      true, // fresh-only — rescue is only 34ms after action-path insert
+    );
+    if (dup) {
+      console.log(
+        `[ReminderRescue] Dedup skip (Bug 1 guard): "${reminderData.reminder_text}" matches existing row ${dup.id}`,
+      );
+      continue;
+    }
+
     const { error } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -3062,6 +3079,67 @@ function isSameTask(a: string, b: string): boolean {
 function isSameEvent(existingTitle: string, newTitle: string, existingDate: string, newDate: string): boolean {
   if (existingDate.slice(0, 10) !== newDate.slice(0, 10)) return false;
   return isSameTask(existingTitle, newTitle);
+}
+
+// Reminder dedup — same group_id, fuzzy-matching text, send_at within window.
+// Used to prevent the 2026-04-24 triple-fire pattern (rescue + action both
+// insert on same Sonnet reply, or user re-asks "וגם את אלה תזכירי?" 49 min later).
+function isSameReminder(
+  aText: string,
+  bText: string,
+  aSendAt: string,
+  bSendAt: string,
+  windowMinutes: number,
+): boolean {
+  if (!aText || !bText || !aSendAt || !bSendAt) return false;
+  const aTs = Date.parse(aSendAt);
+  const bTs = Date.parse(bSendAt);
+  if (!isFinite(aTs) || !isFinite(bTs)) return false;
+  if (Math.abs(aTs - bTs) > windowMinutes * 60 * 1000) return false;
+  return isSameTask(aText, bText);
+}
+
+// Query the DB for any pending reminder in this group with fuzzy-matching text
+// and send_at within ±windowMinutes. `freshOnly=true` restricts to rows
+// created in the last 2 minutes (for the rescue-path 34ms race). Default
+// checks ALL pending rows (covers Bug 2: "already scheduled" short-circuit).
+async function findDuplicateReminder(
+  groupId: string,
+  text: string,
+  sendAt: string,
+  windowMinutes: number,
+  freshOnly: boolean = false,
+): Promise<{ id: string; message_text: string; send_at: string } | null> {
+  try {
+    if (!groupId || !text || !sendAt) return null;
+    const sendAtTs = Date.parse(sendAt);
+    if (!isFinite(sendAtTs)) return null;
+    const lo = new Date(sendAtTs - windowMinutes * 60 * 1000).toISOString();
+    const hi = new Date(sendAtTs + windowMinutes * 60 * 1000).toISOString();
+    let q = supabase
+      .from("reminder_queue")
+      .select("id, message_text, send_at, created_at")
+      .eq("group_id", groupId)
+      .eq("sent", false)
+      .gte("send_at", lo)
+      .lte("send_at", hi)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (freshOnly) {
+      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      q = q.gte("created_at", twoMinAgo);
+    }
+    const { data } = await q;
+    if (!data || data.length === 0) return null;
+    for (const row of data) {
+      if (isSameTask(row.message_text || "", text)) {
+        return { id: row.id, message_text: row.message_text, send_at: row.send_at };
+      }
+    }
+    return null;
+  } catch (_e) {
+    return null;
+  }
 }
 
 // ─── Conversation Context Fetcher ───
@@ -5153,9 +5231,26 @@ async function execute1on1Actions(params: {
             ? new Date(action.send_at).toISOString()
             : parseReminderTime(action.time || "");
           if (sendAt) {
+            // Bug 2 dedup (2026-04-24): user re-asks "וגם את אלה תזכירי?"
+            // minutes or hours later → Haiku re-classifies as fresh add_reminder
+            // with identical entities. Skip if an equivalent pending row exists.
+            const groupIdForDm = phone + "@s.whatsapp.net";
+            const dup = await findDuplicateReminder(
+              groupIdForDm,
+              action.text || "",
+              sendAt,
+              15, // ±15 min window for "already scheduled" short-circuit
+              false, // check ALL pending, not just fresh
+            );
+            if (dup) {
+              console.log(
+                `${logPrefix} Reminder dedup skip (Bug 2 guard): "${action.text}" matches existing row ${dup.id}`,
+              );
+              break;
+            }
             const { error: remErr } = await supabase.from("reminder_queue").insert({
               household_id: householdId,
-              group_id: phone + "@s.whatsapp.net",
+              group_id: groupIdForDm,
               message_text: action.text || "",
               send_at: sendAt,
               sent: false,
@@ -9406,6 +9501,22 @@ Deno.serve(async (req: Request) => {
           console.warn(`[Reminder] ${dm_} mode but no recipient_phones — skipping`);
           continue;
         }
+        // Bug 1 & 2 dedup (2026-04-24): check ALL pending (±15 min, fuzzy text)
+        // for this chat. Covers rescue+action double-insert AND "already
+        // scheduled" short-circuit when user re-asks the same reminder later.
+        const dup_ = await findDuplicateReminder(
+          message.groupId,
+          reminderData.reminder_text,
+          reminderData.send_at,
+          15,
+          false,
+        );
+        if (dup_) {
+          console.log(
+            `[Reminder] Dedup skip: "${reminderData.reminder_text}" matches existing row ${dup_.id}`,
+          );
+          continue;
+        }
         const { error: remErr } = await supabase.from("reminder_queue").insert({
           household_id: householdId,
           group_id: message.groupId,
@@ -11660,6 +11771,58 @@ async function handleCorrection(
   householdId: string,
   provider: WhatsAppProvider,
 ): Promise<void> {
+  // 0. Bulk-correction short-circuit (2026-04-24 Bug 3, Adi incident).
+  // Phrases like "מחקי הכל", "עשית בלגן", "התחילי מחדש", "תבטלי הכל"
+  // implicitly reference every pending reminder in this chat — not a single
+  // target_id. The per-target Sonnet undo path leaves 7-of-8 rows alive.
+  // Solution: soft-cancel every pending reminder in this chat's recent window
+  // (last 2h of creation) BEFORE falling through to the normal flow.
+  const rawUserText = (message.text || "").toLowerCase();
+  const bulkPhrases = [
+    "מחקי הכל",
+    "תמחקי הכל",
+    "בטלי הכל",
+    "תבטלי הכל",
+    "עשית בלגן",
+    "עשית בלאגן",
+    "התחילי מחדש",
+    "תתחילי מחדש",
+    "נקי הכל",
+    "תנקי הכל",
+  ];
+  const isBulk = bulkPhrases.some((p) => rawUserText.includes(p));
+  if (isBulk) {
+    try {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const { data: stale } = await supabase
+        .from("reminder_queue")
+        .select("id")
+        .eq("group_id", message.groupId)
+        .eq("sent", false)
+        .gte("created_at", twoHoursAgo);
+      const staleIds = (stale || []).map((r: { id: string }) => r.id);
+      if (staleIds.length > 0) {
+        const { error: cancelErr } = await supabase
+          .from("reminder_queue")
+          .update({
+            sent: true,
+            sent_at: new Date().toISOString(),
+            metadata: { superseded_reason: "bulk_correction_2026_04_24" },
+          })
+          .in("id", staleIds);
+        if (cancelErr) {
+          console.error("[Correction][Bulk] Soft-cancel error:", cancelErr);
+        } else {
+          console.log(`[Correction][Bulk] Soft-cancelled ${staleIds.length} pending reminders in ${message.groupId}`);
+        }
+      } else {
+        console.log(`[Correction][Bulk] No pending rows in last 2h for ${message.groupId}`);
+      }
+    } catch (bulkErr) {
+      console.error("[Correction][Bulk] Exception:", bulkErr);
+    }
+  }
+
   // 1. Find the bot action being corrected.
   // Prefer title-aware lookup when correction_text references a specific item;
   // fall back to last-5-min most-recent. Bug 3 root cause (Roi 2026-04-23):

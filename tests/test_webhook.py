@@ -1812,3 +1812,196 @@ class TestPrivateDmReminders(unittest.TestCase):
                     if p.get("delivery_mode") == "dm"
                     and p.get("recipient_phones") == ["972500000113"]]
         self.assertGreaterEqual(len(upgraded), 1, f"expected upgraded row, got {rows}")
+
+
+# ─── Reminder Triple-Fire Dedup (2026-04-24) — Integration Tests ──────────────
+#
+# Covers three bugs from docs/plans/2026-04-24-reminder-triple-fire-handoff.md:
+#   Bug 1 — rescueRemindersAndStrip + action-path both INSERT on same Sonnet reply
+#   Bug 2 — "וגם את אלה תזכירי?" 49 min later inserts duplicate rows
+#   Bug 3 — handleCorrection v2 only cancels single target_id on bulk correction
+#
+# Run: python -m unittest tests.test_webhook.TestReminderDedup -v
+
+DEDUP_HOUSEHOLD_ID = "hh_reminder_dedup_test"
+DEDUP_SENDER_PHONE = "972500000200"
+DEDUP_SENDER_NAME = "עדי-טסט"
+DEDUP_DM_CHAT_ID = f"{DEDUP_SENDER_PHONE}@s.whatsapp.net"
+# The 1:1 path stores `group_id` as the bare phone in whatsapp_messages
+# but as the full JID in reminder_queue. Reset covers both shapes.
+
+
+def _dedup_reset_household():
+    for table in ["reminder_queue", "tasks", "shopping_items", "events", "whatsapp_messages"]:
+        try:
+            sb_delete(table, {"household_id": f"eq.{DEDUP_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+    for table, params in [
+        ("onboarding_conversations", {"phone": f"eq.{DEDUP_SENDER_PHONE}"}),
+        ("whatsapp_member_mapping", {"household_id": f"eq.{DEDUP_HOUSEHOLD_ID}"}),
+        ("household_members", {"household_id": f"eq.{DEDUP_HOUSEHOLD_ID}"}),
+        ("households_v2", {"id": f"eq.{DEDUP_HOUSEHOLD_ID}"}),
+    ]:
+        try:
+            sb_delete(table, params)
+        except Exception:
+            pass
+
+
+def _dedup_create_household():
+    sb_post("households_v2", {"id": DEDUP_HOUSEHOLD_ID, "name": "Dedup Test Family", "lang": "he"})
+    sb_post("household_members", {
+        "household_id": DEDUP_HOUSEHOLD_ID,
+        "display_name": DEDUP_SENDER_NAME,
+        "gender": "female",
+    })
+    sb_post("whatsapp_member_mapping", {
+        "household_id": DEDUP_HOUSEHOLD_ID,
+        "phone_number": DEDUP_SENDER_PHONE,
+        "member_name": DEDUP_SENDER_NAME,
+    })
+    sb_post("onboarding_conversations", {
+        "phone": DEDUP_SENDER_PHONE,
+        "state": "chatting",
+        "household_id": DEDUP_HOUSEHOLD_ID,
+        "message_count": 10,
+        "nudge_count": 0,
+        "tried_capabilities": ["reminder"],
+        "context": json.dumps({"name": DEDUP_SENDER_NAME, "gender": "female"}),
+    })
+
+
+def _dedup_send(text, msg_id=None):
+    if msg_id is None:
+        msg_id = generate_msg_id("dedup")
+    # 1:1 path — chat_id = phone@s.whatsapp.net. This is the code path Adi hit.
+    send_webhook(text, msg_id=msg_id, sender_phone=DEDUP_SENDER_PHONE, group_id=DEDUP_DM_CHAT_ID)
+    time.sleep(8)
+    return msg_id
+
+
+def _dedup_fetch_reminders(pending_only=True):
+    params = {
+        "household_id": f"eq.{DEDUP_HOUSEHOLD_ID}",
+        "select": "id,message_text,send_at,sent,delivery_mode,recipient_phones,metadata,created_at",
+        "order": "created_at.desc",
+        "limit": "50",
+    }
+    if pending_only:
+        params["sent"] = "eq.false"
+    return sb_get("reminder_queue", params)
+
+
+def _dedup_poll_bot_reply(after_iso, timeout=20):
+    deadline = time.time() + timeout
+    # 1:1 messages: whatsapp_messages.group_id stores bare phone (see CLAUDE.md
+    # "group_id format mismatch"). Poll for bot replies in that DM thread.
+    while time.time() < deadline:
+        rows = sb_get("whatsapp_messages", {
+            "group_id": f"eq.{DEDUP_SENDER_PHONE}",
+            "sender_phone": f"eq.{BOT_PHONE}",
+            "created_at": f"gt.{after_iso}",
+            "select": "message_text,created_at",
+            "order": "created_at.desc",
+            "limit": "3",
+        })
+        if rows:
+            return rows[0].get("message_text") or ""
+        time.sleep(2)
+    return ""
+
+
+@unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
+class TestReminderDedup(unittest.TestCase):
+    """Integration tests — reminder triple-fire dedup (2026-04-24).
+    Covers Bugs 1/2/3 from the handoff doc. Requires deployed Edge Function."""
+
+    @classmethod
+    def setUpClass(cls):
+        _dedup_reset_household()
+        _dedup_create_household()
+
+    @classmethod
+    def tearDownClass(cls):
+        _dedup_reset_household()
+
+    def setUp(self):
+        try:
+            sb_delete("reminder_queue", {"household_id": f"eq.{DEDUP_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+
+    def test_A_single_message_single_row_per_reminder(self):
+        """Bug 1 — one message with 4 reminders → exactly 4 rows (not 8).
+        Under today's code, rescue + action both INSERT so we see 8."""
+        _dedup_send("תזכירי לי מחר: ביס ב-8, חיסון ב-9, אוריאל ב-10, פירות ב-11")
+        time.sleep(3)
+        rows = _dedup_fetch_reminders(pending_only=True)
+        # Each reminder = 1 row. 4 reminders total. Under bug, each duplicated → 8.
+        self.assertLessEqual(
+            len(rows), 5,
+            f"expected ≤5 rows (4 reminders + slop), got {len(rows)} — Bug 1 likely present. rows={rows}"
+        )
+        self.assertGreaterEqual(
+            len(rows), 3,
+            f"expected ≥3 rows (4 reminders, allowing 1 slop), got {len(rows)}. rows={rows}"
+        )
+
+    def test_B_re_ask_does_not_duplicate(self):
+        """Bug 2 — user re-asks 'וגם את אלה תזכירי?' → no new rows, just acknowledge."""
+        _dedup_send("תזכירי לי מחר: ביס ב-8, חיסון ב-9")
+        time.sleep(4)
+        initial_rows = _dedup_fetch_reminders(pending_only=True)
+        initial_count = len(initial_rows)
+        self.assertGreaterEqual(initial_count, 1, f"setup failed: no initial reminders. rows={initial_rows}")
+
+        after_iso = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+        _dedup_send("וגם את אלה תזכירי?")
+        time.sleep(4)
+        final_rows = _dedup_fetch_reminders(pending_only=True)
+        self.assertEqual(
+            len(final_rows), initial_count,
+            f"Bug 2: re-ask created {len(final_rows) - initial_count} duplicate rows. "
+            f"initial={initial_count}, final={len(final_rows)}, rows={final_rows}"
+        )
+        reply = _dedup_poll_bot_reply(after_iso, timeout=15)
+        # Bot should acknowledge existing — common Hebrew words for "already"/"scheduled".
+        self.assertTrue(
+            any(kw in reply for kw in ["כבר", "רשום", "רשמתי", "קיים"]),
+            f"expected acknowledgement reply with כבר/רשום/רשמתי/קיים; got: {reply!r}"
+        )
+
+    def test_C_bulk_correction_cancels_all_today(self):
+        """Bug 3 — 'עשית בלגן, מחקי הכל' must soft-cancel every pending today row."""
+        _dedup_send("תזכירי לי היום: ביס ב-14, חיסון ב-15, אוריאל ב-16")
+        time.sleep(4)
+        initial_rows = _dedup_fetch_reminders(pending_only=True)
+        self.assertGreaterEqual(
+            len(initial_rows), 2,
+            f"setup failed: need ≥2 pending rows to test bulk cancel. rows={initial_rows}"
+        )
+
+        _dedup_send("עשית בלגן, מחקי הכל")
+        time.sleep(5)
+        pending_after = _dedup_fetch_reminders(pending_only=True)
+        # Exclude any row created by the correction itself (a "redo" replacement batch).
+        # Bug 3 success = every row that existed BEFORE the correction is now sent=true + superseded.
+        initial_ids = {r["id"] for r in initial_rows}
+        still_pending_from_initial = [r for r in pending_after if r["id"] in initial_ids]
+        self.assertEqual(
+            len(still_pending_from_initial), 0,
+            f"Bug 3: {len(still_pending_from_initial)} of the {len(initial_rows)} original rows "
+            f"were NOT soft-cancelled. survivors={still_pending_from_initial}"
+        )
+
+    def test_D_rescue_plus_action_dedups(self):
+        """Bug 1 (variant) — single short reminder 'פירות 8:30' emits REMINDER block
+        AND the action-path fires. Expect 1 row, not 2."""
+        _dedup_send("תזכירי לי פירות מחר ב-8:30")
+        time.sleep(4)
+        rows = _dedup_fetch_reminders(pending_only=True)
+        self.assertEqual(
+            len(rows), 1,
+            f"Bug 1 (rescue+action): expected exactly 1 row for 'פירות 8:30', got {len(rows)}. rows={rows}"
+        )
