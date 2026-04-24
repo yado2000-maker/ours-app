@@ -6608,6 +6608,50 @@ async function handlePersonalChannelMessage(
     // Log incoming message AFTER history fetch (prevents duplicate in Sonnet context)
     await logMessage(message, "received_1on1_personal", householdId);
 
+    // ─── Bulk-correction short-circuit (Bug 3, 2026-04-24) ───
+    // Adi incident: "עשית בלגן שלי, מחקי הכל" in 1:1 left 7 of 8 stale reminders
+    // alive because handleCorrection (group-only path + Haiku correct_bot whitelist)
+    // never fires here. Detect bulk-delete phrases pre-classifier and soft-cancel
+    // every pending reminder for this chat created in the last 2h.
+    {
+      const bulkPhrases = [
+        "מחקי הכל", "תמחקי הכל", "בטלי הכל", "תבטלי הכל",
+        "עשית בלגן", "עשית בלאגן", "התחילי מחדש", "תתחילי מחדש",
+        "נקי הכל", "תנקי הכל",
+      ];
+      if (bulkPhrases.some((p) => text.includes(p))) {
+        try {
+          const cutoffIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+          const groupIdForDm = `${phone}@s.whatsapp.net`;
+          const { data: stale } = await supabase
+            .from("reminder_queue")
+            .select("id")
+            .eq("group_id", groupIdForDm)
+            .eq("sent", false)
+            .gte("created_at", cutoffIso);
+          const ids = (stale || []).map((r: { id: string }) => r.id);
+          if (ids.length > 0) {
+            await supabase
+              .from("reminder_queue")
+              .update({
+                sent: true,
+                sent_at: new Date().toISOString(),
+                metadata: { superseded_reason: "bulk_correction_2026_04_24" },
+              })
+              .in("id", ids);
+            console.log(`[1:1] Bulk-correction soft-cancelled ${ids.length} reminder(s) for ${phone}`);
+            await sendAndLog(prov, message.groupId, "מחקתי את כל התזכורות של השעה-שעתיים האחרונות. תכתבי לי מחדש מה לשים 🙏", {
+              householdId, replyTo: message.messageId, replyType: "bulk_correction_reply",
+              senderPhone: phone, senderName,
+            });
+            return;
+          }
+        } catch (err) {
+          console.error("[1:1] bulk-correction short-circuit failed:", (err as Error).message);
+        }
+      }
+    }
+
     const convo = convoRes.data;
     const userName = convo?.context?.name || hebrewizeName(senderName) || "";
     const userGender = convo?.context?.gender || null;
