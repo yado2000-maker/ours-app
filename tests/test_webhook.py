@@ -2015,3 +2015,288 @@ class TestReminderDedup(unittest.TestCase):
             len(rows), 1,
             f"Bug 1 (rescue+action): expected exactly 1 row for 'פירות 8:30', got {len(rows)}. rows={rows}"
         )
+
+
+# ─── Task 1: executeCrudAction helper regression test ───
+# Baseline: the 1:1 update_shopping path (which drove the extraction) must not
+# regress. Test is skipped until Task 7 deploy — runs in the Task 8 smoke sweep.
+
+@unittest.skip("Task 1 refactor not deployed yet — un-skip in Task 7 smoke sweep")
+class TestCrudHelper(unittest.TestCase):
+    def test_01_update_shopping_still_works_1on1(self):
+        # Sends via the 1:1 DM path to exercise executeCrudAction fuzzy branch.
+        _dm_send("תוסיפי פסטה לרשימה")
+        time.sleep(3)
+        _dm_send("תתקני לפסטה פנה")
+        time.sleep(3)
+        params = {
+            "household_id": f"eq.{DM_TEST_HOUSEHOLD_ID}",
+            "got": "eq.false",
+            "select": "name",
+        }
+        rows = sb_get("shopping_items", params) or []
+        pasta_rows = [r for r in rows if "פסטה" in (r.get("name") or "")]
+        self.assertEqual(len(pasta_rows), 1, f"expected one pasta row, got: {pasta_rows}")
+        self.assertEqual(pasta_rows[0]["name"], "פסטה פנה")
+
+
+# ─── Tasks 2-4: group-path correction (Sonnet-structured update/remove/clarify) ───
+# All 8 cases stay @pytest.mark.skip until the Edge Function is deployed in Task 7.
+
+# ─── TestCorrectBotV2 fixtures + helpers ───
+
+TEST_PHONE_1 = TEST_PHONE  # reuse the authorized test phone
+# Distinct fake group ids so each test seeds under its own household row.
+TEST_GROUP_1 = "120363900000000001@g.us"
+TEST_GROUP_2 = "120363900000000002@g.us"
+TEST_GROUP_3 = "120363900000000003@g.us"
+TEST_GROUP_4 = "120363900000000004@g.us"
+TEST_GROUP_5 = "120363900000000005@g.us"
+TEST_GROUP_6 = "120363900000000006@g.us"
+TEST_GROUP_7 = "120363900000000007@g.us"
+TEST_GROUP_8 = "120363900000000008@g.us"
+
+
+def send_group_message(group_id, phone, text):
+    return send_webhook(text, sender_phone=phone, group_id=group_id)
+
+
+def fetch_household_for_group(group_id):
+    rows = sb_get("whatsapp_config", {
+        "group_id": f"eq.{group_id}",
+        "select": "household_id",
+        "limit": "1",
+    }) or []
+    return rows[0]["household_id"] if rows else None
+
+
+def fetch_events_for_group(group_id, since_minutes=5):
+    hhid = fetch_household_for_group(group_id)
+    if not hhid:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).isoformat()
+    rows = sb_get("events", {
+        "household_id": f"eq.{hhid}",
+        "created_at": f"gte.{since}",
+        "select": "id,title,scheduled_for,created_at",
+        "order": "created_at.desc",
+    }) or []
+    return rows
+
+
+def fetch_reminders_for_group(group_id, since_minutes=5):
+    hhid = fetch_household_for_group(group_id)
+    if not hhid:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(minutes=since_minutes)).isoformat()
+    rows = sb_get("reminder_queue", {
+        "household_id": f"eq.{hhid}",
+        "created_at": f"gte.{since}",
+        "select": "id,message_text,send_at,sent,sent_at,created_at",
+        "order": "created_at.desc",
+    }) or []
+    return rows
+
+
+def fetch_bot_replies(group_id, since_seconds=10):
+    since = (datetime.now(timezone.utc) - timedelta(seconds=since_seconds)).isoformat()
+    rows = sb_get("whatsapp_messages", {
+        "group_id": f"eq.{log_lookup_id(group_id)}",
+        "sender_phone": f"eq.{BOT_PHONE}",
+        "created_at": f"gte.{since}",
+        "select": "message_text,created_at,classification",
+        "order": "created_at.desc",
+    }) or []
+    return rows
+
+
+def israel_time_hhmm(iso_str):
+    d = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    il = d.astimezone(timezone(timedelta(hours=3)))  # IDT approximation, fine for HH:MM assertions
+    return il.strftime("%H:%M")
+
+
+def minutes_ago_iso(n):
+    return (datetime.now(timezone.utc) - timedelta(minutes=n)).isoformat()
+
+
+def insert_reminder_direct(hhid, group_id, text, send_at_iso, sent=False, sent_at_iso=None):
+    reminder_id = str(uuid.uuid4())
+    row = {
+        "id": reminder_id,
+        "household_id": hhid,
+        "group_id": group_id,
+        "message_text": text,
+        "send_at": send_at_iso,
+        "sent": sent,
+        "reminder_type": "user",
+    }
+    if sent_at_iso:
+        row["sent_at"] = sent_at_iso
+    sb_post("reminder_queue", row)
+    return reminder_id
+
+
+def fetch_reminder_by_id(reminder_id):
+    rows = sb_get("reminder_queue", {
+        "id": f"eq.{reminder_id}",
+        "select": "id,message_text,send_at,sent,sent_at",
+        "limit": "1",
+    }) or []
+    return rows[0] if rows else None
+
+
+@unittest.skip("TestCorrectBotV2 requires deployed Edge Function — un-skip in Task 7")
+class TestCorrectBotV2(unittest.TestCase):
+    """Group-path correction with Sonnet-ACTIONS (update/remove/clarify).
+
+    Tests 1-7 use real Sonnet against the live Edge Function with seeded
+    events/reminders under each TEST_GROUP_N's auto-created household.
+    Test 8 requires CORRECTION_SONNET_MOCK=malformed set on the function.
+    """
+
+    def test_01_time_only_event_update_preserves_id(self):
+        group_id = TEST_GROUP_2
+        send_group_message(group_id, TEST_PHONE_1, "בדיקת שיניים ביום רביעי ב-14:00")
+        time.sleep(4)
+        events_before = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_before) == 1, f"seed failed: {events_before}"
+        original_id = events_before[0]["id"]
+
+        send_group_message(group_id, TEST_PHONE_1, "תתקני ל-15:00")
+        time.sleep(5)
+
+        events_after = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_after) == 1, f"Expected no dup, got {len(events_after)}"
+        assert events_after[0]["id"] == original_id, "id must be preserved"
+        assert "15:00" in israel_time_hhmm(events_after[0]["scheduled_for"])
+
+    def test_02_date_only_update_preserves_id(self):
+        group_id = TEST_GROUP_5
+        send_group_message(group_id, TEST_PHONE_1, "ארוחה עם סבתא בחמישי ב-19:00")
+        time.sleep(4)
+        events_before = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_before) == 1
+        original_id = events_before[0]["id"]
+
+        send_group_message(group_id, TEST_PHONE_1, "לא חמישי, שבת")
+        time.sleep(5)
+        events_after = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_after) == 1
+        assert events_after[0]["id"] == original_id
+        sf = datetime.fromisoformat(events_after[0]["scheduled_for"].replace("Z", "+00:00"))
+        assert sf.weekday() in (5, 6), f"Expected Sat, got weekday {sf.weekday()}"
+
+    def test_03_reminder_time_shift_preserves_id_and_sent_false(self):
+        group_id = TEST_GROUP_3
+        send_group_message(group_id, TEST_PHONE_1, "תזכירי לי מחר ב-8 לקחת ויטמין")
+        time.sleep(4)
+        reminders = fetch_reminders_for_group(group_id, since_minutes=2)
+        assert len(reminders) == 1
+        original_id = reminders[0]["id"]
+
+        send_group_message(group_id, TEST_PHONE_1, "תעבירי ל-9")
+        time.sleep(5)
+
+        reminders_after = fetch_reminders_for_group(group_id, since_minutes=2)
+        assert len(reminders_after) == 1
+        assert reminders_after[0]["id"] == original_id
+        assert reminders_after[0]["sent"] == False
+        assert "09:00" in israel_time_hhmm(reminders_after[0]["send_at"])
+
+    def test_04_remove_event_hard_delete(self):
+        group_id = TEST_GROUP_6
+        send_group_message(group_id, TEST_PHONE_1, "ארוחת ערב ב-19:00 מחר")
+        time.sleep(4)
+        events_before = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_before) == 1
+
+        send_group_message(group_id, TEST_PHONE_1, "תבטלי את זה")
+        time.sleep(5)
+        events_after = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_after) == 0, f"Expected deletion, got {events_after}"
+
+        replies = fetch_bot_replies(group_id, since_seconds=10)
+        assert any(
+            ("בוטלה" in (r.get("message_text") or "")) or ("תיקנתי" in (r.get("message_text") or ""))
+            for r in replies
+        )
+
+    def test_05_ambiguous_multi_match_clarifies(self):
+        group_id = TEST_GROUP_4
+        send_group_message(group_id, TEST_PHONE_1, "בדיקת דירה ביום שישי ב-08:00")
+        time.sleep(3)
+        send_group_message(group_id, TEST_PHONE_1, "בדיקת דירה ביום שבת ב-10:00")
+        time.sleep(3)
+
+        send_group_message(group_id, TEST_PHONE_1, "תתקני את בדיקת הדירה ל-11:00")
+        time.sleep(5)
+
+        events = fetch_events_for_group(group_id, since_minutes=3)
+        assert len(events) == 2, f"No DB change expected, got {len(events)}"
+        replies = fetch_bot_replies(group_id, since_seconds=10)
+        assert any(
+            ("איזה" in (r.get("message_text") or "")) or ("איזו" in (r.get("message_text") or ""))
+            for r in replies
+        )
+
+    def test_06_no_event_exists_debug_token_leak(self):
+        group_id = TEST_GROUP_7
+        send_group_message(group_id, TEST_PHONE_1, "תור לרופא מחר ב-10:00")
+        time.sleep(4)
+        send_group_message(group_id, TEST_PHONE_1, "תתקני ל-11:00")
+        time.sleep(5)
+
+        replies = fetch_bot_replies(group_id, since_seconds=10)
+        for r in replies:
+            body = r.get("message_text") or ""
+            assert "Event-exists:" not in body, f"Debug token leaked: {body}"
+            assert "Reminder-exists:" not in body
+            assert "old_title" not in body
+
+    def test_07_fired_reminder_noop(self):
+        """Reminder already fired is invisible to the candidate gatherer."""
+        group_id = TEST_GROUP_8
+        send_group_message(group_id, TEST_PHONE_1, "היי")  # ensures household exists
+        time.sleep(3)
+        hhid = fetch_household_for_group(group_id)
+        assert hhid, "household setup failed"
+        reminder_id = insert_reminder_direct(
+            hhid, group_id, text="לקחת תרופה",
+            send_at_iso=minutes_ago_iso(5),
+            sent=True, sent_at_iso=minutes_ago_iso(5),
+        )
+        send_group_message(group_id, TEST_PHONE_1, "תעבירי את תזכורת התרופה ל-9")
+        time.sleep(5)
+        replies = fetch_bot_replies(group_id, since_seconds=10)
+        assert any(
+            ("לא מצאתי" in (r.get("message_text") or "")) or ("כבר נשלחה" in (r.get("message_text") or ""))
+            for r in replies
+        )
+        fresh = fetch_reminder_by_id(reminder_id)
+        assert fresh and fresh["sent"] == True
+
+    def test_08_malformed_sonnet_falls_back_to_clarify(self):
+        """Mocked Sonnet JSON parse failure → clarify reply, no DB change.
+
+        Requires CORRECTION_SONNET_MOCK=malformed env var on Edge Function
+        (set temporarily during Task 7 smoke). Without the mock this test
+        will fail because real Sonnet returns valid JSON — skip it in that
+        case."""
+        if os.environ.get("RUN_MALFORMED_SONNET_TEST") != "1":
+            self.skipTest("Set RUN_MALFORMED_SONNET_TEST=1 + CORRECTION_SONNET_MOCK=malformed on EF")
+        group_id = TEST_GROUP_1
+        send_group_message(group_id, TEST_PHONE_1, "ארוחת צהריים מחר ב-13:00")
+        time.sleep(4)
+        events_before = fetch_events_for_group(group_id, since_minutes=2)
+        assert len(events_before) == 1
+        original_id = events_before[0]["id"]
+
+        send_group_message(group_id, TEST_PHONE_1, "תתקני ל-14:00")
+        time.sleep(5)
+        events_after = fetch_events_for_group(group_id, since_minutes=2)
+        # No DB change — clarify path taken.
+        assert len(events_after) == 1
+        assert events_after[0]["id"] == original_id
+        assert events_after[0]["scheduled_for"] == events_before[0]["scheduled_for"], \
+            "scheduled_for must be unchanged on clarify fallback"
