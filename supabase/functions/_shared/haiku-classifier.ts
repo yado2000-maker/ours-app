@@ -48,6 +48,10 @@ export interface ClassificationOutput {
     // rules + examples. Extracted here for type parity only.
     delivery_mode?: "group" | "dm" | "both";
     recipient_names?: string[];
+    // Free-form user-defined tags + due_date (Tier 2, 2026-04-25). See inlined
+    // classifier for prompt rules + examples. Type parity only.
+    tags?: string[];
+    due_date?: string; // "YYYY-MM-DD"
     raw_text: string;
   };
 }

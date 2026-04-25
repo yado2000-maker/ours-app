@@ -1,9 +1,12 @@
 import CheckSVG from "./CheckSVG.jsx";
 import { EmptyShoppingIcon, DeleteIcon } from "./Icons.jsx";
+import TagFilter, { useTagFilter, filterByTag } from "./TagFilter.jsx";
 
 export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot, t, pendingDelete, loading }) {
-  const need = shopping.filter(s => !s.got);
-  const got  = shopping.filter(s => s.got);
+  const [activeTag, setActiveTag] = useTagFilter();
+  const visible = filterByTag(shopping, activeTag);
+  const need = visible.filter(s => !s.got);
+  const got  = visible.filter(s => s.got);
   const grouped = {};
   need.forEach(s => { const c = s.category || t.cats[8]; if (!grouped[c]) grouped[c] = []; grouped[c].push(s); });
   // Render canonical categories first (in their defined order), then any non-canonical category
@@ -20,6 +23,7 @@ export default function ShoppingView({ shopping, onToggle, onDelete, onClearGot,
         <div className="list-title">{t.shopTitle}</div>
         {got.length > 0 && <button className="clear-btn" onClick={onClearGot}>{t.clearCart}</button>}
       </div>
+      <TagFilter items={shopping} active={activeTag} onChange={setActiveTag} allLabel={t.allTagLabel || "הכל"} />
       {loading ? (
         <div className="list-empty"><div style={{fontSize:13,color:"var(--muted)",padding:24,textAlign:"center"}}>{(t.loading || "Loading...")}</div></div>
       ) : shopping.length === 0 ? (

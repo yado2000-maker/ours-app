@@ -4,7 +4,7 @@ const SB_URL = "https://wzwwtghtnkapdwlgnrxr.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6d3d0Z2h0bmthcGR3bGducnhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMTg2NDYsImV4cCI6MjA4OTc5NDY0Nn0.P8NlRjUciAewFvKsaPAxL_x_5FHuGyQXIcrTKmxyd9g";
 export const supabase = createClient(SB_URL, SB_KEY);
 
-const TASK_MAP = { assignedTo: 'assigned_to', completedBy: 'completed_by', completedAt: 'completed_at' };
+const TASK_MAP = { assignedTo: 'assigned_to', completedBy: 'completed_by', completedAt: 'completed_at', dueDate: 'due_date' };
 const EVENT_MAP = { assignedTo: 'assigned_to', scheduledFor: 'scheduled_for' };
 const EXPENSE_MAP = {
   amountMinor: 'amount_minor',
