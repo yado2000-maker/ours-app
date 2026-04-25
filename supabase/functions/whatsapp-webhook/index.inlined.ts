@@ -7733,7 +7733,16 @@ async function handleAdminCommand(
   // Hebrew/Latin RTL mixing can flip visual order; bidi marks are stripped.
   const admitMatch = text.match(/^\/admit\s+(\+?[\d\s\-]+\d)\s*(.*?)\s*$/s);
   if (admitMatch) {
-    const parsedPhone = admitMatch[1].replace(/\D/g, "");
+    let parsedPhone = admitMatch[1].replace(/\D/g, "");
+    // Normalize Israeli local format (0XXXXXXXXX, 10 digits) to international
+    // (972XXXXXXXXX). WhatsApp keys on the international form, so an admit
+    // stored as "0505446762" never matches the inbound `senderPhone` of
+    // "972505446762" and the user falls through to waitlist-redirect.
+    // 2026-04-25 ענת incident: admit ran twice, both times she got the
+    // waitlist re-ping. link_user_to_household RPC has the same normalization.
+    if (/^0\d{9}$/.test(parsedPhone)) {
+      parsedPhone = "972" + parsedPhone.slice(1);
+    }
 
     // Strip invisible bidi marks (LRM/RLM/embeds/overrides/isolates) that RTL
     // keyboards inject when Hebrew and Latin letters are mixed.
