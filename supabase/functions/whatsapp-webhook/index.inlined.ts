@@ -171,6 +171,13 @@ interface ClassificationOutput {
     // via PHONE MAPPINGS context (Haiku doesn't see that context).
     delivery_mode?: "group" | "dm" | "both";
     recipient_names?: string[];
+    // Free-form user-defined tags (Tier 2 of list-display + free-form tags plan,
+    // 2026-04-25). Lowercase, multi-word, no taxonomy lockdown. Empty/missing =
+    // untagged. due_date applies to add_task only — when user names a day-of-week
+    // ("X - יום ב"), Haiku materializes it as YYYY-MM-DD; the action executor
+    // also auto-creates a 09:00 IL reminder for that date.
+    tags?: string[];
+    due_date?: string; // "YYYY-MM-DD"
     raw_text: string;
   };
 }
@@ -768,6 +775,17 @@ HEBREW PATTERNS:
 - IN-THE-MOMENT COMMANDS (= ignore, NOT add_task): direct orders from one family member to another about something PHYSICALLY PRESENT in the moment — NOT planning-level tasks. Signals: (a) deictic "זה" / "את זה" / "this" / "that" / "here" pointing at something visible, (b) message is a quote-reply to a photo/image, (c) imperative about immediate cleanup/disposal with no time reference. Examples: "לפנות את זה לזבל" (empty THIS to trash) = ignore. "לנקות את זה" (clean THIS) = ignore. "תזרקי את זה" (throw this out) = ignore. "תסדרו את זה" (tidy this up) = ignore. "לשים את זה שם" (put this there) = ignore. Difference from planning tasks: "לקנות חלב" (abstract, no deictic) CAN be add_task; "לקחת את זה מהסופר" (pointing at something) = ignore. Rule of thumb: if the verb refers to a physical object the family can see RIGHT NOW (not next week, not an abstract chore), it's family social direction. Escape hatch: explicit שלי/@שלי tag = keep original intent.
 - INDIRECT FAMILY PLEAS (= ignore, NOT add_task, NOT add_reminder): "שמישהו [verb]", "מישהו יכול ל...", "אולי מישהו [verb]", "יש מישהו ש...", "someone please [verb]", "can someone [verb]" = one family member asking an UNNAMED person in the group for a favor. This is a social negotiation between humans, NOT a task for Sheli. Even when the verb sounds actionable (ידליק, יוריד, יביא, יפתח, יסגור, turn on/off, bring, pick up), Sheli STAYS OUT. Examples: "שמישהו ידליק לי את הדוד" (someone turn on the boiler for me) = ignore. "מישהו יכול להוריד את הכביסה?" = ignore. "אולי מישהו ייקח את הכלב?" = ignore. Escape hatch: reclassify as add_task ONLY if message ALSO tags שלי/@שלי or clearly addresses the bot (e.g. "שלי, תוסיפי למטלות שמישהו ידליק דוד"). When uncertain, confidence ≤0.55 with needs_conversation_review:true so Sonnet reevaluates with context. Never cross 0.70 as add_task.
 - LINK COMMENTARY: Messages that respond to/riff on a shared link (TikTok, YouTube, article, video) are social commentary = ignore. Signals: "ואני מוסיף:", "בדיוק!", "כל כך נכון", laughter after a link, opinions about shared content. These are NOT tasks or shopping items even if they sound actionable.
+- TAGS — USER-DEFINED LISTS (Tier 2, 2026-04-25). Free-form labels users attach to add_task / add_shopping / add_event so they can group items into their own lists ("עבודה", "בית", "amazon", "trader joes", "פרויקט הסלון", "before flight", "חתונה של דנה"). Detection triggers (extract whatever follows as the tag, lowercase it, trim whitespace, preserve internal spaces — multi-word tags are valid):
+  - "תוסיפי לרשימת X..." / "תוסיפי ב-X..." / "ברשימת X..." / "לרשימה X..."
+  - "add to my X list" / "to the X list" / "for X list"
+  - "תוסיפי למטלות X..." / "למשימות של X..." / "לקניות של X..."
+  - Bracket prefix in user message: "[work] לתאם פגישה" / "[בית] לקנות פרקט" → tags=["work"] / ["בית"]
+  Set entities.tags = ["<lowercased tag>"] (always an array, even single tag). When NO list anchor is present, OMIT tags entirely (don't emit empty array — undefined is fine). NEVER auto-merge synonyms — "work" and "עבודה" stay separate; the user can later ask Sheli to merge.
+- DUE DATE — DAY-OF-WEEK FOR TASKS (Tier 2, 2026-04-25). When add_task includes a day-of-week or relative-day phrase ("- יום ב", "ביום ראשון", "מחר", "היום", "מחרתיים", "ביום שישי", "this Friday", "tomorrow"), set entities.due_date to the ISO YYYY-MM-DD of that day. Use UPCOMING context above to resolve. The day phrase is METADATA, NOT part of the title — strip it from entities.title. Examples:
+  - "תוסיפי לרשימת בית לקנות פרקט - יום ב" → title="לקנות פרקט", tags=["בית"], due_date=<this Monday>
+  - "לארוז לנסיעה - יום שבת" → title="לארוז לנסיעה", due_date=<this Saturday>, no tags
+  - "להחזיר ספר היום" → title="להחזיר ספר", due_date=<today>
+  add_event has its own time_iso field; due_date is for add_task only. The action executor will auto-emit a 09:00 IL reminder when due_date is set.
 - Hebrew time: "ב5" = 17:00, "בצהריים" = ~12:00, "אחרי הגן" = ~16:00, "לפני שבת" = Friday PM
 - "תזכירי", "תזכיר", "תזכרו", "remind" = add_reminder (NOT add_task, NOT add_event)
 - "תור/תורות" (turns), "סדר" (order), "סבב/תורנות" (duty rotation) = add_task with rotation entity
@@ -927,6 +945,17 @@ EXAMPLES:
 [נועה]: "הוצאתי זבל" (OPEN TASKS includes {id:"z4b1", title:"להוציא זבל"}) → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"z4b1","raw_text":"הוצאתי זבל"}}
 [יובל]: "קיפלתי את הכביסה" (OPEN TASKS includes {id:"l7c2", title:"כביסה"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"l7c2","raw_text":"קיפלתי את הכביסה"}}
 [אבא]: "לפרוק מדיח" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לפרוק מדיח","raw_text":"לפרוק מדיח"}}
+[אמא]: "תוסיפי לרשימת עבודה לסגור פגישה עם רובי" → {"intent":"add_task","confidence":0.92,"entities":{"title":"לסגור פגישה עם רובי","tags":["עבודה"],"raw_text":"תוסיפי לרשימת עבודה לסגור פגישה עם רובי"}}
+[אבא]: "תוסיפי לרשימת בית לקנות פרקט - יום ב" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לקנות פרקט","tags":["בית"],"due_date":"<this Monday>","raw_text":"תוסיפי לרשימת בית לקנות פרקט - יום ב"}}
+[אמא]: "תוסיפי לרשימת פרויקט הסלון לקנות וילון" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לקנות וילון","tags":["פרויקט הסלון"],"raw_text":"תוסיפי לרשימת פרויקט הסלון לקנות וילון"}}
+[mom]: "add to my amazon list — שמן זית" → {"intent":"add_shopping","confidence":0.88,"entities":{"items":[{"name":"שמן זית","category":"מזווה"}],"tags":["amazon"],"raw_text":"add to my amazon list — שמן זית"}}
+[אבא]: "[work] לתאם פגישה עם הרואה חשבון" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לתאם פגישה עם הרואה חשבון","tags":["work"],"raw_text":"[work] לתאם פגישה עם הרואה חשבון"}}
+[אמא]: "להחזיר ספר היום" → {"intent":"add_task","confidence":0.88,"entities":{"title":"להחזיר ספר","due_date":"<today>","raw_text":"להחזיר ספר היום"}}
+[אבא]: "לארוז לנסיעה - יום שבת" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לארוז לנסיעה","due_date":"<this Saturday>","raw_text":"לארוז לנסיעה - יום שבת"}}
+[אמא]: "תוסיפי לרשימת חתונה של דנה לבחור שמלה" → {"intent":"add_event","confidence":0.55,"needs_conversation_review":true,"entities":{"title":"לבחור שמלה","tags":["חתונה של דנה"],"raw_text":"תוסיפי לרשימת חתונה של דנה לבחור שמלה"}}
+// Tag-aware queries: "תציגי רשימת X" / "מה ב-X" / "show me my X list" → question intent (Sonnet handles tag filter, not Haiku).
+[אמא]: "תציגי רשימת עבודה" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"תציגי רשימת עבודה"}}
+[אבא]: "מה ב-amazon list?" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"מה ב-amazon list?"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}
 [אבא]: "תור מי?" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"תור מי?"}}
 [נועה]: "אני אסדר את הארון" → {"intent":"claim_task","confidence":0.90,"entities":{"person":"נועה","task_id":"t5c6","raw_text":"אני אסדר את הארון"}}
@@ -1379,7 +1408,21 @@ The 7-item limit is HARD. Do not stretch it because "this list is important". Tr
 
 4. MULTIPLE LISTS IN ONE TURN: pick ONE. If the user asked for two ("תציגי שתי הרשימות"), reply "{N1} בעבודה, {N2} בבית — באיזו להתחיל?" and wait. Do NOT try to fit both in one message.
 
-5. URL FORMATTING — CRITICAL: write "Sheli.ai" or "sheli.ai" with a Hebrew CARRIER WORD before it ("באפליקציה Sheli.ai"), or put the URL on its own line. NEVER write "ב-sheli.ai" / "ל-sheli.ai" / "מ-sheli.ai" — those flip in RTL and break URL auto-detection in WhatsApp. The full ban is in SHARED_HEBREW_GRAMMAR; restated here because list-truncation footers are the #1 place Sonnet drifts to "ב-sheli.ai".`;
+5. URL FORMATTING — CRITICAL: write "Sheli.ai" or "sheli.ai" with a Hebrew CARRIER WORD before it ("באפליקציה Sheli.ai"), or put the URL on its own line. NEVER write "ב-sheli.ai" / "ל-sheli.ai" / "מ-sheli.ai" — those flip in RTL and break URL auto-detection in WhatsApp. The full ban is in SHARED_HEBREW_GRAMMAR; restated here because list-truncation footers are the #1 place Sonnet drifts to "ב-sheli.ai".
+
+6. DEEP LINKS BY TAG (Tier 3.0 of free-form tags plan, 2026-04-25). When a TAG FILTER is active (the question targeted a specific list like "עבודה" / "amazon" / "חתונה של דנה") and you need the truncation/empty footer, deep-link straight to the filtered web view:
+   - Tasks list with tag X → the URL must be "sheli.ai/tasks?tag=<X>"
+   - Shopping list with tag X → "sheli.ai/shopping?tag=<X>"
+   - Events list with tag X → "sheli.ai/events?tag=<X>"
+   The tag value goes through the URL as-is — Hebrew is fine, multi-word is fine ("פרויקט הסלון" → spaces become %20 or stay as spaces; both work in WhatsApp's link auto-parser). Keep the carrier-word rule: write "באפליקציה Sheli.ai/tasks?tag=עבודה" or put the URL on its own line. Without an active tag filter, link to the unfiltered "sheli.ai/tasks" / "sheli.ai/shopping" as before.
+
+   Example WITH tag (footer for an empty filtered list):
+   "אין כלום ברשימת עבודה כרגע. אם משהו חסר, באפליקציה Sheli.ai/tasks?tag=עבודה"
+
+   Example WITH tag (truncation footer for a long filtered list):
+   "יש 12 משימות ברשימת עבודה. הרשימה ארוכה לווטסאפ, הכל באפליקציה Sheli.ai/tasks?tag=עבודה 📋
+   הנה 7 הראשונות:
+   <items 1-7>"`;
 
 const SHARED_MISSING_ITEMS_RULES = `MISSING-ITEMS COMPLAINT — COMPARE-BEFORE-READD (Bat-Chen 2026-04-18):
 
@@ -1751,9 +1794,33 @@ If a family member later replies "כן" / "נשמע טוב" / "תזכירי" / "
     case "claim_task":
       actionSummary = `${sender} claimed a task${e.task_id ? ` (id: ${e.task_id})` : ""}.`;
       break;
-    case "question":
-      actionSummary = `${sender} is asking a question about household state.`;
+    case "question": {
+      // Tier 2.3 (2026-04-25): detect tag-list queries so we can pre-filter the
+      // state context and Sheli renders only the matching list. Pattern matches
+      // both Hebrew ("תציגי רשימת X" / "מה ב-X" / "מה ברשימת X") and English
+      // ("show me my X list" / "what's in my X list"). Multi-word tags are
+      // captured greedily up to the next "?" or end-of-line.
+      const qText = String(e.raw_text || "").trim();
+      // Strip leading "שלי" / "shelly" address vocatives so they don't end up
+      // in the tag capture.
+      const addressStripped = qText.replace(/^(שלי|sheli|shelly|shelley)[\s,]+/i, "").trim();
+      const heMatch = addressStripped.match(/(?:תציגי|הראי|הראה|תני|מה ב[־-]?|מה ברשימת|מה ברשימה של)\s+(?:רשימת\s+|רשימה של\s+|מטלות של\s+|קניות של\s+)?([^?\n]+?)\??$/);
+      const enMatch = addressStripped.match(/(?:show me|show|list|what(?:'s| is) (?:in|on))\s+(?:my\s+|the\s+)?([^?\n]+?)(?:\s+list)?\??$/i);
+      const rawTag = heMatch?.[1] || enMatch?.[1] || "";
+      const queryTag = rawTag.trim().toLowerCase();
+      // Heuristic guard: only treat as tag query if the captured phrase looks
+      // like a list name (1-30 chars, no verb-only fragments). When in doubt,
+      // fall through to the unfiltered state path.
+      const isTagQuery =
+        queryTag.length > 0 &&
+        queryTag.length <= 30 &&
+        !["היום", "מחר", "אתמול", "today", "tomorrow", "yesterday"].includes(queryTag);
+      (classification as any).__queryTag = isTagQuery ? queryTag : null;
+      actionSummary = `${sender} is asking a question about household state${
+        isTagQuery ? ` (filter to tag: "${queryTag}")` : ""
+      }.`;
       break;
+    }
     case "info_request":
       actionSummary = `${sender} is requesting information (not a household task).`;
       break;
@@ -1803,14 +1870,33 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
   // For questions, include current state so Sheli can answer
   let stateContext = "";
   if (classification.intent === "question") {
-    const openTasks = ctx.currentTasks.filter((t) => !t.done);
-    const needShopping = ctx.currentShopping.filter((s) => !s.got);
+    const queryTag = (classification as any).__queryTag as string | null;
+    // Tier 2.3 (2026-04-25): tag filter. When the user asked "תציגי רשימת X",
+    // pre-filter so Sheli only sees the matching subset. Each row's `tags` is
+    // a TEXT[] of lowercased tags (or undefined for old rows). Match is exact
+    // membership — no partial / synonym fuzzing here.
+    const matchesTag = (rowTags: unknown): boolean => {
+      if (!queryTag) return true;
+      if (!Array.isArray(rowTags)) return false;
+      return rowTags.some((t) => String(t || "").trim().toLowerCase() === queryTag);
+    };
+    const openTasks = ctx.currentTasks
+      .filter((t) => !t.done)
+      .filter((t) => matchesTag((t as any).tags));
+    const needShopping = ctx.currentShopping
+      .filter((s) => !s.got)
+      .filter((s) => matchesTag((s as any).tags));
+    const filteredEvents = ctx.currentEvents.filter((ev) => matchesTag((ev as any).tags));
+
+    const tagFilterNote = queryTag
+      ? `\nTAG FILTER ACTIVE: "${queryTag}". The lists below ALREADY exclude items not tagged with this. If a list is empty, say so honestly ("אין כלום ברשימת ${queryTag} כרגע") — do NOT broaden the filter or show untagged items.`
+      : "";
 
     stateContext = `
-CURRENT STATE (use this to answer the question):
+CURRENT STATE (use this to answer the question):${tagFilterNote}
 Open tasks: ${openTasks.length === 0 ? "(none)" : openTasks.map((t) => `${t.title}${t.assigned_to ? ` → ${t.assigned_to}` : ""}`).join(", ")}
 Shopping needed: ${needShopping.length === 0 ? "(empty)" : needShopping.map((s) => `${s.name}${s.qty ? ` ×${s.qty}` : ""}`).join(", ")}
-Upcoming events: ${ctx.currentEvents.length === 0 ? "(none)" : ctx.currentEvents.map((e) => `${e.title}${e.assigned_to ? ` → ${e.assigned_to}` : ""} @ ${formatTimeWithDayLabel(e.scheduled_for)}`).join(", ")}`;
+Upcoming events: ${filteredEvents.length === 0 ? "(none)" : filteredEvents.map((ev) => `${ev.title}${ev.assigned_to ? ` → ${ev.assigned_to}` : ""} @ ${formatTimeWithDayLabel(ev.scheduled_for)}`).join(", ")}`;
 
     const rotations = ctx.currentRotations || [];
     if (rotations.length > 0) {
@@ -2855,9 +2941,9 @@ async function buildHouseholdContext(householdId: string): Promise<HouseholdCont
 
   // Fetch current state
   const [tasksRes, shoppingRes, eventsRes] = await Promise.all([
-    supabase.from("tasks").select("id, title, assigned_to, done").eq("household_id", householdId),
-    supabase.from("shopping_items").select("id, name, qty, got").eq("household_id", householdId),
-    supabase.from("events").select("id, title, assigned_to, scheduled_for").eq("household_id", householdId)
+    supabase.from("tasks").select("id, title, assigned_to, done, tags, due_date").eq("household_id", householdId),
+    supabase.from("shopping_items").select("id, name, qty, got, tags").eq("household_id", householdId),
+    supabase.from("events").select("id, title, assigned_to, scheduled_for, tags").eq("household_id", householdId)
       .gte("scheduled_for", new Date().toISOString()),
   ]);
 
@@ -3533,7 +3619,12 @@ async function executeActions(
     try {
       switch (action.type) {
         case "add_task": {
-          const { title, assigned_to } = action.data as { title: string; assigned_to?: string };
+          const { title, assigned_to, tags, due_date } = action.data as {
+            title: string;
+            assigned_to?: string;
+            tags?: string[];
+            due_date?: string | null;
+          };
 
           // Check if this task matches an active duty rotation
           const { data: matchingRotations } = await supabase
@@ -3576,23 +3667,92 @@ async function executeActions(
           if (taskMatch) {
             summary.push(`Task-exists: "${taskMatch.title}"`);
           } else {
+            const newTaskId = uid4();
+            const normalizedTags = Array.isArray(tags)
+              ? tags
+                  .map((t) => String(t || "").trim().toLowerCase())
+                  .filter((t) => t.length > 0 && t.length <= 50)
+              : [];
+            const validDueDate =
+              typeof due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(due_date)
+                ? due_date
+                : null;
             const { error } = await supabase.from("tasks").insert({
-              id: uid4(),
+              id: newTaskId,
               household_id: householdId,
               title,
               assigned_to: assigned_to || null,
               done: false,
+              tags: normalizedTags,
+              due_date: validDueDate,
             });
             if (error) throw error;
-            summary.push(`Task: "${title}"${assigned_to ? ` → ${assigned_to}` : ""}`);
+            summary.push(
+              `Task: "${title}"${assigned_to ? ` → ${assigned_to}` : ""}` +
+                (normalizedTags.length ? ` [${normalizedTags.join(",")}]` : "") +
+                (validDueDate ? ` due ${validDueDate}` : ""),
+            );
+
+            // Tier 2.4: auto-reminder when due_date is set. Fires at 09:00 IL on
+            // the due date into the household's group chat (1:1 path doesn't go
+            // through this executor). Quiet-hours / window rules in
+            // fire_due_reminders_inner v3 still apply downstream.
+            if (validDueDate) {
+              try {
+                const reminderTime = Deno.env.get("TASK_DUE_DATE_REMINDER_TIME") || "09:00";
+                const sendAtIso = `${validDueDate}T${reminderTime}:00+03:00`;
+                // Locate the group chat for this household (groups have the bot installed).
+                const { data: cfg } = await supabase
+                  .from("whatsapp_config")
+                  .select("group_id")
+                  .eq("household_id", householdId)
+                  .eq("bot_active", true)
+                  .order("first_message_at", { ascending: false })
+                  .limit(1)
+                  .single();
+                const groupId = cfg?.group_id || null;
+                if (groupId) {
+                  const { error: remErr } = await supabase.from("reminder_queue").insert({
+                    id: crypto.randomUUID(),
+                    household_id: householdId,
+                    group_id: groupId,
+                    send_at: sendAtIso,
+                    message_text: `${title} (היום)`,
+                    reminder_type: "user",
+                    sent: false,
+                    delivery_mode: "group",
+                    metadata: { source: "task_due_date", task_id: newTaskId },
+                  });
+                  if (remErr) {
+                    console.warn(
+                      `[Webhook] add_task: due_date reminder insert failed: ${remErr.message}`,
+                    );
+                  } else {
+                    summary.push(`Reminder (due_date): ${sendAtIso}`);
+                  }
+                } else {
+                  console.warn(
+                    `[Webhook] add_task: due_date set but no active group_id for household ${householdId} — skipping auto-reminder`,
+                  );
+                }
+              } catch (err) {
+                console.warn(`[Webhook] add_task: due_date reminder error: ${err}`);
+              }
+            }
           }
           break;
         }
 
         case "add_shopping": {
-          const { items } = action.data as {
+          const { items, tags } = action.data as {
             items: Array<{ name: string; qty?: string; category?: string }>;
+            tags?: string[];
           };
+          const normalizedTags = Array.isArray(tags)
+            ? tags
+                .map((t) => String(t || "").trim().toLowerCase())
+                .filter((t) => t.length > 0 && t.length <= 50)
+            : [];
 
           const { data: existingItems } = await supabase
             .from("shopping_items")
@@ -3636,20 +3796,30 @@ async function executeActions(
                 qty: item.qty || parsed.qty || null,
                 category: item.category || "אחר",
                 got: false,
+                tags: normalizedTags,
               });
               if (error) throw error;
-              summary.push(`Shopping: "${item.name}"${(item.qty || parsed.qty) ? ` ×${item.qty || parsed.qty}` : ""}`);
+              summary.push(
+                `Shopping: "${item.name}"${(item.qty || parsed.qty) ? ` ×${item.qty || parsed.qty}` : ""}` +
+                  (normalizedTags.length ? ` [${normalizedTags.join(",")}]` : ""),
+              );
             }
           }
           break;
         }
 
         case "add_event": {
-          const { title, assigned_to, scheduled_for } = action.data as {
+          const { title, assigned_to, scheduled_for, tags } = action.data as {
             title: string;
             assigned_to?: string;
             scheduled_for: string;
+            tags?: string[];
           };
+          const normalizedTags = Array.isArray(tags)
+            ? tags
+                .map((t) => String(t || "").trim().toLowerCase())
+                .filter((t) => t.length > 0 && t.length <= 50)
+            : [];
 
           const datePrefix = scheduled_for.slice(0, 10);
           const { data: existingEvents } = await supabase
@@ -3683,9 +3853,13 @@ async function executeActions(
               title,
               assigned_to: assigned_to || null,
               scheduled_for: normalizedScheduledFor,
+              tags: normalizedTags,
             });
             if (error) throw error;
-            summary.push(`Event: "${title}" @ ${normalizedScheduledFor}`);
+            summary.push(
+              `Event: "${title}" @ ${normalizedScheduledFor}` +
+                (normalizedTags.length ? ` [${normalizedTags.join(",")}]` : ""),
+            );
           }
           break;
         }
@@ -11524,9 +11698,9 @@ async function buildReplyCtx(householdId: string, chatType?: "group" | "direct",
 
   const [membersRes, tasksRes, shoppingRes, eventsRes, rotationsRes, botMsgsRes, memoriesRes, mappingRes] = await Promise.all([
     supabase.from("household_members").select("display_name, gender").eq("household_id", householdId),
-    supabase.from("tasks").select("id, title, assigned_to, done").eq("household_id", householdId),
-    supabase.from("shopping_items").select("id, name, qty, got").eq("household_id", householdId),
-    supabase.from("events").select("id, title, assigned_to, scheduled_for").eq("household_id", householdId)
+    supabase.from("tasks").select("id, title, assigned_to, done, tags, due_date").eq("household_id", householdId),
+    supabase.from("shopping_items").select("id, name, qty, got, tags").eq("household_id", householdId),
+    supabase.from("events").select("id, title, assigned_to, scheduled_for, tags").eq("household_id", householdId)
       .gte("scheduled_for", new Date().toISOString()),
     supabase.from("rotations").select("id, title, type, members, current_index, frequency")
       .eq("household_id", householdId).eq("active", true),
@@ -11685,7 +11859,12 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       } else {
         actions.push({
           type: "add_task",
-          data: { title: e.title || e.raw_text, assigned_to: e.person || null },
+          data: {
+            title: e.title || e.raw_text,
+            assigned_to: e.person || null,
+            tags: Array.isArray(e.tags) ? e.tags : [],
+            due_date: e.due_date || null,
+          },
         });
       }
       break;
@@ -11694,12 +11873,15 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       if (e.items && Array.isArray(e.items)) {
         actions.push({
           type: "add_shopping",
-          data: { items: e.items },
+          data: { items: e.items, tags: Array.isArray(e.tags) ? e.tags : [] },
         });
       } else {
         actions.push({
           type: "add_shopping",
-          data: { items: [{ name: e.raw_text, qty: "1", category: "אחר" }] },
+          data: {
+            items: [{ name: e.raw_text, qty: "1", category: "אחר" }],
+            tags: Array.isArray(e.tags) ? e.tags : [],
+          },
         });
       }
       break;
@@ -11726,6 +11908,7 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
           title: e.title || e.raw_text,
           assigned_to: e.person || null,
           scheduled_for: scheduledFor,
+          tags: Array.isArray(e.tags) ? e.tags : [],
         },
       });
       break;
