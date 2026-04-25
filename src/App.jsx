@@ -70,6 +70,8 @@ function SheliApp() {
   const [rotations, setRotationsS] = useState([]);
   const [expenses, setExpenses]     = useState([]);
   const [input, setInput]         = useState("");
+  const [pickName, setPickName]   = useState("");
+  const [pickSaving, setPickSaving] = useState(false);
   const [busy, setBusy]           = useState(false);
   const [showMenu, setShowMenu]   = useState(false);
   const [theme, setTheme]         = useState(() => lsGet("sheli-theme") || "auto");
@@ -766,7 +768,7 @@ function SheliApp() {
         </p>
         <div className="pick-list">
           {household.members.map(m => (
-            <button key={m.id} className="pick-member"
+            <button key={m.id || m.name} className="pick-member"
               onClick={() => {
                 if (!lsGet("sheli-hhid") && household?.id) {
                   lsSet("sheli-hhid", household.id);
@@ -778,6 +780,75 @@ function SheliApp() {
               {m.name}
             </button>
           ))}
+          {/* Fallback when no members are visible (RLS race, stale household,
+              or first-time WA-then-phone signup where the bot hadn't yet
+              created a household_members row). User types their name and we
+              create the row on the spot — same shape Setup uses. */}
+          {(!household.members || household.members.length === 0) && (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const name = pickName.trim();
+                if (!name || pickSaving) return;
+                setPickSaving(true);
+                try {
+                  const uid = session?.user?.id;
+                  const { data: inserted, error } = await supabase
+                    .from("household_members")
+                    .insert({
+                      household_id: household.id,
+                      display_name: name,
+                      role: "founder",
+                      user_id: uid || null,
+                    })
+                    .select("id, display_name")
+                    .single();
+                  if (error) throw error;
+                  const me = { id: inserted?.id, name: inserted?.display_name || name };
+                  if (!lsGet("sheli-hhid") && household.id) lsSet("sheli-hhid", household.id);
+                  lsSet("sheli-user", me);
+                  setHousehold({ ...household, members: [...(household.members || []), me] });
+                  setUser(me);
+                  setDataLoaded(true);
+                  setScreen("chat");
+                } catch (err) {
+                  console.error("[pick] create member failed:", err);
+                  alert(pickDir === "rtl" ? "שמירת השם נכשלה, נסו שוב 🙈" : "Couldn't save your name, please try again");
+                } finally {
+                  setPickSaving(false);
+                }
+              }}
+              style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}
+            >
+              <input
+                type="text"
+                value={pickName}
+                onChange={(e) => setPickName(e.target.value)}
+                placeholder={pickDir === "rtl" ? "השם שלך" : "Your name"}
+                autoFocus
+                dir={pickDir}
+                style={{
+                  padding: "14px 16px",
+                  borderRadius: 12,
+                  border: "1px solid var(--border, #e0e0e0)",
+                  fontSize: 16,
+                  fontFamily: pickFont,
+                  textAlign: pickDir === "rtl" ? "right" : "left",
+                  background: "var(--white, #fff)",
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!pickName.trim() || pickSaving}
+                className="pick-member"
+                style={{ opacity: pickName.trim() && !pickSaving ? 1 : 0.5 }}
+              >
+                {pickSaving
+                  ? (pickDir === "rtl" ? "שומרת..." : "Saving...")
+                  : (pickDir === "rtl" ? "המשיכו" : "Continue")}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
