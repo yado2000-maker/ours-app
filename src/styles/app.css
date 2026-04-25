@@ -141,6 +141,15 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .section-head{font-size:13px;font-weight:600;letter-spacing:0.08em;color:var(--muted);padding:10px 2px 4px;}
 [dir="rtl"] .section-head{letter-spacing:0;}
 
+/* Tag chip filter row (free-form tags, 2026-04-25). Horizontal scroll on
+   overflow so 10+ tags don't break the layout. RTL inherits from parent. */
+.tag-filter-row{display:flex;flex-wrap:nowrap;gap:6px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:none;}
+.tag-filter-row::-webkit-scrollbar{display:none;}
+.tag-chip{flex:0 0 auto;font-size:13px;font-weight:500;padding:6px 12px;border-radius:999px;border:1.5px solid var(--border);background:var(--white);color:var(--warm);cursor:pointer;transition:background 0.15s,color 0.15s,border-color 0.15s;font-family:inherit;}
+.tag-chip:hover{border-color:var(--primary);color:var(--primary);}
+.tag-chip-active{background:var(--primary);border-color:var(--primary);color:#fff;}
+.tag-chip-active:hover{color:#fff;}
+
 /* task row */
 .task-row{display:flex;align-items:center;gap:11px;background:var(--white);border-radius:13px;padding:12px 14px;box-shadow:var(--sh);border:1.5px solid var(--border);transition:opacity 0.25s,transform 0.15s;animation:rowIn 0.2s ease;}
 @keyframes rowIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}

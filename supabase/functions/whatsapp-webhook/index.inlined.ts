@@ -3610,7 +3610,11 @@ async function executeQueryExpense(
 async function executeActions(
   householdId: string,
   actions: ClassifiedAction[],
-  senderName?: string
+  senderName?: string,
+  // Tier 2.4 follow-up (2026-04-25): when the caller is the 1:1 path, the
+  // household may have no paired group_id — in that case auto-reminders for
+  // due_date tasks fire to the user's own JID instead of warn-failing.
+  senderPhone?: string,
 ): Promise<{ success: boolean; summary: string[] }> {
   const summary: string[] = [];
   let success = true;
@@ -3710,7 +3714,9 @@ async function executeActions(
                   .order("first_message_at", { ascending: false })
                   .limit(1)
                   .single();
-                const groupId = cfg?.group_id || null;
+                // Prefer the household's active group chat. Fall back to the
+                // 1:1 JID when no group is paired (1:1-only users).
+                const groupId = cfg?.group_id || (senderPhone ? `${senderPhone}@s.whatsapp.net` : null);
                 if (groupId) {
                   const { error: remErr } = await supabase.from("reminder_queue").insert({
                     id: crypto.randomUUID(),
@@ -4893,6 +4899,19 @@ OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visi
 Your visible reply here
 
 ACTIONS array: each object has "type" and relevant fields:
+
+FREE-FORM TAGS (Tier 2 of free-form tags plan, 2026-04-25). add_task / shopping / event accept a "tags" field — an array of lowercase user-named lists ("עבודה", "amazon", "פרויקט הסלון", "חתונה של דנה"). Detect from phrasings like "תוסיפי לרשימת X..." / "add to my X list" / "[work] ..." / "ברשימת X". Tags are arbitrary user labels — no taxonomy, multi-word allowed, never auto-merge synonyms. When NO list anchor is present, OMIT tags (do not emit "tags":[] noise). Examples:
+  {"type":"task","text":"לסגור פגישה עם רובי","tags":["עבודה"]}
+  {"type":"shopping","items":["שמן זית"],"tags":["amazon"]}
+  {"type":"task","text":"לבחור שמלה","tags":["חתונה של דנה"]}
+  {"type":"task","text":"[work] לתאם פגישה"}      → tags:["work"] (bracket prefix recognized; STRIP from text)
+
+DUE_DATE (tasks only). When the user names a day-of-week or relative-day for a task ("X - יום ב", "X היום", "X מחר", "X ביום שישי"), emit "due_date":"YYYY-MM-DD" alongside "text". STRIP the day phrase from "text" — it's metadata, not part of the title. The executor auto-creates a 09:00 IL reminder on that date for tasks with a due_date. Use the CONVERSATION STATE's "today" / "this Saturday" / "this Monday" date hints to resolve. Examples:
+  "להחזיר ספר היום" → {"type":"task","text":"להחזיר ספר","due_date":"<today>"}
+  "תוסיפי לרשימת בית לקנות פרקט - יום ב" → {"type":"task","text":"לקנות פרקט","tags":["בית"],"due_date":"<this Monday>"}
+  "לארוז לנסיעה ביום שבת" → {"type":"task","text":"לארוז לנסיעה","due_date":"<this Saturday>"}
+  Events have their own date/time field; due_date is task-only.
+
 ADD:
 - shopping: {"type":"shopping","items":["חלב","ביצים"]}
 - task: {"type":"task","text":"לפרוק מדיח"}
@@ -5635,14 +5654,22 @@ async function execute1on1Actions(params: {
           if (action.items && Array.isArray(action.items)) {
             mappedActions.push({
               type: "add_shopping",
-              data: { items: action.items.map((item: string) => ({ name: item, qty: "1", category: "אחר" })) },
+              data: {
+                items: action.items.map((item: string) => ({ name: item, qty: "1", category: "אחר" })),
+                tags: Array.isArray(action.tags) ? action.tags : [],
+              },
             });
           }
           break;
         case "task":
           mappedActions.push({
             type: "add_task",
-            data: { title: action.text || "", assigned_to: null },
+            data: {
+              title: action.text || "",
+              assigned_to: null,
+              tags: Array.isArray(action.tags) ? action.tags : [],
+              due_date: typeof action.due_date === "string" ? action.due_date : null,
+            },
           });
           break;
         case "event": {
@@ -5658,6 +5685,7 @@ async function execute1on1Actions(params: {
               title: action.title || action.text || "",
               assigned_to: null,
               scheduled_for: scheduledFor,
+              tags: Array.isArray(action.tags) ? action.tags : [],
             },
           });
           break;
@@ -5851,7 +5879,7 @@ async function execute1on1Actions(params: {
         }
       }
       try {
-        const { summary } = await executeActions(householdId, mappedActions, userName);
+        const { summary } = await executeActions(householdId, mappedActions, userName, phone);
         console.log(`${logPrefix} Executed ${summary.length} actions for ${phone}:`, summary);
       } catch (err) {
         console.error(`${logPrefix} executeActions error:`, err);

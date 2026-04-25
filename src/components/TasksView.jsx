@@ -1,5 +1,6 @@
 import CheckSVG from "./CheckSVG.jsx";
 import { EmptyTasksIcon, DeleteIcon } from "./Icons.jsx";
+import TagFilter, { useTagFilter, filterByTag } from "./TagFilter.jsx";
 
 const formatTs = (iso) => {
   if (!iso) return "";
@@ -11,14 +12,19 @@ const formatTs = (iso) => {
 };
 
 export default function TasksView({ tasks, user, lang, onToggle, onClaim, onDelete, onClearDone, t, pendingDelete, loading }) {
-  const open = tasks.filter(x => !x.done);
-  const done = tasks.filter(x => x.done);
+  const [activeTag, setActiveTag] = useTagFilter();
+  // Apply tag filter to the full task list before splitting open/done so the
+  // counts in section heads + the "all done" message match the filtered view.
+  const visible = filterByTag(tasks, activeTag);
+  const open = visible.filter(x => !x.done);
+  const done = visible.filter(x => x.done);
   return (
     <div className="list-view">
       <div className="list-header">
         <div className="list-title">{t.tasksTitle}</div>
         {done.length > 0 && <button className="clear-btn" onClick={onClearDone}>{t.clearDone}</button>}
       </div>
+      <TagFilter items={tasks} active={activeTag} onChange={setActiveTag} allLabel={t.allTagLabel || "הכל"} />
       {loading ? (
         <div className="list-empty"><div style={{fontSize:13,color:"var(--muted)",padding:24,textAlign:"center"}}>{(t.loading || "Loading...")}</div></div>
       ) : tasks.length === 0 ? (
