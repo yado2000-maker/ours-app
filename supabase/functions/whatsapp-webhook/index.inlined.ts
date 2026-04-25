@@ -955,7 +955,7 @@ EXAMPLES:
 [אמא]: "תוסיפי לרשימת חתונה של דנה לבחור שמלה" → {"intent":"add_event","confidence":0.55,"needs_conversation_review":true,"entities":{"title":"לבחור שמלה","tags":["חתונה של דנה"],"raw_text":"תוסיפי לרשימת חתונה של דנה לבחור שמלה"}}
 // Tag-aware queries: "תציגי רשימת X" / "מה ב-X" / "show me my X list" → question intent (Sonnet handles tag filter, not Haiku).
 [אמא]: "תציגי רשימת עבודה" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"תציגי רשימת עבודה"}}
-[אבא]: "מה ב-amazon list?" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"מה ב-amazon list?"}}
+[אבא]: "תציגי רשימת amazon" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"תציגי רשימת amazon"}}
 [אמא]: "מה צריך מהסופר?" → {"intent":"question","confidence":0.95,"entities":{"raw_text":"מה צריך מהסופר?"}}
 [אבא]: "תור מי?" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"תור מי?"}}
 [נועה]: "אני אסדר את הארון" → {"intent":"claim_task","confidence":0.90,"entities":{"person":"נועה","task_id":"t5c6","raw_text":"אני אסדר את הארון"}}
@@ -1804,18 +1804,35 @@ If a family member later replies "כן" / "נשמע טוב" / "תזכירי" / "
       // Strip leading "שלי" / "shelly" address vocatives so they don't end up
       // in the tag capture.
       const addressStripped = qText.replace(/^(שלי|sheli|shelly|shelley)[\s,]+/i, "").trim();
-      const heMatch = addressStripped.match(/(?:תציגי|הראי|הראה|תני|מה ב[־-]?|מה ברשימת|מה ברשימה של)\s+(?:רשימת\s+|רשימה של\s+|מטלות של\s+|קניות של\s+)?([^?\n]+?)\??$/);
-      const enMatch = addressStripped.match(/(?:show me|show|list|what(?:'s| is) (?:in|on))\s+(?:my\s+|the\s+)?([^?\n]+?)(?:\s+list)?\??$/i);
+      // Tag-query detection (review HIGH 3, 2026-04-25): require an EXPLICIT
+      // list-anchor word ("רשימת" / "רשימה של" / "list") so phrases like
+      // "מה בתפריט הערב" don't get misclassified as a "תפריט הערב" tag query
+      // and trigger the false-denial empty-state path. Only fire when the
+      // user clearly says "the X list" / "רשימת X".
+      const heMatch = addressStripped.match(/(?:תציגי|הראי|הראה|תני|מה ב|מה ברשימת|מה ברשימה של)\s+(?:את\s+)?(?:רשימת|רשימה של|מטלות של|קניות של|אירועי)\s+([^?\n]+?)\??$/);
+      const enMatch = addressStripped.match(/(?:show me|show|list|what(?:'s| is) (?:in|on))\s+(?:my\s+|the\s+)?([^?\n]+?)\s+list\??$/i);
       const rawTag = heMatch?.[1] || enMatch?.[1] || "";
-      const queryTag = rawTag.trim().toLowerCase();
-      // Heuristic guard: only treat as tag query if the captured phrase looks
-      // like a list name (1-30 chars, no verb-only fragments). When in doubt,
-      // fall through to the unfiltered state path.
+      const candidateTag = rawTag.trim().toLowerCase();
+      // Cross-check the captured phrase against actual tags in current state.
+      // If no row in the household has this tag, do NOT activate the filter
+      // (gracefully degrade to unfiltered) — prevents a regex false-positive
+      // from triggering the strong empty-state framing on a real question.
+      const allTagsInState = new Set<string>();
+      for (const row of [...(ctx.currentTasks || []), ...(ctx.currentShopping || []), ...(ctx.currentEvents || [])]) {
+        const rt = (row as any).tags;
+        if (Array.isArray(rt)) {
+          for (const t of rt) {
+            const norm = String(t || "").trim().toLowerCase();
+            if (norm) allTagsInState.add(norm);
+          }
+        }
+      }
       const isTagQuery =
-        queryTag.length > 0 &&
-        queryTag.length <= 30 &&
-        !["היום", "מחר", "אתמול", "today", "tomorrow", "yesterday"].includes(queryTag);
-      (classification as any).__queryTag = isTagQuery ? queryTag : null;
+        candidateTag.length > 0 &&
+        candidateTag.length <= 30 &&
+        !["היום", "מחר", "אתמול", "today", "tomorrow", "yesterday"].includes(candidateTag) &&
+        allTagsInState.has(candidateTag);
+      (classification as any).__queryTag = isTagQuery ? candidateTag : null;
       actionSummary = `${sender} is asking a question about household state${
         isTagQuery ? ` (filter to tag: "${queryTag}")` : ""
       }.`;
@@ -3611,9 +3628,13 @@ async function executeActions(
   householdId: string,
   actions: ClassifiedAction[],
   senderName?: string,
-  // Tier 2.4 follow-up (2026-04-25): when the caller is the 1:1 path, the
-  // household may have no paired group_id — in that case auto-reminders for
-  // due_date tasks fire to the user's own JID instead of warn-failing.
+  // Tier 2.4 follow-up (2026-04-25): the caller's phone is used as a fallback
+  // chat target for due_date auto-reminders when the household has no paired
+  // group_id. Both group + 1:1 callers should pass it (review HIGH 1) — the
+  // group path normally relies on whatsapp_config.group_id, but synthetic /
+  // not-yet-merged groups can have bot_active=false and would otherwise drop
+  // the reminder silently. Falling back to phone@s.whatsapp.net is safe: the
+  // reminder fires into the same chat the user wrote from.
   senderPhone?: string,
 ): Promise<{ success: boolean; summary: string[] }> {
   const summary: string[] = [];
@@ -3677,10 +3698,17 @@ async function executeActions(
                   .map((t) => String(t || "").trim().toLowerCase())
                   .filter((t) => t.length > 0 && t.length <= 50)
               : [];
-            const validDueDate =
-              typeof due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(due_date)
-                ? due_date
-                : null;
+            // Defense-in-depth (review LOW 8): the regex alone allows nonsense
+            // like 9999-99-99 through, which then 22008-fails the entire INSERT
+            // (not just the date column). Round-trip through Date so an invalid
+            // calendar date drops to null and the task still saves.
+            let validDueDate: string | null = null;
+            if (typeof due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
+              const parsed = new Date(`${due_date}T00:00:00Z`);
+              if (!Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === due_date) {
+                validDueDate = due_date;
+              }
+            }
             const { error } = await supabase.from("tasks").insert({
               id: newTaskId,
               household_id: householdId,
@@ -3719,7 +3747,6 @@ async function executeActions(
                 const groupId = cfg?.group_id || (senderPhone ? `${senderPhone}@s.whatsapp.net` : null);
                 if (groupId) {
                   const { error: remErr } = await supabase.from("reminder_queue").insert({
-                    id: crypto.randomUUID(),
                     household_id: householdId,
                     group_id: groupId,
                     send_at: sendAtIso,
@@ -8604,7 +8631,7 @@ Deno.serve(async (req: Request) => {
       if (pending) {
         if (isConfirm) {
           const actions = [{ type: pending.action_type, data: pending.action_data }];
-          const { summary } = await executeActions(hhId, actions, message.senderName);
+          const { summary } = await executeActions(hhId, actions, message.senderName, message.senderPhone);
           console.log(`[Reaction] Confirmed via ${message.reactionEmoji}:`, summary);
           await supabase.from("pending_confirmations")
             .update({ status: "confirmed" }).eq("id", pending.id);
@@ -8935,7 +8962,7 @@ Deno.serve(async (req: Request) => {
       if (CONFIRM_AFFIRMATIVE.test(msgTrimmed)) {
         // Execute the pending action
         const actions = [{ type: pendingConfirm.action_type, data: pendingConfirm.action_data }];
-        const { summary } = await executeActions(householdId, actions, message.senderName);
+        const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
         console.log(`[Webhook] Pending confirmation confirmed:`, summary);
 
         await supabase.from("pending_confirmations")
@@ -8967,7 +8994,7 @@ Deno.serve(async (req: Request) => {
       // Check for auto-expire: if past expires_at, execute silently
       if (new Date(pendingConfirm.expires_at) < new Date()) {
         const actions = [{ type: pendingConfirm.action_type, data: pendingConfirm.action_data }];
-        const { summary } = await executeActions(householdId, actions, message.senderName);
+        const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
         console.log(`[Webhook] Pending confirmation auto-expired, executing:`, summary);
 
         await supabase.from("pending_confirmations")
@@ -9383,7 +9410,7 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
-      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName);
+      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName, message.senderPhone);
       await incrementUsage(householdId);
       if (sonnetResult.reply) {
         await sendAndLog(provider, { groupId: message.groupId, text: sonnetResult.reply }, {
@@ -9606,7 +9633,7 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
-      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName);
+      const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName, message.senderPhone);
       console.log(`[Webhook] Sonnet escalation executed ${sonnetSummary.length} actions:`, sonnetSummary);
 
       // Check if all actions were deduped
@@ -9789,7 +9816,7 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    const { summary } = await executeActions(householdId, actions, message.senderName);
+    const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
     console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
 
     // 11. Check for dedup outcomes
@@ -10886,7 +10913,7 @@ async function executeRotationTableFromImage(
   }
 
   try {
-    const { summary } = await executeActions(householdId, actions, message.senderName);
+    const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
     console.log(`[OCR] rotation_table executed: ${summary.join(", ")}`);
   } catch (err) {
     console.error("[OCR] rotation_table execute error:", err);

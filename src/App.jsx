@@ -56,9 +56,22 @@ export default function Sheli() {
   return <SheliApp />;
 }
 
+// Map deep-link pathnames (/tasks, /shopping, /events) to internal tab names.
+// Used both by the initial tab state and by Vercel SPA rewrites in vercel.json
+// — see review HIGH 4 (2026-04-25). Returns "chat" (the default) for paths
+// that don't carry a tab hint, so cold visits to "/" stay on chat.
+function tabFromPath() {
+  if (typeof window === "undefined") return "chat";
+  const p = window.location.pathname.replace(/\/+$/, "");
+  if (p === "/tasks") return "tasks";
+  if (p === "/shopping") return "shopping";
+  if (p === "/events") return "week"; // events tab is internally named "week"
+  return "chat";
+}
+
 function SheliApp() {
   const [screen, setScreen]       = useState("loading");
-  const [tab, setTab]             = useState("chat");
+  const [tab, setTab]             = useState(() => tabFromPath());
   const [household, setHousehold] = useState(null);
   const [detectedHh, setDetectedHh] = useState(null); // Auto-detected household for join flow
   const [user, setUser]           = useState(null);
