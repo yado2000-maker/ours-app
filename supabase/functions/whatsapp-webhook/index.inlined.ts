@@ -5041,6 +5041,21 @@ TOPIC-VS-ITEM (2026-04-26): when the user names a noun, decide TOPIC vs ITEM:
 - ADD-TO-TOPIC: user names BOTH a topic AND an item. EMIT a normal shopping/task action with the item AS the item content AND tags=["<topic>"]. Reply NAMES the topic: "הוספתי חיתולים לרשימת בית מרקחת ✓".
 - AMBIGUOUS bare noun (just "בית מרקחת" with no anchor and no existing tag): ASK once — "התכוונת להוסיף את 'בית מרקחת' כפריט לקנות, או ליצור רשימה חדשה לפריטים שאת קונה שם?". Wait for the answer.
 
+RETAG OPERATIONS (Tier 2, 2026-04-26): when the user asks to MOVE existing items between topics or ADD/REMOVE a tag from existing items, emit a tag-update action — NOT a fresh add.
+- "להעביר את [item] לרשימת [topic]" / "תשייכי את [item] ל[topic]" / "[item] שייך ל[topic]" → update_shopping_tags or update_task_tags with old_name (or old_text) + add_tags=[topic].
+- "להעביר את כל ה[items] ל[topic]" / "כל הקניות של היום שייכות ל[topic]" → bulk_update_tags with filter.ids=[...] picked from "Items collected so far".
+- "להעביר ל[topic]" / "תעבירי לרשימת [topic]" with NO item context — DO NOT guess. ASK: "להעביר את כל הקניות לרשימת [topic], או רק כמה? תגידי לי מה."
+- "להעביר את כל מה שיש ב[old_topic] ל[new_topic]" → bulk_update_tags with filter.where_tag=[old_topic], add_tags=[new_topic], remove_tags=[old_topic].
+- "תורידי את ה[topic] מ[item]" / "X לא שייך ל[topic]" → update_*_tags with remove_tags=[topic].
+- BULK CONFIRMATION THRESHOLD — when bulk_update_tags would touch ≥5 rows, ADD a confirmation footer to your visible reply: "סימנתי {N} פריטים בנושא {topic}. אם זה לא נכון, תגידי 'בטלי' ואחזיר". The action still fires (don't wait); the footer just gives the user a quick undo path.
+- TOPIC CREATION SIDE EFFECT — if the user is retagging items into a topic that DIDN'T exist yet, also acknowledge the creation in the visible reply: "יצרתי את הרשימה {topic} והעברתי {N} פריטים אליה ✓".
+- The 2026-04-26 "להעביר ל shopping" incident: user had pre-tagged items via the dashboard chip ("shopping"), then said "להעביר ל shopping" expecting Sheli to retag MORE items. The right move is to ASK what to retag (if no item context), then emit bulk_update_tags. Wrong move (the original bug) was Sheli interpreting "shopping" as the built-in shopping LIST and replying "they're already there".
+EXAMPLES:
+  "תשייכי את האספירין לבית מרקחת" → reply "סימנתי את האספירין בנושא בית מרקחת ✓" + ACTIONS [{"type":"update_shopping_tags","old_name":"אספירין","add_tags":["בית מרקחת"]}]
+  "להעביר את כל מה שב-shopping לרשימת אמזון" → reply "העברתי את הפריטים מ-shopping לאמזון ✓" + ACTIONS [{"type":"bulk_update_tags","table":"shopping_items","filter":{"where_tag":"shopping"},"add_tags":["אמזון"],"remove_tags":["shopping"]}]
+  "תורידי את הבית מרקחת מהאספירין" → reply "הורדתי את הבית מרקחת מהאספירין ✓" + ACTIONS [{"type":"update_shopping_tags","old_name":"אספירין","remove_tags":["בית מרקחת"]}]
+  "להעביר ל shopping" (no item context, no recent items mentioned) → reply "להעביר מה לרשימת shopping? תגידי לי אילו פריטים." + ACTIONS [] (nothing yet — wait for the user to specify)
+
 DUE_DATE (tasks only). When the user names a day-of-week or relative-day for a task ("X - יום ב", "X היום", "X מחר", "X ביום שישי"), emit "due_date":"YYYY-MM-DD" alongside "text". STRIP the day phrase from "text" — it's metadata, not part of the title. The executor auto-creates a 09:00 IL reminder on that date for tasks with a due_date. Use the CONVERSATION STATE's "today" / "this Saturday" / "this Monday" date hints to resolve. Examples:
   "להחזיר ספר היום" → {"type":"task","text":"להחזיר ספר","due_date":"<today>"}
   "תוסיפי לרשימת בית לקנות פרקט - יום ב" → {"type":"task","text":"לקנות פרקט","tags":["בית"],"due_date":"<this Monday>"}
@@ -5077,6 +5092,11 @@ UPDATE (rename/edit existing):
 - update_task: {"type":"update_task","old_text":"לנקות","new_text":"לנקות את המטבח"}
 - update_reminder: {"type":"update_reminder","old_text":"להוציא בשר","new_text":"להוציא עוף","new_send_at":"2026-04-14T18:00:00+03:00"}
 - update_event: {"type":"update_event","old_title":"ארוחת ערב","new_title":"ארוחה עם סבתא","new_date":"2026-04-20","new_time":"19:00"}
+RETAG (move existing items between topics — Tier 2 of topic-aware classification, 2026-04-26):
+- update_shopping_tags: {"type":"update_shopping_tags","old_name":"אספירין","add_tags":["בית מרקחת"]}
+- update_task_tags: {"type":"update_task_tags","old_text":"לתאם פגישה","add_tags":["עבודה"],"remove_tags":["בית"]}
+- bulk_update_tags: {"type":"bulk_update_tags","table":"shopping_items","filter":{"where_tag":"shopping"},"add_tags":["בית מרקחת"]}
+  Use filter.where_tag for "everything currently tagged X" (most common bulk case). Use filter.ids:[...] when the user named specific items from the snapshot ("Items collected so far"). NEVER omit filter — that would target every row in the household.
 REMOVE (delete existing):
 - remove_shopping: {"type":"remove_shopping","name":"פסטה"}
 - remove_task: {"type":"remove_task","text":"לנקות"}
@@ -5550,6 +5570,10 @@ const ITEMS_BASED_TYPES = new Set([
   "update_reminder", "remove_reminder",
   "update_event", "remove_event",
   "name_correction", "expense",
+  // Tier 2 retag (2026-04-26) — these have their own resolution shapes
+  // (target_id / old_name / old_text / filter) and don't carry an actionText
+  // field, so they need to skip the trigger-word check.
+  "update_shopping_tags", "update_task_tags", "bulk_update_tags",
 ]);
 
 // --- Shared CRUD helper used by 1:1 inline dispatch AND group correction handler ---
@@ -5714,6 +5738,167 @@ async function executeCrudAction(
   return { ok: true, summary: `עדכנתי ${cfg.table === "events" ? "אירוע" : cfg.table === "reminder_queue" ? "תזכורת" : "שורה"}` };
 }
 
+// Tier 2 retag operations (2026-04-26). Distinct from CrudAction's update_*
+// because tag updates merge a diff (add/remove sets) into an array column,
+// rather than overwriting a scalar field. Two shapes:
+//   single-row: update_task_tags / update_shopping_tags by id or name match
+//   bulk:       bulk_update_tags across multiple rows (filter by ids OR by
+//               existing where_tag — "everything currently tagged X")
+type TagUpdateAction = {
+  type: "update_task_tags" | "update_shopping_tags";
+  target_id?: string;
+  old_name?: string;  // shopping
+  old_text?: string;  // task
+  add_tags?: string[];
+  remove_tags?: string[];
+};
+
+type BulkTagUpdateAction = {
+  type: "bulk_update_tags";
+  table: "tasks" | "shopping_items";
+  filter: { ids?: string[]; where_tag?: string };
+  add_tags?: string[];
+  remove_tags?: string[];
+};
+
+// Apply an add/remove diff to an existing tags array. Always passes through
+// normalizeTags for consistency with executor add-* paths. Pure function —
+// no DB side effects.
+function mergeTagsDiff(current: unknown, addTags?: string[], removeTags?: string[]): string[] {
+  const next = new Set(normalizeTags(current));
+  for (const t of normalizeTags(addTags)) next.add(t);
+  for (const t of normalizeTags(removeTags)) next.delete(t);
+  return Array.from(next).sort();
+}
+
+async function executeTagUpdate(
+  householdId: string,
+  action: TagUpdateAction,
+  logPrefix: string,
+): Promise<{ ok: boolean; summary: string; error?: string }> {
+  const isTask = action.type === "update_task_tags";
+  const table = isTask ? "tasks" : "shopping_items";
+  const matchCol = isTask ? "title" : "name";
+  const activeFilter = isTask ? { done: false } : { got: false };
+  const searchText = isTask ? (action.old_text || "") : (action.old_name || "");
+
+  // Resolve target row. Direct id wins; fall back to fuzzy ilike.
+  let match: { id: string; tags?: string[] | null } | null = null;
+  if (action.target_id) {
+    let q = supabase.from(table).select("id, tags").eq("household_id", householdId).eq("id", action.target_id);
+    for (const [k, v] of Object.entries(activeFilter)) q = q.eq(k, v);
+    const { data } = await q.limit(1).maybeSingle();
+    if (data) match = data as any;
+  }
+  if (!match && searchText) {
+    let exactQ = supabase.from(table).select("id, tags").eq("household_id", householdId).eq(matchCol, searchText);
+    for (const [k, v] of Object.entries(activeFilter)) exactQ = exactQ.eq(k, v);
+    let { data: exact } = await exactQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!exact) {
+      let fuzzyQ = supabase.from(table).select("id, tags").eq("household_id", householdId).ilike(matchCol, `%${searchText}%`);
+      for (const [k, v] of Object.entries(activeFilter)) fuzzyQ = fuzzyQ.eq(k, v);
+      const { data: fuzzy } = await fuzzyQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+      exact = fuzzy;
+    }
+    match = (exact as any) || null;
+  }
+  if (!match) return { ok: false, summary: "", error: "not_found" };
+
+  const nextTags = mergeTagsDiff(match.tags, action.add_tags, action.remove_tags);
+  // C2 no-op detection (review 2026-04-26): if the merge produces the same
+  // sorted array as current, skip the UPDATE and report it. Saves a DB
+  // round-trip and gives the caller a signal to suppress the misleading
+  // "סימנתי בנושא X ✓" reply when nothing actually changed.
+  const currentSorted = normalizeTags(match.tags);
+  const sameTags = currentSorted.length === nextTags.length && currentSorted.every((t, i) => t === nextTags[i]);
+  if (sameTags) {
+    console.log(`${logPrefix} ${action.type} no-op: ${match.id} tags unchanged=[${nextTags.join(",")}]`);
+    return { ok: true, summary: `Tag-update noop: ${match.id} unchanged`, error: "noop" };
+  }
+  const { error: updErr } = await supabase
+    .from(table)
+    .update({ tags: nextTags })
+    .eq("id", match.id)
+    .eq("household_id", householdId);
+  if (updErr) { console.error(`${logPrefix} ${action.type} error:`, updErr); return { ok: false, summary: "", error: "db_error" }; }
+
+  const addLabel = (action.add_tags || []).join(", ");
+  const summary = addLabel
+    ? `Tag-update: ${match.id} +[${addLabel}] now=[${nextTags.join(",")}]`
+    : `Tag-update: ${match.id} now=[${nextTags.join(",")}]`;
+  console.log(`${logPrefix} ${summary}`);
+  return { ok: true, summary };
+}
+
+// TODO (post-observation): if bulk retag becomes a hot path, replace the
+// per-row Promise.all UPDATEs with a single Postgres RPC using array_cat /
+// array_remove. At expected scale (5-20 rows typical) the round-trip
+// overhead is acceptable; revisit only if traces show it's slow.
+async function executeBulkTagUpdate(
+  householdId: string,
+  action: BulkTagUpdateAction,
+  logPrefix: string,
+): Promise<{ ok: boolean; summary: string; error?: string; count: number; truncated?: boolean }> {
+  const table = action.table;
+  if (table !== "tasks" && table !== "shopping_items") {
+    return { ok: false, summary: "", error: "invalid_table", count: 0 };
+  }
+  const activeFilter = table === "tasks" ? { done: false } : { got: false };
+
+  // Build target row set from filter. Cap at 50 to prevent runaway (a user
+  // with 200+ items asking "retag everything" should be confirmed first via
+  // the >5-row threshold rule baked into the prompt). C1 fix (review 2026-04-26):
+  // request limit(51) so we can distinguish "exactly 50 matched" from "more
+  // than 50 — capped". If 51 come back we drop the extra and surface
+  // truncated:true so the caller can refuse and ask for a narrower scope
+  // instead of silently partial-succeeding (the Bat-Chen failure mode).
+  const HARD_CAP = 50;
+  let q = supabase.from(table).select("id, tags").eq("household_id", householdId);
+  for (const [k, v] of Object.entries(activeFilter)) q = q.eq(k, v);
+  if (action.filter?.ids && Array.isArray(action.filter.ids) && action.filter.ids.length > 0) {
+    q = q.in("id", action.filter.ids);
+  } else if (action.filter?.where_tag) {
+    const tag = String(action.filter.where_tag || "").trim().toLowerCase();
+    if (!tag) return { ok: false, summary: "", error: "empty_where_tag", count: 0 };
+    // Postgres array contains: tags @> ARRAY[tag]. supabase-js exposes via .contains()
+    q = q.contains("tags", [tag]);
+  } else {
+    return { ok: false, summary: "", error: "missing_filter", count: 0 };
+  }
+  const { data: rows, error: fetchErr } = await q.limit(HARD_CAP + 1);
+  if (fetchErr) { console.error(`${logPrefix} bulk_update_tags fetch error:`, fetchErr); return { ok: false, summary: "", error: "db_error", count: 0 }; }
+  const allRows = (rows || []) as Array<{ id: string; tags: string[] | null }>;
+  const truncated = allRows.length > HARD_CAP;
+  if (truncated) {
+    // Refuse — partial-success is worse than a clear "too many, narrow it down".
+    console.warn(`${logPrefix} bulk_update_tags REFUSED: ${allRows.length}+ rows match, exceeds HARD_CAP=${HARD_CAP}`);
+    return { ok: false, summary: "", error: "too_many_rows", count: 0, truncated: true };
+  }
+  if (allRows.length === 0) return { ok: true, summary: "no_rows_matched", count: 0 };
+
+  // Apply diff per-row in parallel. Skip rows whose merged tags array is
+  // identical to the existing one (C2 no-op detection from review 2026-04-26)
+  // — saves DB round-trips AND lets the caller report an honest count.
+  const updates = await Promise.all(allRows.map(async (row) => {
+    const nextTags = mergeTagsDiff(row.tags, action.add_tags, action.remove_tags);
+    const currentSorted = normalizeTags(row.tags);
+    const sameTags = currentSorted.length === nextTags.length && currentSorted.every((t, i) => t === nextTags[i]);
+    if (sameTags) return { id: row.id, ok: true, noop: true };
+    const { error } = await supabase
+      .from(table)
+      .update({ tags: nextTags })
+      .eq("id", row.id)
+      .eq("household_id", householdId);
+    return { id: row.id, ok: !error, noop: false };
+  }));
+  const updated = updates.filter((u) => u.ok && !u.noop).length;
+  const noops = updates.filter((u) => u.noop).length;
+  const failed = updates.filter((u) => !u.ok).length;
+  if (failed > 0) console.error(`${logPrefix} bulk_update_tags: ${failed}/${updates.length} rows failed to update`);
+  console.log(`${logPrefix} Bulk-tag-update: ${updated} updated, ${noops} no-op, ${failed} failed (${table}), +[${(action.add_tags || []).join(",")}] -[${(action.remove_tags || []).join(",")}]`);
+  return { ok: failed === 0, summary: `bulk_tag_update updated=${updated} noop=${noops}`, count: updated };
+}
+
 async function execute1on1Actions(params: {
   raw: string;
   text: string;
@@ -5801,6 +5986,28 @@ async function execute1on1Actions(params: {
       if (action.type === "expense" && (!action.amount || (typeof action.amount === "number" && action.amount <= 0))) {
         droppedActions.push({ reason: "expense_no_amount", action });
         return false;
+      }
+      // Tier 2 retag validation (2026-04-26): tag updates need a target AND a
+      // diff. Drop empties so a malformed Sonnet emission doesn't no-op silently.
+      const isTagUpdate = action.type === "update_shopping_tags" || action.type === "update_task_tags";
+      if (isTagUpdate) {
+        const hasTarget = action.target_id || action.old_name || action.old_text;
+        const hasDiff = (Array.isArray(action.add_tags) && action.add_tags.length > 0)
+          || (Array.isArray(action.remove_tags) && action.remove_tags.length > 0);
+        if (!hasTarget) { droppedActions.push({ reason: "tag_update_no_target", action }); return false; }
+        if (!hasDiff)   { droppedActions.push({ reason: "tag_update_no_diff", action }); return false; }
+      }
+      if (action.type === "bulk_update_tags") {
+        const validTable = action.table === "tasks" || action.table === "shopping_items";
+        const hasFilter = action.filter && (
+          (Array.isArray(action.filter.ids) && action.filter.ids.length > 0)
+          || (typeof action.filter.where_tag === "string" && action.filter.where_tag.trim().length > 0)
+        );
+        const hasDiff = (Array.isArray(action.add_tags) && action.add_tags.length > 0)
+          || (Array.isArray(action.remove_tags) && action.remove_tags.length > 0);
+        if (!validTable) { droppedActions.push({ reason: "bulk_tag_invalid_table", action }); return false; }
+        if (!hasFilter)  { droppedActions.push({ reason: "bulk_tag_no_filter", action }); return false; }
+        if (!hasDiff)    { droppedActions.push({ reason: "bulk_tag_no_diff", action }); return false; }
       }
       return true;
     }
@@ -6128,6 +6335,17 @@ async function execute1on1Actions(params: {
         case "remove_shopping": case "remove_task": case "remove_reminder": case "remove_event": {
           if (!householdId) break;
           await executeCrudAction(householdId, action as CrudAction, logPrefix);
+          break;
+        }
+        // --- TAG UPDATE / BULK TAG UPDATE (Tier 2 retag, 2026-04-26) ---
+        case "update_shopping_tags": case "update_task_tags": {
+          if (!householdId) break;
+          await executeTagUpdate(householdId, action as TagUpdateAction, logPrefix);
+          break;
+        }
+        case "bulk_update_tags": {
+          if (!householdId) break;
+          await executeBulkTagUpdate(householdId, action as BulkTagUpdateAction, logPrefix);
           break;
         }
         default:
