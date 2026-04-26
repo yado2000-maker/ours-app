@@ -3332,6 +3332,18 @@ function levenshtein(a: string, b: string): number {
   return prev[n];
 }
 
+// Canonicalize a free-form tag list before storing. Pre-2026-04-26 the same
+// six lines lived inline in add_task / add_shopping / add_event executors;
+// any drift between them silently fragmented the household's tag taxonomy.
+// Rules: stringify, trim, lowercase, drop empty, drop length>50. Returns []
+// for non-array input so callers can pass `entities.tags` directly.
+function normalizeTags(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((t) => String(t ?? "").trim().toLowerCase())
+    .filter((t) => t.length > 0 && t.length <= 50);
+}
+
 function isSameProduct(a: string, b: string): boolean {
   const na = a.replace(REPEATED_LETTERS, "$1$1").trim();
   const nb = b.replace(REPEATED_LETTERS, "$1$1").trim();
@@ -3732,11 +3744,7 @@ async function executeActions(
             summary.push(`Task-exists: "${taskMatch.title}"`);
           } else {
             const newTaskId = uid4();
-            const normalizedTags = Array.isArray(tags)
-              ? tags
-                  .map((t) => String(t || "").trim().toLowerCase())
-                  .filter((t) => t.length > 0 && t.length <= 50)
-              : [];
+            const normalizedTags = normalizeTags(tags);
             // Defense-in-depth (review LOW 8): the regex alone allows nonsense
             // like 9999-99-99 through, which then 22008-fails the entire INSERT
             // (not just the date column). Round-trip through Date so an invalid
@@ -3820,11 +3828,7 @@ async function executeActions(
             items: Array<{ name: string; qty?: string; category?: string }>;
             tags?: string[];
           };
-          const normalizedTags = Array.isArray(tags)
-            ? tags
-                .map((t) => String(t || "").trim().toLowerCase())
-                .filter((t) => t.length > 0 && t.length <= 50)
-            : [];
+          const normalizedTags = normalizeTags(tags);
 
           const { data: existingItems } = await supabase
             .from("shopping_items")
@@ -3887,11 +3891,7 @@ async function executeActions(
             scheduled_for: string;
             tags?: string[];
           };
-          const normalizedTags = Array.isArray(tags)
-            ? tags
-                .map((t) => String(t || "").trim().toLowerCase())
-                .filter((t) => t.length > 0 && t.length <= 50)
-            : [];
+          const normalizedTags = normalizeTags(tags);
 
           const datePrefix = scheduled_for.slice(0, 10);
           const { data: existingEvents } = await supabase
