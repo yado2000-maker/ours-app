@@ -290,5 +290,25 @@ Each phase is a deployable unit; later phases depend on earlier. Each ends with 
 
 ## Open Questions
 
-- **Pill series details for Netzer backfill:** Yaron asked to set up "עופרי takes pill from 8pm every 30 mins". Need: deadline (23:00? 22:00?), max_tries, days. The existing 20:00-daily reminder already exists; question is whether to add nudge behavior or keep current daily + add separate nudge. Tentatively: extend the existing parent with `nudge_config = {interval_min:30, max_tries:6, deadline_time_il:"23:00", channel:"group"}` once Phase 1 ships.
-- **Net Phase 1 backfill timing:** Phase 1 schema-only is ~1 day to ship. The wrong-days every-day reminders fire tomorrow at 14:00. Options: (a) fix immediately with the existing recurring-reminder primitive (12 rows, fixed times, no auto-ack — same as today's broken state but with correct days), then migrate to nudge series in Phase 1; (b) ship Phase 1 fast and backfill once. Recommend (a) — interim users benefit even without auto-ack, and tomorrow's nudges will land at correct days.
+- **13:00 dog reminder day-set drift:** the pre-existing lunch-walk reminder at 13:00 from 2026-04-20 uses עופרי `[0,2,4]` (no Saturday), but the corrected 14:00–16:30 series uses `[0,2,4,6]`. Decide whether to align the 13:00 row.
+
+## Interim Cleanup Log (2026-04-26)
+
+Ahead of Phase 1, the Netzer family DB was repaired to fire correctly tomorrow morning. This cleanup uses the **existing** `recurring_reminder` primitive (no auto-ack); rows are tagged `metadata.will_migrate_to_nudge_series=true` for Phase 1 migration.
+
+**Snapshot:** 55 affected rows preserved at `bot_settings.netzer_2026_04_26_dog_pill_pre_cleanup_snapshot` for rollback.
+
+**Removed:** 7 wrong parents (6 every-day dog reminders with `group_id=Einat's 1:1 phone` from the 16:41 ACTIONS-leak session + 1 daily-only pill parent) plus their 48 unsent children. The 3 historical fired pill children (2026-04-21..04-25) are preserved for audit trail.
+
+**Inserted:**
+
+- 12 dog rotation parents — 6 time slots × 2 targets:
+  - עופרי `days:[0,2,4,6]` at 14:00 / 14:30 / 15:00 / 15:30 / 16:00 / 16:30
+  - אריק `days:[1,3,5]` at the same 6 slots
+  - All in family group `120363407839946451@g.us`
+  - Tagged `source: netzer_dog_rotation_cleanup_2026_04_26`
+- 6 pill nudge-stub parents — every 30 min from 20:00 to 22:30, all 7 days, family group
+  - Tagged `source: netzer_pill_nudge_cleanup_2026_04_26`
+  - Each carries `metadata.intended_nudge_config` with the target Phase 1 shape (`interval_min:30, max_tries:6, deadline_time_il:'22:30', channel:'group', target:'עופרי', prompt_completion:'לקחת את הכדור'`) so the Phase 1 backfill script can read intent directly.
+
+**Materialized:** 78 children for the next 7 days via `materialize_recurring_reminders()`. Tonight's 6 pill nudges (20:00–22:30) and tomorrow's 6 אריק dog nudges (14:00–16:30) are queued in family group.
