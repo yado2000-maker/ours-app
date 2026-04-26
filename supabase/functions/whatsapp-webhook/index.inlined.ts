@@ -2183,6 +2183,28 @@ Examples — rotation kids Wed=יונתן (972501111111), Thu=איתן (97250222
 Same rotation but נגה MISSING from PHONE MAPPINGS:
   reply (empty or short — handler writes the fallback)
   <!--MISSING_PHONES:{"known":[{"name":"יונתן","phone":"972501111111"},{"name":"איתן","phone":"972502222222"}],"unknown":["נגה"],"reminder_text":"לשטוף כלים","delivery_mode":"dm","send_at_or_recurrence":{"days":[3,4,5],"time":"07:00"}}-->
+
+RETAG OPERATIONS — group path (Tier 2.5, 2026-04-26):
+When the user asks to MOVE existing items between topics or ADD/REMOVE a tag from existing items, emit a hidden RETAG block. Same operation semantics as the 1:1 ACTIONS shape but as a metadata block (group path doesn't use ACTIONS arrays). Two block shapes:
+- SINGLE row by name/title: <!--RETAG:{"table":"shopping_items","old_name":"אספירין","add_tags":["בית מרקחת"]}-->
+- SINGLE row task by text: <!--RETAG:{"table":"tasks","old_text":"לתאם פגישה","add_tags":["עבודה"],"remove_tags":["בית"]}-->
+- BULK by where_tag: <!--RETAG:{"table":"shopping_items","filter":{"where_tag":"shopping"},"add_tags":["אמזון"],"remove_tags":["shopping"]}-->
+- BULK by ids: <!--RETAG:{"table":"shopping_items","filter":{"ids":["abc","def"]},"add_tags":["בית מרקחת"]}-->
+
+Detection patterns:
+- "להעביר את [item] לרשימת [topic]" / "תשייכי את [item] ל[topic]" / "[item] שייך ל[topic]" → SINGLE retag.
+- "להעביר את כל מה שב-[old_topic] ל[new_topic]" → BULK by where_tag, with both add_tags AND remove_tags=[old_topic].
+- "תורידי את ה[topic] מ[item]" → SINGLE retag with remove_tags=[topic] only.
+- "להעביר ל[topic]" with NO item context — DO NOT guess. Reply "להעביר מה לרשימת [topic]?" and emit NO RETAG block. Wait for the user to specify.
+- BULK CONFIRMATION FOOTER — when bulk RETAG would touch ≥5 rows, ADD a confirmation line to your visible reply: "סימנתי {N} פריטים בנושא {topic}. אם זה לא נכון, תגידי 'בטלי' ואחזיר".
+- TOPIC CREATION SIDE EFFECT — if the new tag in add_tags is a topic that didn't exist yet (not in EXISTING TOPICS or TAG DECISIONS), acknowledge in the visible reply: "יצרתי את הרשימה {topic} והעברתי {N} פריטים אליה ✓".
+- HARD CAP — server refuses bulk operations exceeding 50 rows. If the user asks "retag everything" on a topic with 50+ items, ASK for a narrower scope first.
+
+Examples:
+  "תשייכי את האספירין לבית מרקחת" → reply "סימנתי את האספירין בנושא בית מרקחת ✓" + <!--RETAG:{"table":"shopping_items","old_name":"אספירין","add_tags":["בית מרקחת"]}-->
+  "להעביר את כל מה שב-shopping לרשימת אמזון" → reply "העברתי את הפריטים מ-shopping לאמזון ✓" + <!--RETAG:{"table":"shopping_items","filter":{"where_tag":"shopping"},"add_tags":["אמזון"],"remove_tags":["shopping"]}-->
+  "תורידי את הבית מרקחת מהאספירין" → reply "הורדתי את הבית מרקחת מהאספירין ✓" + <!--RETAG:{"table":"shopping_items","old_name":"אספירין","remove_tags":["בית מרקחת"]}-->
+
 ${buildDayAnchor()}
 
 ${ctx.familyMemories ? `
@@ -2475,11 +2497,72 @@ function extractMissingPhonesFromReply(reply: string): Array<{
   return out;
 }
 
+// RETAG block extractor (Tier 2.5, 2026-04-26). Group-path equivalent of the
+// 1:1 ACTIONS update_shopping_tags / update_task_tags / bulk_update_tags
+// shapes. Sonnet emits one or more <!--RETAG:{...}--> blocks; this returns
+// the parsed action shapes ready for dispatch to executeTagUpdate /
+// executeBulkTagUpdate. Bulk vs single is determined by the presence of
+// `filter` — bulk shape has `filter.where_tag` or `filter.ids`, single
+// shape has `old_name` (shopping) or `old_text` (task).
+function extractRetagFromReply(reply: string): Array<TagUpdateAction | BulkTagUpdateAction> {
+  const out: Array<TagUpdateAction | BulkTagUpdateAction> = [];
+  // The block body can contain nested arrays/objects; use [\s\S]*? non-greedy
+  // up to "-->" terminator. Multiline fields like recipient_phones aren't a
+  // concern here, but be permissive.
+  for (const m of reply.matchAll(/<!--\s*RETAG\s*:\s*(\{[\s\S]*?\})\s*-*>/g)) {
+    try {
+      const parsed = JSON.parse(m[1]);
+      if (!parsed.table || (parsed.table !== "tasks" && parsed.table !== "shopping_items")) {
+        console.warn("[Retag] Invalid or missing table:", m[1]);
+        continue;
+      }
+      const hasDiff = (Array.isArray(parsed.add_tags) && parsed.add_tags.length > 0)
+        || (Array.isArray(parsed.remove_tags) && parsed.remove_tags.length > 0);
+      if (!hasDiff) {
+        console.warn("[Retag] No add_tags or remove_tags — skipping:", m[1]);
+        continue;
+      }
+      // Bulk shape: has filter object with ids[] or where_tag.
+      if (parsed.filter) {
+        const f = parsed.filter;
+        const hasFilter = (Array.isArray(f.ids) && f.ids.length > 0)
+          || (typeof f.where_tag === "string" && f.where_tag.trim().length > 0);
+        if (!hasFilter) { console.warn("[Retag] Bulk filter empty:", m[1]); continue; }
+        out.push({
+          type: "bulk_update_tags",
+          table: parsed.table,
+          filter: f,
+          add_tags: parsed.add_tags,
+          remove_tags: parsed.remove_tags,
+        });
+        continue;
+      }
+      // Single shape: requires old_name (shopping) or old_text (task).
+      const isTask = parsed.table === "tasks";
+      const target = isTask ? parsed.old_text : parsed.old_name;
+      if (!target || typeof target !== "string" || !target.trim()) {
+        console.warn("[Retag] Single shape missing target field:", m[1]);
+        continue;
+      }
+      out.push({
+        type: isTask ? "update_task_tags" : "update_shopping_tags",
+        ...(isTask ? { old_text: target } : { old_name: target }),
+        add_tags: parsed.add_tags,
+        remove_tags: parsed.remove_tags,
+      });
+    } catch {
+      console.warn("[Retag] Failed to parse RETAG block:", m[1]);
+    }
+  }
+  return out;
+}
+
 function cleanReminderFromReply(reply: string): string {
   return reply
     .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
+    .replace(/<!--\s*RETAG\s*:[\s\S]*?-->/g, "")
     .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
     .replace(/<!--\s*REMINDER[^>]*>/g, "")
     // Catch-all (2026-04-19): strip any remaining HTML-comment metadata block
@@ -2935,6 +3018,28 @@ async function rescueRemindersAndStrip(
 
   if (missingPhoneFallbackReply) {
     return missingPhoneFallbackReply;
+  }
+
+  // RETAG dispatch (Tier 2.5, 2026-04-26). Sonnet emits one or more
+  // <!--RETAG:{...}--> blocks for retag operations from group context.
+  // Each block translates to either a single-row update_*_tags or a
+  // bulk_update_tags action and dispatches via the shared executors.
+  // Errors are logged but non-fatal — the visible reply still goes through.
+  const retagActions = extractRetagFromReply(reply);
+  for (const ra of retagActions) {
+    try {
+      if (ra.type === "bulk_update_tags") {
+        const res = await executeBulkTagUpdate(householdId, ra, "[RetagRescue]");
+        if (res.truncated) {
+          console.warn(`[RetagRescue] Bulk refused (>50 rows) — Sonnet should have asked for narrower scope`);
+        }
+      } else {
+        await executeTagUpdate(householdId, ra, "[RetagRescue]");
+      }
+      rescueSaveCount++;
+    } catch (err) {
+      console.error(`[RetagRescue] dispatch error (non-fatal):`, err);
+    }
   }
 
   // COMMITMENT-EMISSION safety net (2026-04-21). If Sonnet's visible reply contains
@@ -3736,14 +3841,29 @@ async function executeActions(
     try {
       switch (action.type) {
         case "create_topic": {
-          // No-op success (Tier 1, 2026-04-26). Topics are emergent from the
-          // `tags` column on existing rows; an "empty topic" has no DB shape.
-          // We acknowledge here so Sonnet's reply context knows to say
-          // "סבבה, יצרתי את רשימת X ✓ מה להוסיף?". The first add-to-topic
-          // action that follows materializes the topic into reality.
-          // Tier 3 will persist the user's topic-vs-item choice into
-          // household_patterns so future ambiguous mentions don't re-ask.
+          // Topics are emergent from the `tags` column on existing rows; an
+          // "empty topic" has no DB row of its own. But for the household to
+          // remember "<noun> is a topic" even before any items get tagged,
+          // we persist a household_patterns row (Tier 3, 2026-04-26).
+          // Future bare-noun mentions of <topic> hit the TAG DECISIONS
+          // block in the Haiku prompt and skip the ambiguity-ask. This
+          // lets users "create" a list and then add to it later without
+          // Sheli forgetting in between.
           const { topic, scope } = action.data as { topic: string; scope?: string };
+          const norm = String(topic || "").trim().toLowerCase();
+          if (norm && norm.length <= 50) {
+            const { error: patternErr } = await supabase
+              .from("household_patterns")
+              .upsert({
+                household_id: householdId,
+                pattern_type: "tag_decision",
+                pattern_key: norm,
+                pattern_value: "topic",
+                confidence: 0.9,
+                hit_count: 1,
+              }, { onConflict: "household_id,pattern_type,pattern_key" });
+            if (patternErr) console.error(`${logPrefix} create_topic pattern persist error (non-fatal):`, patternErr);
+          }
           summary.push(`Topic-create: "${topic}" (scope: ${scope || "any"})`);
           break;
         }
@@ -12193,6 +12313,15 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     if (byType.invitation_accepted) {
       sections.push(
         `INVITATIONS THIS FAMILY ACCEPTED (ok to visit warmly next time you see something similar):\n  - ${byType.invitation_accepted.join("\n  - ")}`,
+      );
+    }
+    // Tier 3 (2026-04-26): topic-vs-item decisions remembered for this household.
+    // When a user has previously confirmed that "<noun>" is a topic (or an item),
+    // future ambiguous bare-noun mentions skip the ask and route directly.
+    // Format: pattern_key=noun, pattern_value="topic"|"item".
+    if (byType.tag_decision) {
+      sections.push(
+        `TAG DECISIONS — household has resolved these previously, treat as canonical (do NOT re-ask):\n  - ${byType.tag_decision.join("\n  - ")}`,
       );
     }
     familyPatterns = sections.join("\n");
