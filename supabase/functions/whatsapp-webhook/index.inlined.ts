@@ -1757,7 +1757,8 @@ async function callCorrectionSonnet(prompt: string): Promise<CorrectionSonnetRes
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 512,
+        // 2026-04-26: bumped 512→4096 (truncation safety, see Netzer leak).
+        max_tokens: 4096,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -2249,7 +2250,9 @@ async function generateReply(
       },
       body: JSON.stringify({
         model: SONNET_MODEL,
-        max_tokens: 256,
+        // 2026-04-26: bumped 256→4096 to prevent <!--ACTIONS/RECURRING_REMINDER/...-->
+        // truncation. Multi-action turns (e.g. 6 rotation entries) overflowed 256.
+        max_tokens: 4096,
         system: systemPrompt,
         messages: [
           {
@@ -2557,23 +2560,37 @@ function extractRetagFromReply(reply: string): Array<TagUpdateAction | BulkTagUp
   return out;
 }
 
+// Truncation-aware metadata stripper (2026-04-26 Netzer leak).
+// Sonnet's max_tokens cut-off can leave an unterminated "<!--ACTIONS:[{..."
+// (or any other "<!--XXX:" opener) with no closing "-->". The terminator-
+// required strippers above all miss it, so the raw JSON leaks to the user.
+// Run AFTER all terminated-block strippers — at this point the only remaining
+// "<!--XXX:" opener is by definition truncated, so we strip it to end-of-string.
+// Pattern requires uppercase/underscore name (e.g. ACTIONS, REMINDER, RECURRING_REMINDER,
+// EVENT, MEMORY, TRIED, RETAG, MISSING_PHONES, PENDING_ACTION) so legitimate
+// chat text containing "<!--" stays untouched.
+function stripUnterminatedMetaBlocks(s: string): string {
+  return s.replace(/<!--\s*[A-Z][A-Z_]*\s*:[\s\S]*$/, "").trimEnd();
+}
+
 function cleanReminderFromReply(reply: string): string {
-  return reply
-    .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
-    .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
-    .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
-    .replace(/<!--\s*RETAG\s*:[\s\S]*?-->/g, "")
-    .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
-    .replace(/<!--\s*REMINDER[^>]*>/g, "")
-    // Catch-all (2026-04-19): strip any remaining HTML-comment metadata block
-    // Sonnet may have invented by analogy — e.g. <!--EVENT:{...}-->, <!--TASK:...-->,
-    // <!--SHOPPING:...-->. Real consumable blocks (REMINDER / MEMORY / PENDING_ACTION)
-    // are extracted + stripped BEFORE this function runs in their respective paths,
-    // so this catch-all only removes stray Sonnet hallucinations, preventing them
-    // from leaking to the user's WhatsApp chat.
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return stripUnterminatedMetaBlocks(
+    reply
+      .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
+      .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
+      .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
+      .replace(/<!--\s*RETAG\s*:[\s\S]*?-->/g, "")
+      .replace(/<-*!?-*\s*\{[^}]*\}\s*:?\s*REMINDER\s*[~!-]*>/g, "")
+      .replace(/<!--\s*REMINDER[^>]*>/g, "")
+      // Catch-all (2026-04-19): strip any remaining HTML-comment metadata block
+      // Sonnet may have invented by analogy — e.g. <!--EVENT:{...}-->, <!--TASK:...-->,
+      // <!--SHOPPING:...-->. Real consumable blocks (REMINDER / MEMORY / PENDING_ACTION)
+      // are extracted + stripped BEFORE this function runs in their respective paths,
+      // so this catch-all only removes stray Sonnet hallucinations, preventing them
+      // from leaking to the user's WhatsApp chat.
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+  ).trim();
 }
 
 /**
@@ -3383,7 +3400,8 @@ async function classifyMessages(
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
+        // 2026-04-26: bumped 1024→4096 (truncation safety, see Netzer leak).
+        max_tokens: 4096,
         system: systemPrompt,
         messages: [{ role: "user", content: formattedMsgs }],
       }),
@@ -5411,12 +5429,13 @@ async function fetch1on1History(groupId: string, currentUserName: string): Promi
   for (const msg of history.reverse()) {
     if (msg.sender_phone === BOT_PHONE) {
       // Bot message — strip metadata blocks, keep visible text only
-      const visible = (msg.message_text || "")
-        .replace(/<!--ACTIONS:.*?-->/s, "")
-        .replace(/<!--TRIED:.*?-->/s, "")
-        .replace(/<!--MEMORY:.*?-->/s, "")
-        .replace(/<!--REMINDER:\{.*?\}-->/s, "")
-        .trim();
+      const visible = stripUnterminatedMetaBlocks(
+        (msg.message_text || "")
+          .replace(/<!--ACTIONS:.*?-->/s, "")
+          .replace(/<!--TRIED:.*?-->/s, "")
+          .replace(/<!--MEMORY:.*?-->/s, "")
+          .replace(/<!--REMINDER:\{.*?\}-->/s, "")
+      ).trim();
       if (visible) turns.push({ role: "assistant", content: visible });
     } else {
       // User message
@@ -6047,10 +6066,11 @@ async function execute1on1Actions(params: {
   // 2. Parse hidden metadata
   const actionsMatch = raw.match(/<!--ACTIONS:(.*?)-->/s);
   const triedMatch = raw.match(/<!--TRIED:(.*?)-->/s);
-  let visibleReply = raw
-    .replace(/<!--ACTIONS:.*?-->/s, "")
-    .replace(/<!--TRIED:.*?-->/s, "")
-    .trim();
+  let visibleReply = stripUnterminatedMetaBlocks(
+    raw
+      .replace(/<!--ACTIONS:.*?-->/s, "")
+      .replace(/<!--TRIED:.*?-->/s, "")
+  ).trim();
 
   // 3. Parse actions JSON
   let actions: any[] = [];
@@ -7527,7 +7547,9 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 512,
+        // 2026-04-26: bumped 512→4096 to prevent <!--ACTIONS:[...]--> truncation
+        // on multi-action turns (Netzer rotation leak).
+        max_tokens: 4096,
         system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
         messages: mergedMessages,
       }),
@@ -7741,7 +7763,8 @@ CONVERSATION CONTINUITY — CRITICAL:
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 512,
+        // 2026-04-26: bumped 512→4096 (truncation safety, Netzer leak).
+        max_tokens: 4096,
         system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
         messages: mergedMessages,
       }),
