@@ -334,3 +334,47 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* ─── Tag chip editor + new-item input + inline edit (2026-04-26) ─── */
+
+/* Inline tag pills shown on read-only task/shopping rows. Smaller than the
+   filter chips — they're decoration, not interaction. */
+.task-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+.task-tag-chip{font-size:11px;font-weight:500;color:var(--muted);background:var(--cream);border:1px solid var(--border);border-radius:100px;padding:2px 8px;white-space:nowrap;}
+
+.task-text-editable,.shop-name-editable{cursor:text;}
+.task-text-editable:hover,.shop-name-editable:hover{color:var(--primary);}
+
+/* TagChipsEditor — multi-select chip row used inside edit forms + new-item.
+   Wraps to multiple lines when chips overflow (vs filter row which scrolls). */
+.tag-editor{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.tag-editor-compact{margin-top:6px;}
+
+.tag-chip-editable{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);border-color:var(--accent-mid);color:var(--accent);cursor:default;}
+.tag-chip-editable:hover{border-color:var(--accent-mid);color:var(--accent);}
+.tag-chip-x{background:none;border:none;cursor:pointer;color:var(--accent);font-size:14px;line-height:1;padding:0 0 0 2px;opacity:0.5;transition:opacity 0.12s;}
+.tag-chip-x:hover{opacity:1;}
+
+.tag-chip-add{color:var(--muted);border-style:dashed;}
+.tag-chip-add:hover{color:var(--primary);border-color:var(--primary);border-style:solid;}
+
+.tag-chip-input-wrap{position:relative;padding:0;background:var(--white);border:1.5px solid var(--primary);border-radius:999px;display:inline-flex;align-items:center;}
+.tag-chip-input{font-size:13px;font-family:inherit;border:none;outline:none;background:transparent;padding:6px 12px;width:120px;color:var(--dark);}
+.tag-suggestions{position:absolute;top:100%;inset-inline-start:0;margin-top:4px;display:flex;flex-direction:column;gap:2px;background:var(--white);border:1px solid var(--border);border-radius:8px;box-shadow:var(--sh);padding:4px;z-index:20;min-width:120px;}
+.tag-suggestion{font-size:13px;font-family:inherit;background:transparent;border:none;cursor:pointer;color:var(--dark);text-align:start;padding:5px 10px;border-radius:5px;}
+.tag-suggestion:hover{background:var(--accent-soft);color:var(--accent);}
+
+/* NewItemInput — single-row input above each list. */
+.new-item-input{display:flex;flex-direction:column;gap:4px;background:var(--white);border-radius:13px;padding:10px 12px;box-shadow:var(--sh);border:1.5px solid var(--border);margin-bottom:8px;}
+.new-item-row{display:flex;align-items:center;gap:8px;}
+.new-item-text{flex:1;min-width:0;font-size:14.5px;font-family:inherit;border:none;outline:none;background:transparent;color:var(--dark);padding:4px 0;}
+.new-item-text::placeholder{color:var(--muted);}
+.new-item-submit{flex-shrink:0;width:28px;height:28px;border-radius:50%;border:1.5px solid var(--primary);background:var(--primary);color:#fff;font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.15s,transform 0.1s;font-family:inherit;padding:0;}
+.new-item-submit:disabled{opacity:0.35;cursor:default;}
+.new-item-submit:not(:disabled):hover{transform:scale(1.06);}
+
+/* Inline edit state for task and shopping rows. The edit row replaces the
+   normal row in place — same border/background/spacing for visual continuity,
+   but the title becomes an input and the tag editor sits below it. */
+.task-row-editing,.shop-row-editing{flex-direction:column;align-items:stretch;gap:8px;border-color:var(--primary);}
+.task-edit-input,.shop-edit-input{font-size:14.5px;font-family:inherit;border:none;outline:none;background:transparent;color:var(--dark);width:100%;padding:2px 0;}

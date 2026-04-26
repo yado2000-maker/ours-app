@@ -537,6 +537,48 @@ function SheliApp() {
     const updated = n.find(x => x.id === id);
     if (hhId && updated) saveShoppingItem(hhId, updated);
   };
+  // Web-app add/edit (2026-04-26 — closes the round-trip so tags created via
+  // bot can be edited from dashboard, and items can be added without WhatsApp).
+  // Same optimistic-update + lastSaveRef debounce pattern as toggleTask.
+  const addTask = async ({ text, tags }) => {
+    if (!text || !text.trim()) return;
+    const id = uid8();
+    const newTask = { id, title: text.trim(), tags: Array.isArray(tags) ? tags : [], done: false };
+    const n = [...tasks, newTask];
+    setTasksS(n);
+    analytics.taskCreated();
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    if (hhId) saveTask(hhId, newTask);
+  };
+  const updateTask = async (id, patch) => {
+    const n = tasks.map(x => x.id === id ? { ...x, ...patch } : x);
+    setTasksS(n);
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    const updated = n.find(x => x.id === id);
+    if (hhId && updated) saveTask(hhId, updated);
+  };
+  const addShop = async ({ text, tags }) => {
+    if (!text || !text.trim()) return;
+    const id = uid8();
+    const newItem = { id, name: text.trim(), tags: Array.isArray(tags) ? tags : [], got: false, category: "אחר" };
+    const n = [...shopping, newItem];
+    setShoppingS(n);
+    analytics.shoppingItemAdded();
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    if (hhId) saveShoppingItem(hhId, newItem);
+  };
+  const updateShop = async (id, patch) => {
+    const n = shopping.map(x => x.id === id ? { ...x, ...patch } : x);
+    setShoppingS(n);
+    const hhId = lsGet("sheli-hhid");
+    lastSaveRef.current = Date.now();
+    const updated = n.find(x => x.id === id);
+    if (hhId && updated) saveShoppingItem(hhId, updated);
+  };
+
   // M4 fix: two-tap delete — first tap shows "Sure?", second tap deletes
   const deleteItem = async (type, id) => {
     if (!pendingDelete || pendingDelete.type !== type || pendingDelete.id !== id) {
@@ -968,11 +1010,11 @@ function SheliApp() {
           )}
 
           {tab === "tasks" && (
-            <TasksView tasks={tasks} user={user} lang={lang} onToggle={toggleTask} onClaim={claimTask} onDelete={deleteItem} onClearDone={clearDone} t={t} pendingDelete={pendingDelete} loading={!dataLoaded} />
+            <TasksView tasks={tasks} user={user} lang={lang} onToggle={toggleTask} onClaim={claimTask} onDelete={deleteItem} onClearDone={clearDone} onAdd={addTask} onUpdate={updateTask} t={t} pendingDelete={pendingDelete} loading={!dataLoaded} />
           )}
 
           {tab === "shopping" && (
-            <ShoppingView shopping={shopping} onToggle={toggleShop} onDelete={deleteItem} onClearGot={clearGot} t={t} pendingDelete={pendingDelete} loading={!dataLoaded} />
+            <ShoppingView shopping={shopping} onToggle={toggleShop} onDelete={deleteItem} onClearGot={clearGot} onAdd={addShop} onUpdate={updateShop} t={t} pendingDelete={pendingDelete} loading={!dataLoaded} />
           )}
 
           {tab === "week" && (
