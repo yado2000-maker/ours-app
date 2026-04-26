@@ -21,7 +21,7 @@ export default function TagChipsEditor({
   value,
   onChange,
   suggestions = [],
-  placeholder = "+ תג",
+  placeholder = "+ נושא",
   compact = false,
 }) {
   const [adding, setAdding] = useState(false);
