@@ -178,6 +178,14 @@ interface ClassificationOutput {
     // also auto-creates a 09:00 IL reminder for that date.
     tags?: string[];
     due_date?: string; // "YYYY-MM-DD"
+    // Topic-aware classification (Tier 1, 2026-04-26). When the user's message
+    // names a topic/sub-list (place, vendor, project label) WITHOUT an item,
+    // Haiku sets is_topic_creation=true so the executor records the topic
+    // without inserting an item row. The "topic" field carries the topic name
+    // (already in tags too — kept separate so the executor can render
+    // "יצרתי את רשימת X ✓" correctly even if tags is empty downstream).
+    is_topic_creation?: boolean;
+    topic?: string;
     raw_text: string;
   };
 }
@@ -190,6 +198,10 @@ interface ClassifierContext {
   today: string; // ISO date "2026-04-02"
   dayOfWeek: string; // Hebrew day name "רביעי"
   familyPatterns?: string; // Learned patterns for this household
+  // Distinct tags currently in use by this household across tasks + shopping +
+  // events. Lets Haiku resolve ambiguous "תוסיפי X" — if X matches an existing
+  // topic, classify as add-to-topic instead of add-as-item (Tier 1, 2026-04-26).
+  existingTags?: string[];
   conversationHistory?: string; // Formatted recent conversation for context
   // Phase 5 Task 5.2 (2026-04-22): compact signal about the conversational moment
   // — time since last message + living-layer density over the last 5 messages.
@@ -704,6 +716,9 @@ ${shoppingStr}
 ACTIVE ROTATIONS:
 ${rotationsStr}
 
+EXISTING TOPICS (sub-lists this household already uses — match candidate "items" against these before adding as new items):
+${(ctx.existingTags && ctx.existingTags.length > 0) ? ctx.existingTags.map((t) => `• ${t}`).join("\n") : "(none yet)"}
+
 HEBREW PATTERNS:
 - GROCERY VOCABULARY = add_shopping, always. Any list of food (vegetables, fruits, meat, fish, dairy, bread, grains, oils, spices, snacks, beverages, condiments, sweets, baking supplies), household staples (toilet paper, dish soap, cleaning supplies), or pantry items IS a shopping list. This is true regardless of:
   - Format: commas, newlines, numbered lines, bullet-free text — all valid shopping lists
@@ -775,12 +790,25 @@ HEBREW PATTERNS:
 - IN-THE-MOMENT COMMANDS (= ignore, NOT add_task): direct orders from one family member to another about something PHYSICALLY PRESENT in the moment — NOT planning-level tasks. Signals: (a) deictic "זה" / "את זה" / "this" / "that" / "here" pointing at something visible, (b) message is a quote-reply to a photo/image, (c) imperative about immediate cleanup/disposal with no time reference. Examples: "לפנות את זה לזבל" (empty THIS to trash) = ignore. "לנקות את זה" (clean THIS) = ignore. "תזרקי את זה" (throw this out) = ignore. "תסדרו את זה" (tidy this up) = ignore. "לשים את זה שם" (put this there) = ignore. Difference from planning tasks: "לקנות חלב" (abstract, no deictic) CAN be add_task; "לקחת את זה מהסופר" (pointing at something) = ignore. Rule of thumb: if the verb refers to a physical object the family can see RIGHT NOW (not next week, not an abstract chore), it's family social direction. Escape hatch: explicit שלי/@שלי tag = keep original intent.
 - INDIRECT FAMILY PLEAS (= ignore, NOT add_task, NOT add_reminder): "שמישהו [verb]", "מישהו יכול ל...", "אולי מישהו [verb]", "יש מישהו ש...", "someone please [verb]", "can someone [verb]" = one family member asking an UNNAMED person in the group for a favor. This is a social negotiation between humans, NOT a task for Sheli. Even when the verb sounds actionable (ידליק, יוריד, יביא, יפתח, יסגור, turn on/off, bring, pick up), Sheli STAYS OUT. Examples: "שמישהו ידליק לי את הדוד" (someone turn on the boiler for me) = ignore. "מישהו יכול להוריד את הכביסה?" = ignore. "אולי מישהו ייקח את הכלב?" = ignore. Escape hatch: reclassify as add_task ONLY if message ALSO tags שלי/@שלי or clearly addresses the bot (e.g. "שלי, תוסיפי למטלות שמישהו ידליק דוד"). When uncertain, confidence ≤0.55 with needs_conversation_review:true so Sonnet reevaluates with context. Never cross 0.70 as add_task.
 - LINK COMMENTARY: Messages that respond to/riff on a shared link (TikTok, YouTube, article, video) are social commentary = ignore. Signals: "ואני מוסיף:", "בדיוק!", "כל כך נכון", laughter after a link, opinions about shared content. These are NOT tasks or shopping items even if they sound actionable.
-- TAGS — USER-DEFINED LISTS (Tier 2, 2026-04-25). Free-form labels users attach to add_task / add_shopping / add_event so they can group items into their own lists ("עבודה", "בית", "amazon", "trader joes", "פרויקט הסלון", "before flight", "חתונה של דנה"). Detection triggers (extract whatever follows as the tag, lowercase it, trim whitespace, preserve internal spaces — multi-word tags are valid):
+- TAGS — USER-DEFINED LISTS / TOPICS (Tier 2, 2026-04-25 + topic-aware classification 2026-04-26). Free-form labels users attach to add_task / add_shopping / add_event so they can group items into their own lists ("עבודה", "בית", "amazon", "trader joes", "פרויקט הסלון", "before flight", "חתונה של דנה"). Users think of these HIERARCHICALLY: top-level list (קניות / משימות) → topic (בית מרקחת / amazon / עבודה) → items inside the topic. Your job is to figure out whether a candidate noun is the ITEM or the TOPIC. Detection triggers (extract whatever follows as the tag, lowercase it, trim whitespace, preserve internal spaces — multi-word tags are valid):
   - "תוסיפי לרשימת X..." / "תוסיפי ב-X..." / "ברשימת X..." / "לרשימה X..."
   - "add to my X list" / "to the X list" / "for X list"
   - "תוסיפי למטלות X..." / "למשימות של X..." / "לקניות של X..."
   - Bracket prefix in user message: "[work] לתאם פגישה" / "[בית] לקנות פרקט" → tags=["work"] / ["בית"]
   Set entities.tags = ["<lowercased tag>"] (always an array, even single tag). When NO list anchor is present, OMIT tags entirely (don't emit empty array — undefined is fine). NEVER auto-merge synonyms — "work" and "עבודה" stay separate; the user can later ask Sheli to merge.
+- TOPIC-VS-ITEM SEMANTIC RULES (Tier 1, 2026-04-26). When the user names a noun in an add_task / add_shopping context, decide if the noun is a TOPIC (sub-list label) or an ITEM (thing to buy/do). Signals that strongly suggest TOPIC:
+  - **Place / vendor / store names**: בית מרקחת, סופר, שופרסל, רמי לוי, איקאה, IKEA, אמזון, Amazon, eBay, ויקטוריה'ס סיקרט, KSP, ZAP, AliExpress, Costco, Trader Joes, Whole Foods. Almost always topics — they're WHERE you buy, not WHAT you buy.
+  - **Project / category labels**: "פרויקט [X]", "פרויקטים ל[name]", "מתנות ל[event]", "אריזה ל[trip]", "חתונה של [name]", "יום הולדת [age]", "בר מצווה של [name]", "before flight", "for vacation", "after surgery". The noun is a CONTEXT for items, not an item itself.
+  - **Hebrew construct phrases (סמיכות)**: "רשימת X" → X is a topic. "מטלות של [project]" → [project] is a topic.
+  - **Match against EXISTING TOPICS context above**: if the candidate noun (or a close variant) appears in the household's EXISTING TOPICS list, treat as topic, not item. Example: existing topic "בית מרקחת" + user says "אספירין לבית מרקחת" → topic="בית מרקחת", item="אספירין".
+  Signals that suggest ITEM (do NOT treat as topic):
+  - **Compound food name**: חלב אורז, שמן זית, חמאת בוטנים, עגבניות שרי, פלפל חריף, ירקות קפואים — full grocery items.
+  - **Has quantity / unit**: "2 חלב", "קילו עגבניות", "חבילת ביצים", "ליטר חלב".
+  - **Listed alongside other items**: "חלב, ביצים, בית מרקחת" — בית מרקחת is suspicious-sounding but in a comma list it's probably also an item being bought (rare interpretation, but possible). When in this case AND no list anchor — when ambiguous, treat as item per the conservative default; Sonnet's confirm flow will catch user pushback.
+  TOPIC OUTPUT SHAPES — two distinct cases:
+  - **TOPIC CREATION (no item)**: user names ONLY a topic with no item to add. "תוסיפי בית מרקחת לרשימות" / "צרי לי רשימה חדשה אמזון" / bare "בית מרקחת" addressed to Sheli with no item context. Set entities.is_topic_creation=true and entities.topic="<topic name>". DO NOT populate entities.title or entities.items — there's nothing to insert. Confidence ~0.85. The executor will record the topic without inserting an item row, and Sheli will say "סבבה, יצרתי לך רשימת [topic] ✓ מה להוסיף?".
+  - **ADD-TO-TOPIC (item + topic together)**: user names both a topic AND an item. "תוסיפי לרשימת בית מרקחת חיתולים" / "אספירין לבית מרקחת" / "חיתולים, בנושא בית מרקחת". Set entities.tags=["<topic>"] (existing field, behavior unchanged) AND entities.topic="<topic>" (new — duplicate of tags[0], lets the executor render "הוספתי X לרשימת Y ✓"). The item goes into entities.title (for tasks) or entities.items (for shopping).
+  When ambiguous between topic-creation and a generic add-shopping item (e.g. user types just "בית מרקחת" with no anchor and no existing tag matching), set confidence ≤0.60 and needs_conversation_review:true so Sonnet can ask for clarification.
 - DUE DATE — DAY-OF-WEEK FOR TASKS (Tier 2, 2026-04-25). When add_task includes a day-of-week or relative-day phrase ("- יום ב", "ביום ראשון", "מחר", "היום", "מחרתיים", "ביום שישי", "this Friday", "tomorrow"), set entities.due_date to the ISO YYYY-MM-DD of that day. Use UPCOMING context above to resolve. The day phrase is METADATA, NOT part of the title — strip it from entities.title. Examples:
   - "תוסיפי לרשימת בית לקנות פרקט - יום ב" → title="לקנות פרקט", tags=["בית"], due_date=<this Monday>
   - "לארוז לנסיעה - יום שבת" → title="לארוז לנסיעה", due_date=<this Saturday>, no tags
@@ -950,6 +978,13 @@ EXAMPLES:
 [אמא]: "תוסיפי לרשימת פרויקט הסלון לקנות וילון" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לקנות וילון","tags":["פרויקט הסלון"],"raw_text":"תוסיפי לרשימת פרויקט הסלון לקנות וילון"}}
 [mom]: "add to my amazon list — שמן זית" → {"intent":"add_shopping","confidence":0.88,"entities":{"items":[{"name":"שמן זית","category":"מזווה"}],"tags":["amazon"],"raw_text":"add to my amazon list — שמן זית"}}
 [אבא]: "[work] לתאם פגישה עם הרואה חשבון" → {"intent":"add_task","confidence":0.90,"entities":{"title":"לתאם פגישה עם הרואה חשבון","tags":["work"],"raw_text":"[work] לתאם פגישה עם הרואה חשבון"}}
+[אמא]: "תוסיפי בית מרקחת לרשימות" → {"intent":"add_shopping","confidence":0.85,"entities":{"is_topic_creation":true,"topic":"בית מרקחת","tags":["בית מרקחת"],"raw_text":"תוסיפי בית מרקחת לרשימות"}}
+[אמא]: "צרי לי רשימה חדשה אמזון" → {"intent":"add_shopping","confidence":0.88,"entities":{"is_topic_creation":true,"topic":"amazon","tags":["amazon"],"raw_text":"צרי לי רשימה חדשה אמזון"}}
+[אמא]: "תוסיפי לרשימת בית מרקחת חיתולים" → {"intent":"add_shopping","confidence":0.92,"entities":{"items":[{"name":"חיתולים","category":"טיפוח"}],"topic":"בית מרקחת","tags":["בית מרקחת"],"raw_text":"תוסיפי לרשימת בית מרקחת חיתולים"}}
+[אבא]: "אספירין לבית מרקחת" (EXISTING TOPICS includes "בית מרקחת") → {"intent":"add_shopping","confidence":0.88,"entities":{"items":[{"name":"אספירין","category":"אחר"}],"topic":"בית מרקחת","tags":["בית מרקחת"],"raw_text":"אספירין לבית מרקחת"}}
+[אמא]: "תוסיפי לרשימת פרויקטים ליוסי לתאם עם המורה" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לתאם עם המורה","topic":"פרויקטים ליוסי","tags":["פרויקטים ליוסי"],"raw_text":"תוסיפי לרשימת פרויקטים ליוסי לתאם עם המורה"}}
+[אמא]: "תוסיפי לקניות בית מרקחת" (EXISTING TOPICS does NOT include "בית מרקחת") → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"items":[{"name":"בית מרקחת","category":"אחר"}],"raw_text":"תוסיפי לקניות בית מרקחת"}}
+[אמא]: "@שלי בית מרקחת" (1:1, no item context, no existing topic) → {"intent":"add_shopping","confidence":0.55,"needs_conversation_review":true,"entities":{"is_topic_creation":true,"topic":"בית מרקחת","tags":["בית מרקחת"],"raw_text":"@שלי בית מרקחת"}}
 [אמא]: "להחזיר ספר היום" → {"intent":"add_task","confidence":0.88,"entities":{"title":"להחזיר ספר","due_date":"<today>","raw_text":"להחזיר ספר היום"}}
 [אבא]: "לארוז לנסיעה - יום שבת" → {"intent":"add_task","confidence":0.88,"entities":{"title":"לארוז לנסיעה","due_date":"<this Saturday>","raw_text":"לארוז לנסיעה - יום שבת"}}
 [אמא]: "תוסיפי לרשימת חתונה של דנה לבחור שמלה" → {"intent":"add_event","confidence":0.55,"needs_conversation_review":true,"entities":{"title":"לבחור שמלה","tags":["חתונה של דנה"],"raw_text":"תוסיפי לרשימת חתונה של דנה לבחור שמלה"}}
@@ -1784,20 +1819,26 @@ Keep responses SHORT — 1-2 lines max.`;
 
   switch (classification.intent) {
     case "add_task":
-      if (e.override) {
+      if (e.is_topic_creation && e.topic) {
+        actionSummary = `User asked to CREATE A NEW TOPIC named "${e.topic}" (scope: tasks). No item was added — Sheli should confirm the topic was created and ASK for the first item to add to it. Hebrew reply pattern: "סבבה, יצרתי לך את הרשימה ${e.topic} ✓ מה להוסיף?". Vary phrasing naturally. Do NOT pretend an item was added.`;
+      } else if (e.override) {
         actionSummary = `Rotation override: "${e.override.title}" switched to ${e.override.person} for today. Confirm the change briefly.`;
       } else if (e.rotation) {
         const membersList = e.rotation.members.join(" ← ");
         const typeLabel = e.rotation.type === "order" ? "סדר" : "תורנות";
         actionSummary = `A rotation was created: "${e.rotation.title}" (${typeLabel}). Members in order: ${membersList}. First turn: ${e.rotation.members[0]}. Reply should confirm the rotation and announce whose turn it is today.`;
       } else {
-        actionSummary = `A task was just created: "${e.title || e.raw_text}"${e.person ? ` assigned to ${e.person}` : ""}.`;
+        const topicLabel = e.topic ? ` (in topic "${e.topic}" — name the topic in your reply: "הוספתי X לרשימת ${e.topic} ✓")` : "";
+        actionSummary = `A task was just created: "${e.title || e.raw_text}"${e.person ? ` assigned to ${e.person}` : ""}${topicLabel}.`;
       }
       break;
     case "add_shopping":
-      if (e.items && Array.isArray(e.items)) {
+      if (e.is_topic_creation && e.topic) {
+        actionSummary = `User asked to CREATE A NEW TOPIC named "${e.topic}" (scope: shopping). No items were added — Sheli should confirm the topic was created and ASK for the first item to add to it. Hebrew reply pattern: "סבבה, יצרתי לך את רשימת ${e.topic} 🛒 מה להוסיף?". Vary phrasing naturally. Do NOT pretend an item was added.`;
+      } else if (e.items && Array.isArray(e.items)) {
         const itemNames = e.items.map((i: { name: string }) => i.name).join(", ");
-        actionSummary = `Shopping item(s) added to the list: ${itemNames}.`;
+        const topicLabel = e.topic ? ` (in topic "${e.topic}" — name the topic in your reply: "הוספתי ${itemNames} לרשימת ${e.topic} ✓")` : "";
+        actionSummary = `Shopping item(s) added to the list: ${itemNames}${topicLabel}.`;
       } else {
         actionSummary = `A shopping item was added from: "${e.raw_text}".`;
       }
@@ -3694,6 +3735,18 @@ async function executeActions(
   for (const action of actions) {
     try {
       switch (action.type) {
+        case "create_topic": {
+          // No-op success (Tier 1, 2026-04-26). Topics are emergent from the
+          // `tags` column on existing rows; an "empty topic" has no DB shape.
+          // We acknowledge here so Sonnet's reply context knows to say
+          // "סבבה, יצרתי את רשימת X ✓ מה להוסיף?". The first add-to-topic
+          // action that follows materializes the topic into reality.
+          // Tier 3 will persist the user's topic-vs-item choice into
+          // household_patterns so future ambiguous mentions don't re-ask.
+          const { topic, scope } = action.data as { topic: string; scope?: string };
+          summary.push(`Topic-create: "${topic}" (scope: ${scope || "any"})`);
+          break;
+        }
         case "add_task": {
           const { title, assigned_to, tags, due_date } = action.data as {
             title: string;
@@ -4975,11 +5028,18 @@ Your visible reply here
 
 ACTIONS array: each object has "type" and relevant fields:
 
-FREE-FORM TAGS (Tier 2 of free-form tags plan, 2026-04-25). add_task / shopping / event accept a "tags" field — an array of lowercase user-named lists ("עבודה", "amazon", "פרויקט הסלון", "חתונה של דנה"). Detect from phrasings like "תוסיפי לרשימת X..." / "add to my X list" / "[work] ..." / "ברשימת X". Tags are arbitrary user labels — no taxonomy, multi-word allowed, never auto-merge synonyms. When NO list anchor is present, OMIT tags (do not emit "tags":[] noise). Examples:
+FREE-FORM TAGS / TOPICS (Tier 2 of free-form tags plan, 2026-04-25 + topic-aware classification 2026-04-26). add_task / shopping / event accept a "tags" field — an array of lowercase user-named lists ("עבודה", "amazon", "פרויקט הסלון", "חתונה של דנה"). Users think HIERARCHICALLY: top-level list (קניות / משימות) → topic (בית מרקחת / amazon / עבודה) → items inside the topic. Detect topics from phrasings like "תוסיפי לרשימת X..." / "add to my X list" / "[work] ..." / "ברשימת X". Tags are arbitrary user labels — no taxonomy, multi-word allowed, never auto-merge synonyms. When NO list anchor is present, OMIT tags (do not emit "tags":[] noise). Examples:
   {"type":"task","text":"לסגור פגישה עם רובי","tags":["עבודה"]}
   {"type":"shopping","items":["שמן זית"],"tags":["amazon"]}
   {"type":"task","text":"לבחור שמלה","tags":["חתונה של דנה"]}
   {"type":"task","text":"[work] לתאם פגישה"}      → tags:["work"] (bracket prefix recognized; STRIP from text)
+
+TOPIC-VS-ITEM (2026-04-26): when the user names a noun, decide TOPIC vs ITEM:
+- TOPIC signals: place/vendor names (בית מרקחת, אמזון, סופר, IKEA), project labels ("פרויקטים ל-X", "מתנות ל-Y", "חתונה של Z"), construct phrases ("רשימת X"), or matches an existing tag in the household's CURRENT STATE.
+- ITEM signals: compound food name (חלב אורז, שמן זית), has quantity/unit, listed alongside other items.
+- TOPIC-ONLY message: user names just a topic with no item to add ("תוסיפי בית מרקחת לרשימות" / "צרי רשימה חדשה אמזון" / a bare topic noun addressed to Sheli with no item context). EMIT a topic action: {"type":"topic","text":"בית מרקחת"}. DO NOT emit "shopping" or "task" with the topic as the item — that's the wrong move. The reply confirms creation and asks for the first item: "סבבה, יצרתי לך רשימת בית מרקחת ✓ מה להוסיף?".
+- ADD-TO-TOPIC: user names BOTH a topic AND an item. EMIT a normal shopping/task action with the item AS the item content AND tags=["<topic>"]. Reply NAMES the topic: "הוספתי חיתולים לרשימת בית מרקחת ✓".
+- AMBIGUOUS bare noun (just "בית מרקחת" with no anchor and no existing tag): ASK once — "התכוונת להוסיף את 'בית מרקחת' כפריט לקנות, או ליצור רשימה חדשה לפריטים שאת קונה שם?". Wait for the answer.
 
 DUE_DATE (tasks only). When the user names a day-of-week or relative-day for a task ("X - יום ב", "X היום", "X מחר", "X ביום שישי"), emit "due_date":"YYYY-MM-DD" alongside "text". STRIP the day phrase from "text" — it's metadata, not part of the title. The executor auto-creates a 09:00 IL reminder on that date for tasks with a due_date. Use the CONVERSATION STATE's "today" / "this Saturday" / "this Monday" date hints to resolve. Examples:
   "להחזיר ספר היום" → {"type":"task","text":"להחזיר ספר","due_date":"<today>"}
@@ -4990,6 +5050,7 @@ DUE_DATE (tasks only). When the user names a day-of-week or relative-day for a t
 ADD:
 - shopping: {"type":"shopping","items":["חלב","ביצים"]}
 - task: {"type":"task","text":"לפרוק מדיח"}
+- topic: {"type":"topic","text":"בית מרקחת"} — creates a new topic/sub-list. NO item added. Reply: "סבבה, יצרתי לך את הרשימה בית מרקחת ✓ מה להוסיף?". Use ONLY when user explicitly names a topic with no item content.
 - reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
   IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00).
   DEFAULT-DAY RULE (critical — users noticed this):
@@ -5899,6 +5960,20 @@ async function execute1on1Actions(params: {
             });
           }
           break;
+        case "topic": {
+          // 1:1 path topic-creation (Tier 1, 2026-04-26). Sonnet emits
+          // {"type":"topic","text":"בית מרקחת"} when the user names a topic
+          // without an item. The shared executor handles this as a no-op
+          // success that surfaces in actionSummary so Sheli's reply confirms
+          // topic creation and asks for the first item.
+          const topic = String(action.text || action.topic || "").trim().toLowerCase();
+          if (topic && topic.length <= 50) {
+            mappedActions.push({ type: "create_topic", data: { topic, scope: "any" } });
+          } else {
+            console.warn(`${logPrefix} topic action with empty/oversize text — skipping: ${JSON.stringify(action)}`);
+          }
+          break;
+        }
         case "reminder": {
           const sendAt = action.send_at
             ? new Date(action.send_at).toISOString()
@@ -11848,8 +11923,8 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
 
   const [membersRes, tasksRes, shoppingRes, patternsRes, rotationsRes] = await Promise.all([
     supabase.from("household_members").select("display_name").eq("household_id", householdId),
-    supabase.from("tasks").select("id, title, assigned_to").eq("household_id", householdId).eq("done", false),
-    supabase.from("shopping_items").select("id, name, qty").eq("household_id", householdId).eq("got", false),
+    supabase.from("tasks").select("id, title, assigned_to, tags").eq("household_id", householdId).eq("done", false),
+    supabase.from("shopping_items").select("id, name, qty, tags").eq("household_id", householdId).eq("got", false),
     supabase.from("household_patterns").select("pattern_type, pattern_key, pattern_value, pending_until")
       .eq("household_id", householdId).gte("confidence", 0.3)
       .order("hit_count", { ascending: false }).limit(30),
@@ -11905,6 +11980,23 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     familyPatterns = sections.join("\n");
   }
 
+  // Aggregate distinct tags across open tasks + open shopping. Existing-tag
+  // lookup lets the classifier resolve "תוסיפי X" → topic when X matches a
+  // known tag (Tier 1, 2026-04-26). Lowercased for stable matching.
+  const tagSet = new Set<string>();
+  for (const row of (tasksRes.data || []) as Array<{ tags?: string[] }>) {
+    for (const t of row.tags || []) {
+      const norm = String(t || "").trim().toLowerCase();
+      if (norm) tagSet.add(norm);
+    }
+  }
+  for (const row of (shoppingRes.data || []) as Array<{ tags?: string[] }>) {
+    for (const t of row.tags || []) {
+      const norm = String(t || "").trim().toLowerCase();
+      if (norm) tagSet.add(norm);
+    }
+  }
+
   return {
     members: (membersRes.data || []).map((m) => m.display_name),
     openTasks: (tasksRes.data || []).map((t) => ({ id: t.id, title: t.title, assigned_to: t.assigned_to })),
@@ -11918,6 +12010,7 @@ async function buildClassifierCtx(householdId: string): Promise<ClassifierContex
     today: ilTodayStr,
     dayOfWeek: ilDayOfWeek,
     familyPatterns,
+    existingTags: Array.from(tagSet).sort(),
   };
 }
 
@@ -12069,7 +12162,13 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
 
   switch (classification.intent) {
     case "add_task":
-      if (e.override) {
+      // Topic-only message: "תוסיפי בית מרקחת לרשימות" / "צרי רשימה חדשה אמזון".
+      // No item to insert — just record the topic and let Sheli ask for the
+      // first item in her reply (per design decision #3, 2026-04-26: wait for
+      // the first item to materialize the topic into existence).
+      if (e.is_topic_creation && e.topic) {
+        actions.push({ type: "create_topic", data: { topic: e.topic, scope: "task" } });
+      } else if (e.override) {
         actions.push({
           type: "override_rotation",
           data: { title: e.override.title, person: e.override.person },
@@ -12099,7 +12198,9 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       break;
 
     case "add_shopping":
-      if (e.items && Array.isArray(e.items)) {
+      if (e.is_topic_creation && e.topic) {
+        actions.push({ type: "create_topic", data: { topic: e.topic, scope: "shopping" } });
+      } else if (e.items && Array.isArray(e.items)) {
         actions.push({
           type: "add_shopping",
           data: { items: e.items, tags: Array.isArray(e.tags) ? e.tags : [] },
