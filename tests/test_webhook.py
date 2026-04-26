@@ -1814,6 +1814,219 @@ class TestPrivateDmReminders(unittest.TestCase):
         self.assertGreaterEqual(len(upgraded), 1, f"expected upgraded row, got {rows}")
 
 
+# ─── 1:1 reminder target group_id (2026-04-26 Netzer bug) — Integration Tests ─
+#
+# Bug: 1:1 path (execute1on1Actions, handlePersonalChannelMessage forward) was
+# inserting reminder_queue rows with group_id = phone@s.whatsapp.net regardless
+# of whether the household had a paired family group. Real-world impact:
+# Einat Netzer asked "תזכירי לעופרי בקבוצה המשותפת" from her 1:1 with Sheli;
+# the recurring reminders were inserted with Einat's 1:1 JID, so they would
+# have fired into Einat's private DM, invisible to her daughter עופרי.
+#
+# Fix: resolve1on1ReminderGroupId() in index.inlined.ts defaults to the
+# household's active whatsapp_config.group_id when paired, falls back to the
+# phone JID only for 1:1-only households (no group ever connected).
+#
+# Run: python -m unittest tests.test_webhook.TestOneOnOneReminderTarget -v
+
+NETZER_HOUSEHOLD_ID = "hh_netzer_test"
+NETZER_SOLO_HOUSEHOLD_ID = "hh_netzer_solo_test"
+NETZER_SENDER_PHONE = "972500000300"
+NETZER_SOLO_SENDER_PHONE = "972500000301"
+NETZER_SENDER_NAME = "עינת-טסט"
+NETZER_FAMILY_GROUP_ID = "120363999999999999@g.us"
+NETZER_DM_CHAT_ID = f"{NETZER_SENDER_PHONE}@s.whatsapp.net"
+NETZER_SOLO_DM_CHAT_ID = f"{NETZER_SOLO_SENDER_PHONE}@s.whatsapp.net"
+
+
+def _netzer_reset_all():
+    for hh in (NETZER_HOUSEHOLD_ID, NETZER_SOLO_HOUSEHOLD_ID):
+        for table in ["reminder_queue", "tasks", "shopping_items", "events", "whatsapp_messages"]:
+            try:
+                sb_delete(table, {"household_id": f"eq.{hh}"})
+            except Exception:
+                pass
+        for table, params in [
+            ("whatsapp_member_mapping", {"household_id": f"eq.{hh}"}),
+            ("household_members", {"household_id": f"eq.{hh}"}),
+            ("households_v2", {"id": f"eq.{hh}"}),
+        ]:
+            try:
+                sb_delete(table, params)
+            except Exception:
+                pass
+    for params in [
+        {"phone": f"eq.{NETZER_SENDER_PHONE}"},
+        {"phone": f"eq.{NETZER_SOLO_SENDER_PHONE}"},
+    ]:
+        try:
+            sb_delete("onboarding_conversations", params)
+        except Exception:
+            pass
+    try:
+        sb_delete("whatsapp_config", {"group_id": f"eq.{NETZER_FAMILY_GROUP_ID}"})
+    except Exception:
+        pass
+
+
+def _netzer_create_paired_household():
+    """Household WITH a paired family group — reminders should target the group."""
+    sb_post("households_v2", {"id": NETZER_HOUSEHOLD_ID, "name": "Netzer Test Family", "lang": "he"})
+    sb_post("whatsapp_config", {
+        "group_id": NETZER_FAMILY_GROUP_ID,
+        "household_id": NETZER_HOUSEHOLD_ID,
+        "bot_active": True,
+        "first_message_at": datetime.now(timezone.utc).isoformat(),
+    })
+    sb_post("household_members", {
+        "household_id": NETZER_HOUSEHOLD_ID,
+        "display_name": NETZER_SENDER_NAME,
+        "gender": "female",
+    })
+    sb_post("whatsapp_member_mapping", {
+        "household_id": NETZER_HOUSEHOLD_ID,
+        "phone_number": NETZER_SENDER_PHONE,
+        "member_name": NETZER_SENDER_NAME,
+    })
+    sb_post("onboarding_conversations", {
+        "phone": NETZER_SENDER_PHONE,
+        "state": "chatting",
+        "household_id": NETZER_HOUSEHOLD_ID,
+        "message_count": 10,
+        "nudge_count": 0,
+        "tried_capabilities": ["reminder"],
+        "context": json.dumps({"name": NETZER_SENDER_NAME, "gender": "female"}),
+    })
+
+
+def _netzer_create_solo_household():
+    """Household WITHOUT a paired group — reminders should fall back to phone JID."""
+    sb_post("households_v2", {"id": NETZER_SOLO_HOUSEHOLD_ID, "name": "Netzer Solo Test", "lang": "he"})
+    sb_post("household_members", {
+        "household_id": NETZER_SOLO_HOUSEHOLD_ID,
+        "display_name": "סולו-טסט",
+        "gender": "female",
+    })
+    sb_post("whatsapp_member_mapping", {
+        "household_id": NETZER_SOLO_HOUSEHOLD_ID,
+        "phone_number": NETZER_SOLO_SENDER_PHONE,
+        "member_name": "סולו-טסט",
+    })
+    sb_post("onboarding_conversations", {
+        "phone": NETZER_SOLO_SENDER_PHONE,
+        "state": "chatting",
+        "household_id": NETZER_SOLO_HOUSEHOLD_ID,
+        "message_count": 10,
+        "nudge_count": 0,
+        "tried_capabilities": ["reminder"],
+        "context": json.dumps({"name": "סולו-טסט", "gender": "female"}),
+    })
+
+
+def _netzer_send(text, phone, chat_id, msg_id=None):
+    if msg_id is None:
+        msg_id = generate_msg_id("netzer")
+    send_webhook(text, msg_id=msg_id, sender_phone=phone, group_id=chat_id)
+    time.sleep(8)
+    return msg_id
+
+
+def _netzer_fetch_reminders(household_id):
+    return sb_get("reminder_queue", {
+        "household_id": f"eq.{household_id}",
+        "select": "id,group_id,message_text,send_at,sent,delivery_mode,recurrence,metadata,created_at",
+        "order": "created_at.desc",
+        "limit": "50",
+    })
+
+
+class TestOneOnOneReminderTarget(unittest.TestCase):
+    """Integration tests — 1:1-authored reminders target the family group when paired.
+
+    Pre-fix: every 1:1 reminder INSERT hardcoded `phone@s.whatsapp.net`, so a
+    user in 1:1 with Sheli could not produce a reminder visible to their family.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _netzer_reset_all()
+        _netzer_create_paired_household()
+        _netzer_create_solo_household()
+
+    @classmethod
+    def tearDownClass(cls):
+        _netzer_reset_all()
+
+    def setUp(self):
+        for hh in (NETZER_HOUSEHOLD_ID, NETZER_SOLO_HOUSEHOLD_ID):
+            try:
+                sb_delete("reminder_queue", {"household_id": f"eq.{hh}"})
+            except Exception:
+                pass
+
+    def test_01_one_shot_reminder_paired_household_targets_group(self):
+        """1:1 user with paired family group → one-shot reminder fires into group."""
+        _netzer_send(
+            "תזכירי מחר ב-9 בבוקר לקחת תרופה לכלב",
+            NETZER_SENDER_PHONE,
+            NETZER_DM_CHAT_ID,
+        )
+        rows = _netzer_fetch_reminders(NETZER_HOUSEHOLD_ID)
+        self.assertGreaterEqual(len(rows), 1, f"expected reminder row, got {rows}")
+        # The bug was rows[*].group_id == "972500000300@s.whatsapp.net".
+        # Post-fix: rows[*].group_id == NETZER_FAMILY_GROUP_ID.
+        targeting_group = [r for r in rows if r.get("group_id") == NETZER_FAMILY_GROUP_ID]
+        self.assertGreaterEqual(
+            len(targeting_group), 1,
+            f"reminder should target family group {NETZER_FAMILY_GROUP_ID}, got group_ids "
+            f"{[r.get('group_id') for r in rows]}",
+        )
+        self.assertNotEqual(
+            targeting_group[0].get("group_id"), NETZER_DM_CHAT_ID,
+            "reminder targeted speaker's 1:1 JID — bug regressed",
+        )
+        self.assertEqual(targeting_group[0].get("delivery_mode"), "group")
+
+    def test_02_recurring_reminder_paired_household_targets_group(self):
+        """1:1 user with paired family group → recurring reminder parent targets group."""
+        _netzer_send(
+            "תזכירי כל יום ב-9 בבוקר לקחת תרופה לכלב",
+            NETZER_SENDER_PHONE,
+            NETZER_DM_CHAT_ID,
+        )
+        rows = _netzer_fetch_reminders(NETZER_HOUSEHOLD_ID)
+        recurring = [r for r in rows if (r.get("recurrence") or {})]
+        self.assertGreaterEqual(
+            len(recurring), 1, f"expected recurring parent, got {rows}",
+        )
+        targeting_group = [r for r in recurring if r.get("group_id") == NETZER_FAMILY_GROUP_ID]
+        self.assertGreaterEqual(
+            len(targeting_group), 1,
+            f"recurring parent should target family group, got group_ids "
+            f"{[r.get('group_id') for r in recurring]}",
+        )
+        self.assertEqual(targeting_group[0].get("delivery_mode"), "group")
+
+    def test_03_solo_household_falls_back_to_phone_jid(self):
+        """1:1-only household (no paired group) → reminder falls back to phone JID, dm mode."""
+        _netzer_send(
+            "תזכירי לי מחר ב-10 לבדוק את המייל",
+            NETZER_SOLO_SENDER_PHONE,
+            NETZER_SOLO_DM_CHAT_ID,
+        )
+        rows = _netzer_fetch_reminders(NETZER_SOLO_HOUSEHOLD_ID)
+        self.assertGreaterEqual(len(rows), 1, f"expected reminder row, got {rows}")
+        # No paired group → must fall back to phone JID so the reminder still
+        # fires somewhere the speaker will see it.
+        targeting_phone = [r for r in rows if r.get("group_id") == NETZER_SOLO_DM_CHAT_ID]
+        self.assertGreaterEqual(
+            len(targeting_phone), 1,
+            f"solo-household reminder should fall back to phone JID, got group_ids "
+            f"{[r.get('group_id') for r in rows]}",
+        )
+        self.assertEqual(targeting_phone[0].get("delivery_mode"), "dm")
+
+
 # ─── Reminder Triple-Fire Dedup (2026-04-24) — Integration Tests ──────────────
 #
 # Covers three bugs from docs/plans/2026-04-24-reminder-triple-fire-handoff.md:
