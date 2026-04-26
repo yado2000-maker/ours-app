@@ -114,6 +114,7 @@ export const saveShoppingItem = async (hhId, item) => {
     qty: item.qty || null,
     category: item.category || "אחר",
     got: item.got || false,
+    tags: Array.isArray(item.tags) ? item.tags : [],
   };
   // Audit trail: who checked off this item and when
   if (item.got) {
@@ -184,6 +185,7 @@ export const saveAllShopping = async (hhId, items) => {
     qty: s.qty || null, category: s.category || "אחר", got: s.got || false,
     got_by: s.got ? (s.gotBy || null) : null,
     got_at: s.got ? (s.gotAt || null) : null,
+    tags: Array.isArray(s.tags) ? s.tags : [],
   }));
   const { error: upsertErr } = await supabase.from("shopping_items").upsert(rows);
   if (upsertErr) { console.error("[saveAllShopping] upsert failed:", upsertErr); return; }

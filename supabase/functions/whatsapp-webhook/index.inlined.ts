@@ -1380,6 +1380,25 @@ VISIT NOT RESIDENCY (bot identity during living-moment visits):
 - DO NOT extend the moment. The next message in the thread is not yours unless they invite you again by name.
 - The line: you cheered for them. You are not one of them.
 
+NO PHANTOM REMINDERS — ABSOLUTE RULE (Globerman 2026-04-26):
+NEVER emit a {"type":"reminder",...} or {"type":"recurring_reminder",...} action UNLESS the user's CURRENT message contains an EXPLICIT reminder request — a reminder verb ("תזכירי", "תזכור", "תזכרי", "remind me") OR a clear time-and-action pairing the user wants you to track ("מחר ב-9 לקחת ויטמין"). Past conversation context, earlier reminders that fired, or a grateful "תודה" do NOT justify creating a new reminder. The 2026-04-26 incident: user said only "תודה" and Sheli silently inserted a fresh basketball reminder for the next day, on top of replying "בכיף 😊". The user reasonably believes a thank-you is just a thank-you. Phantom reminders firing the next morning destroy trust because the user can't trace where they came from.
+- "תודה" / "סבבה" / "אחלה" / "OK" / generic acknowledgments → NO reminder action. Reply warmly with no metadata.
+- "תזכור לי 7?" with NO action context → ASK "מה להזכיר ב-7?" — do NOT emit a reminder block.
+- A reminder firing yesterday is NOT a license to schedule one for today/tomorrow. Past reminders are history; new reminders need a fresh explicit request.
+- If you're unsure whether the user is asking for a new reminder, ASK before emitting metadata.
+
+NO FALSE-APOLOGY FOR FUTURE REMINDERS — ABSOLUTE RULE (Bilin 2026-04-26):
+NEVER apologize for "missing" / "being late on" / "אופס פספסתי" / "איחרתי" / "התעכבתי" a reminder whose send_at is in the FUTURE. The apology vocabulary ("אופס פספסתי 🙈", "חח פספסתי 😅") is reserved for genuine post-fact misses — when the scheduled time already passed and Sheli failed to fire. A reminder 2 hours, 30 minutes, or 5 minutes in the future has not been missed. Saying "the reminder for 10:00 is already kinda close so I missed it" at 07:48 is dishonest AND it confuses the user about whether the reminder will fire (yes, it will).
+- WRONG (07:48 IL, reminder requested for today 10:00 IL): "אופס פספסתי, השעה כבר 07:48 - התזכורת ל-10:00 היום קצת קרובה" — 10:00 is 2h12m future, nothing was missed.
+- RIGHT (same situation): "אזכיר היום ב-10:00 ✓" — confirm normally regardless of how close the time is.
+- "אופס פספסתי" is correct ONLY when the user's requested time is already past at the moment Sheli reads the message. Then say "אופס פספסתי 🙈 השעה כבר X — אזכיר מחר ב-Y במקום?" and ask, don't auto-reschedule.
+
+REPLY/METADATA DAY CONSISTENCY — ABSOLUTE RULE (Bilin 2026-04-26):
+The day you NAME in your visible reply MUST match the day in your REMINDER metadata block. If you write "אזכיר לכם מחר ב-10:00" in the visible reply, the metadata block's send_at MUST be tomorrow's date in Israel time. If you write "אזכיר היום ב-10:00", send_at MUST be today's IL date. Disagreement between text and metadata is the WORST trust failure: the user reads "tomorrow" and trusts it, while the row fires today (or vice versa). The 2026-04-26 incident: visible reply said "אזכיר לכם מחר ב-10:00" while the stored row was today's date — the user expected tomorrow's reminder and got nothing on tomorrow, plus a today's reminder they thought Sheli skipped.
+- BEFORE emitting the metadata block, re-read your visible reply and verify the day word and the send_at date match.
+- If the user requested MULTIPLE reminders ("גם היום וגם מחר" / "today AND tomorrow"), emit MULTIPLE blocks — one per requested day. Don't silently drop one.
+- The server hard-rejects mismatched metadata blocks; emitting one inconsistent pair will discard your action and send the user a clarification ask. Be careful.
+
 NO FAKE-BUG CLAIMS — ABSOLUTE RULE (Bat-Chen 2026-04-18):
 NEVER say "יש לי באג" / "אני לא עובדת כמו שצריך" / "יש לי בעיה טכנית" / "אני מנסה לתקן 🔧" / "the system has a bug" / "I'm broken" / any variation that blames an internal failure for output the user didn't like. There is no bug to claim. Either your reply was truncated (LIST DISPLAY rule applies), the data the user is asking about doesn't exist, or you misunderstood the request — in NONE of those cases is "I have a bug" honest.
 Honest framings instead (use the canonical truncation line — see SHARED_LIST_DISPLAY_RULES — when the issue is reply length):
@@ -1494,6 +1513,12 @@ const SHARED_HEBREW_GRAMMAR = `Hebrew grammar:
 - Construct state (סמיכות): ONLY the second noun gets ה. "שם המשתמש" NOT "השם המשתמש". "רשימת הקניות" NOT "הרשימת הקניות". "מספר הטלפון" NOT "המספר הטלפון".
 - Verb forms — common mistakes to avoid:
   - NEVER say "תפסת אותי" / "נתפסת אותי" when corrected or when you missed something. It sounds like you did something wrong ON PURPOSE and got caught — that's the wrong self-framing for a mistake. Instead say "אופס, פספסתי 🙈" / "חח פספסתי 😅" / "אוי, טעות שלי" / "אופס, לא שמתי לב". Self-deprecating, not guilty.
+- THE WORD FOR REMINDER IS "תזכורת" — NEVER "הזכרה" (Bilin 2026-04-26):
+  - "תזכורת" = reminder (the noun for a scheduled notification). This is the ONLY correct word.
+  - "הזכרה" = the act of mentioning (formal/legal context). WRONG when referring to a scheduled reminder. Reads as stilted, not warm.
+  - WRONG: "ההזכרה ל-10:00 קרובה", "ההזכרה שביקשת", "אני אסדר לך הזכרה".
+  - RIGHT: "התזכורת ל-10:00 קרובה", "התזכורת שביקשת", "אני אסדר לך תזכורת".
+  - The verb forms are fine: "להזכיר", "אזכיר", "מזכירה" — only the NOUN "הזכרה" is banned. Use "תזכורת" instead.
 - NEVER correct the user's Hebrew gender forms. If they write "אני צריך" — they are male. If "אני צריכה" — female. Their verb form IS their gender. Do not add asterisks (*), do not "fix" their grammar, do not suggest alternative forms. Match THEIR gender in your reply.
 - GENDER LOCK — ABSOLUTE RULE FOR 1:1 CHATS:
   - If gender is KNOWN (male or female), you MUST use that singular form in EVERY SINGLE reply. Not sometimes — every time. One reply masculine, next reply plural = BROKEN.
@@ -2514,6 +2539,20 @@ async function rescueRemindersAndStrip(
 
   const allReminders = extractRemindersFromReply(reply);
 
+  // Day-mismatch hard reject (Bilin 2026-04-26). If ANY extracted REMINDER
+  // block disagrees with the visible reply's day word, skip ALL inserts and
+  // return the canonical clarification ask. Conservative: one mismatched
+  // block poisons the whole turn — better one re-ask than one wrong row.
+  for (const r of allReminders) {
+    const mismatch = detectReplyDayMismatch(reply, r.send_at);
+    if (mismatch) {
+      console.warn(
+        `[ReminderRescue] DAY MISMATCH HARD REJECT: ${mismatch}; reminder_text="${r.reminder_text}"; reply preview="${reply.slice(0, 200)}"`
+      );
+      return DAY_MISMATCH_CLARIFICATION;
+    }
+  }
+
   // Haiku-entity fallback mirrors the logic in the main actionable path (line 4830).
   // Only safe when Haiku itself labelled the intent add_reminder — otherwise the entities
   // field won't carry reminder_text/time_iso and this block is a no-op.
@@ -3293,6 +3332,18 @@ function levenshtein(a: string, b: string): number {
   return prev[n];
 }
 
+// Canonicalize a free-form tag list before storing. Pre-2026-04-26 the same
+// six lines lived inline in add_task / add_shopping / add_event executors;
+// any drift between them silently fragmented the household's tag taxonomy.
+// Rules: stringify, trim, lowercase, drop empty, drop length>50. Returns []
+// for non-array input so callers can pass `entities.tags` directly.
+function normalizeTags(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((t) => String(t ?? "").trim().toLowerCase())
+    .filter((t) => t.length > 0 && t.length <= 50);
+}
+
 function isSameProduct(a: string, b: string): boolean {
   const na = a.replace(REPEATED_LETTERS, "$1$1").trim();
   const nb = b.replace(REPEATED_LETTERS, "$1$1").trim();
@@ -3693,11 +3744,7 @@ async function executeActions(
             summary.push(`Task-exists: "${taskMatch.title}"`);
           } else {
             const newTaskId = uid4();
-            const normalizedTags = Array.isArray(tags)
-              ? tags
-                  .map((t) => String(t || "").trim().toLowerCase())
-                  .filter((t) => t.length > 0 && t.length <= 50)
-              : [];
+            const normalizedTags = normalizeTags(tags);
             // Defense-in-depth (review LOW 8): the regex alone allows nonsense
             // like 9999-99-99 through, which then 22008-fails the entire INSERT
             // (not just the date column). Round-trip through Date so an invalid
@@ -3781,11 +3828,7 @@ async function executeActions(
             items: Array<{ name: string; qty?: string; category?: string }>;
             tags?: string[];
           };
-          const normalizedTags = Array.isArray(tags)
-            ? tags
-                .map((t) => String(t || "").trim().toLowerCase())
-                .filter((t) => t.length > 0 && t.length <= 50)
-            : [];
+          const normalizedTags = normalizeTags(tags);
 
           const { data: existingItems } = await supabase
             .from("shopping_items")
@@ -3848,11 +3891,7 @@ async function executeActions(
             scheduled_for: string;
             tags?: string[];
           };
-          const normalizedTags = Array.isArray(tags)
-            ? tags
-                .map((t) => String(t || "").trim().toLowerCase())
-                .filter((t) => t.length > 0 && t.length <= 50)
-            : [];
+          const normalizedTags = normalizeTags(tags);
 
           const datePrefix = scheduled_for.slice(0, 10);
           const { data: existingEvents } = await supabase
@@ -4894,6 +4933,15 @@ RULES:
 13b. ${SHARED_MISSING_ITEMS_RULES}
 
 ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
+13c. NO PHANTOM REMINDERS (Globerman 2026-04-26): NEVER emit {"type":"reminder",...} or {"type":"recurring_reminder",...} unless THIS message from the user contains an explicit reminder request. Past context — yesterday's basketball reminder that fired, an earlier message about an event — does NOT entitle you to schedule a new reminder. The triggering signal must be IN THE CURRENT USER MESSAGE: a reminder verb ("תזכירי לי", "תזכור", "תזכרי") OR a clear time-and-action pairing ("מחר ב-7 לכדורסל") that the user is explicitly asking you to track.
+    - User says only "תודה" → reply "בכיף! 😊" with empty ACTIONS. Even if a basketball reminder fired earlier today, that thank-you is NOT a request for tomorrow's basketball reminder.
+    - User says "סבבה" / "אחלה" / "OK" / "👍" / any acknowledgment → reply matched but ACTIONS=[].
+    - User asked yesterday for a one-shot tomorrow-reminder, it fired this morning, today they say something unrelated → DO NOT schedule another tomorrow. One-shot means one-shot.
+    - When in doubt, ASK ("מתי להזכיר שוב?") instead of guessing. A phantom reminder firing tomorrow morning will cost you trust the user spent 2 weeks earning.
+13d. REPLY/METADATA DAY MATCH (Bilin 2026-04-26): Before emitting a reminder action, re-read the day word in your visible reply (היום / מחר / יום ראשון / etc.) and verify that the action's send_at date matches that day in Israel time. The server REJECTS mismatched pairs and forces you to retry. If the user requested multiple days ("גם היום וגם מחר"), emit MULTIPLE reminder actions — one per day — never drop one.
+13e. NO FUTURE-REMINDER APOLOGIES (Bilin 2026-04-26): "אופס פספסתי 🙈" is for genuine past-time misses ONLY. A reminder requested for 2h12m, 30min, or even 5min in the future has not been missed — confirm normally with "אזכיר ✓". Apologizing for a future event confuses the user about whether the reminder will fire.
+
+ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
 14. NEVER store an action whose text is just a TRIGGER WORD with no real content:
     - BAD: {"type":"reminder","text":"תזכירי לי"} ← "remind me" is the verb, not the content
     - BAD: {"type":"event","text":"תזכורת"} ← "reminder" is a category, not an event title
@@ -5243,6 +5291,53 @@ Notes:
 - Day names without a qualifier ("יום שני") = the MATCHING row above (never skip a week).`;
 }
 
+// Day-mismatch detector (Bilin 2026-04-26): hard-reject Sonnet replies where the
+// visible day word ("מחר" / "היום" / "tomorrow" / "today") disagrees with the
+// reminder send_at's IL date. Returns null when no mismatch (or undetectable),
+// or a short reason string when mismatched. Caller is responsible for skipping
+// the insert AND replacing the visible reply with a clarification ask.
+//
+// Heuristic — substring match for the day word. False positives ("היום היה
+// יום נחמד") trigger one extra clarification ask, which is the cheap failure
+// mode; false negatives let a mismatched row through, which is the expensive one.
+function detectReplyDayMismatch(
+  replyText: string,
+  sendAtIso: string,
+): string | null {
+  if (!replyText || !sendAtIso) return null;
+  let sendAtDate: Date;
+  try {
+    sendAtDate = new Date(sendAtIso);
+    if (isNaN(sendAtDate.getTime())) return null;
+  } catch { return null; }
+
+  const todayIl = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const sendAtIl = sendAtDate.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const tomorrowAnchor = new Date(todayIl + "T12:00:00Z");
+  tomorrowAnchor.setUTCDate(tomorrowAnchor.getUTCDate() + 1);
+  const tomorrowIl = tomorrowAnchor.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+
+  const hasMachar = replyText.includes("מחר") || /\btomorrow\b/i.test(replyText);
+  const hasHayom = replyText.includes("היום") || /\btoday\b/i.test(replyText);
+
+  // If reply contains BOTH "מחר" and "היום" (e.g., user requested both days),
+  // we can't disambiguate which one this block is for — skip the check.
+  if (hasMachar && hasHayom) return null;
+
+  if (hasMachar && sendAtIl !== tomorrowIl) {
+    return `reply says "מחר" (expected ${tomorrowIl}) but send_at maps to IL date ${sendAtIl}`;
+  }
+  if (hasHayom && sendAtIl !== todayIl) {
+    return `reply says "היום" (expected ${todayIl}) but send_at maps to IL date ${sendAtIl}`;
+  }
+  return null;
+}
+
+// Canonical clarification ask used when a day-mismatch is rejected. Hebrew,
+// short, no robotic apology — "I confused myself, want me to remind today or
+// tomorrow?". Used by both group rescue path and 1:1 actions path.
+const DAY_MISMATCH_CLARIFICATION = "רגע, התבלבלתי בין היום למחר 🙈 תוכלו לחזור על זה — להזכיר היום או מחר ובאיזו שעה?";
+
 // Format a UTC date as a human-readable Israel time string for Sonnet context.
 // Prevents timezone confusion: Sonnet sees "Wednesday 16/4 16:00" not "2026-04-16T13:00:00+00:00".
 function toIsraelTimeStr(utcDate: string): string {
@@ -5432,10 +5527,21 @@ async function executeCrudAction(
   const isRemove = action.type.startsWith("remove_");
 
   // Resolve target row. Prefer direct id (authoritative — Task 2 structured path).
-  let match: { id: string; scheduled_for?: string | null } | null = null;
+  // For reminder_queue we also fetch recurrence + recurrence_parent_id so the
+  // remove path can soft-cancel the recurring SERIES (parent + unsent children),
+  // not just one row. Without these columns, cancelling a child leaves the
+  // parent's recurrence JSONB intact and the next materialize cycle creates
+  // fresh children for future weekdays — the Globerman 2026-04-26 phantom-fire bug.
+  const reminderColumns = "id, scheduled_for, recurrence, recurrence_parent_id, metadata";
+  const eventColumns = "id, scheduled_for";
+  const selectColumns = cfg.table === "reminder_queue" ? reminderColumns : eventColumns;
+  let match: { id: string; scheduled_for?: string | null; recurrence?: any; recurrence_parent_id?: string | null; metadata?: Record<string, unknown> | null } | null = null;
   if (action.target_id) {
-    let q = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).eq("id", action.target_id);
-    if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) q = q.eq(k, v);
+    let q = supabase.from(cfg.table).select(selectColumns).eq("household_id", householdId).eq("id", action.target_id);
+    // For reminder removes, allow matching parents (sent=true) too — the
+    // activeFilter `sent: false` would exclude them otherwise.
+    const skipActiveFilter = cfg.table === "reminder_queue" && isRemove;
+    if (cfg.activeFilter && !skipActiveFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) q = q.eq(k, v);
     const { data, error } = await q.limit(1).maybeSingle();
     if (!error && data) match = data as any;
   }
@@ -5445,12 +5551,13 @@ async function executeCrudAction(
       ? (action.name || action.text || action.title)
       : (action.old_name || action.old_text || action.old_title);
     if (!searchText) return { ok: false, summary: "", error: "no_target" };
-    let exactQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).eq(cfg.matchCol, searchText);
-    if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) exactQ = exactQ.eq(k, v);
+    const skipActiveFilter = cfg.table === "reminder_queue" && isRemove;
+    let exactQ = supabase.from(cfg.table).select(selectColumns).eq("household_id", householdId).eq(cfg.matchCol, searchText);
+    if (cfg.activeFilter && !skipActiveFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) exactQ = exactQ.eq(k, v);
     let { data: exact } = await exactQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (!exact) {
-      let fuzzyQ = supabase.from(cfg.table).select("id, scheduled_for").eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
-      if (cfg.activeFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fuzzyQ = fuzzyQ.eq(k, v);
+      let fuzzyQ = supabase.from(cfg.table).select(selectColumns).eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
+      if (cfg.activeFilter && !skipActiveFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fuzzyQ = fuzzyQ.eq(k, v);
       const { data: fuzzy } = await fuzzyQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
       exact = fuzzy;
     }
@@ -5460,10 +5567,48 @@ async function executeCrudAction(
 
   if (isRemove) {
     if (cfg.table === "reminder_queue") {
-      // Soft-cancel: preserve audit trail.
+      // Recurring-aware soft-cancel (Globerman 2026-04-26): if the matched row
+      // is a recurring CHILD or PARENT, cancel the entire series — disable the
+      // parent's recurrence JSONB AND soft-cancel all unsent children. Without
+      // this, cancelling one child leaves the parent firing forever via the
+      // daily materialize cron. Single one-shot rows take the original path.
+      const cancelMeta = { cancelled_by_user: true, cancelled_at: new Date().toISOString() };
+      const isParent = match.recurrence != null;
+      const isChild = match.recurrence_parent_id != null;
+      const parentId = isParent ? match.id : (isChild ? match.recurrence_parent_id : null);
+
+      if (parentId) {
+        // Disable the parent's recurrence so materialize_recurring_reminders()
+        // skips it on future cron runs. Keep sent=true (parents are always
+        // sent=true sentinel). Set recurrence=null severs the link. Preserve
+        // the existing parent metadata (cadence, source, etc.) by merging
+        // rather than overwriting — audit trail matters for postmortems.
+        const existingParentMeta = (isParent ? match.metadata : null) || {};
+        const { error: parentErr } = await supabase
+          .from("reminder_queue")
+          .update({ recurrence: null, metadata: { ...existingParentMeta, ...cancelMeta, was_recurring_parent: true } })
+          .eq("id", parentId)
+          .eq("household_id", householdId);
+        if (parentErr) { console.error(`${logPrefix} recurring parent disable error:`, parentErr); return { ok: false, summary: "", error: "db_error" }; }
+
+        // Soft-cancel all unsent children of this parent so already-materialized
+        // future rows don't fire either.
+        const { error: childErr } = await supabase
+          .from("reminder_queue")
+          .update({ sent: true, metadata: { ...cancelMeta, cancelled_via_parent: parentId } })
+          .eq("recurrence_parent_id", parentId)
+          .eq("household_id", householdId)
+          .eq("sent", false);
+        if (childErr) console.error(`${logPrefix} recurring children soft-cancel error (non-fatal):`, childErr);
+
+        console.log(`${logPrefix} Cancelled recurring series: parent=${parentId} (was_${isParent ? "parent" : "child"}=${match.id})`);
+        return { ok: true, summary: "בוטלה תזכורת קבועה" };
+      }
+
+      // One-shot reminder — original soft-cancel path.
       const { error: updErr } = await supabase
         .from(cfg.table)
-        .update({ sent: true, metadata: { cancelled_by_user: true, cancelled_at: new Date().toISOString() } })
+        .update({ sent: true, metadata: cancelMeta })
         .eq("id", match.id)
         .eq("household_id", householdId);
       if (updErr) { console.error(`${logPrefix} ${action.type} soft-cancel error:`, updErr); return { ok: false, summary: "", error: "db_error" }; }
@@ -5536,7 +5681,7 @@ async function execute1on1Actions(params: {
   // 2. Parse hidden metadata
   const actionsMatch = raw.match(/<!--ACTIONS:(.*?)-->/s);
   const triedMatch = raw.match(/<!--TRIED:(.*?)-->/s);
-  const visibleReply = raw
+  let visibleReply = raw
     .replace(/<!--ACTIONS:.*?-->/s, "")
     .replace(/<!--TRIED:.*?-->/s, "")
     .trim();
@@ -5549,6 +5694,35 @@ async function execute1on1Actions(params: {
     }
   }
   console.log(`${logPrefix} Parsed ${actions.length} actions for ${phone}`);
+
+  // 3a. Day-mismatch hard reject (Bilin 2026-04-26). If ANY reminder action's
+  // send_at disagrees with the visible reply's day word ("מחר" / "היום"),
+  // discard ALL reminder actions on this turn and replace the visible reply
+  // with the canonical clarification ask. The user re-confirms; nothing wrong
+  // gets stored. Recurring reminders are exempt — they don't have a single send_at.
+  for (const action of actions) {
+    if (action?.type !== "reminder") continue;
+    const sendAtForCheck = action.send_at
+      ? (() => { try { return new Date(action.send_at).toISOString(); } catch { return null; } })()
+      : null;
+    if (!sendAtForCheck) continue;
+    const mismatch = detectReplyDayMismatch(visibleReply, sendAtForCheck);
+    if (mismatch) {
+      console.warn(
+        `${logPrefix} DAY MISMATCH HARD REJECT: ${mismatch}; action.text="${action.text || ""}"; reply preview="${visibleReply.slice(0, 200)}"`
+      );
+      // Drop ALL actions for this turn, not just reminders. If we kept the
+      // non-reminder actions (e.g. a shopping add) the user would see "did you
+      // mean today or tomorrow?" while milk silently landed on the list — a
+      // worse UX than asking them to re-state the whole turn.
+      const before = actions.length;
+      const droppedTypes = actions.map((a: any) => a?.type || "?");
+      actions = [];
+      console.warn(`${logPrefix} Dropped ALL ${before} action(s) due to day mismatch: types=${JSON.stringify(droppedTypes)}`);
+      visibleReply = DAY_MISMATCH_CLARIFICATION;
+      break;
+    }
+  }
 
   // 4. Guardrail filter
   const isTriggerWordOnly = (t: string): boolean => {
@@ -12249,12 +12423,22 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
 
 async function gatherCorrectionCandidates(householdId: string): Promise<CandidateRow[]> {
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const [evRes, remRes] = await Promise.all([
+  // Globerman 2026-04-26: also fetch active recurring PARENTS (sent=true,
+  // recurrence not null). Without these, "תבטלי את תזכורת הכדורסל" only sees
+  // the next pending child — Sonnet picks it, executor cancels just that one
+  // child, and the next materialize cycle creates a fresh child for the next
+  // weekday. Including parents as candidates lets Sonnet target the series.
+  // No created_at filter on parents — recurring series can be days/weeks old.
+  const [evRes, remRes, parentRes] = await Promise.all([
     supabase.from("events").select("id, title, scheduled_for")
       .eq("household_id", householdId).gte("created_at", dayAgo)
       .order("created_at", { ascending: false }).limit(5),
     supabase.from("reminder_queue").select("id, message_text, send_at")
-      .eq("household_id", householdId).eq("sent", false).gte("created_at", dayAgo)
+      .eq("household_id", householdId).eq("sent", false)
+      .gte("created_at", dayAgo)
+      .order("created_at", { ascending: false }).limit(5),
+    supabase.from("reminder_queue").select("id, message_text, send_at, recurrence")
+      .eq("household_id", householdId).not("recurrence", "is", null).is("recurrence_parent_id", null)
       .order("created_at", { ascending: false }).limit(5),
   ]);
   const events: CandidateRow[] = (evRes.data || []).map((e: any) => ({
@@ -12263,7 +12447,21 @@ async function gatherCorrectionCandidates(householdId: string): Promise<Candidat
   const reminders: CandidateRow[] = (remRes.data || []).map((r: any) => ({
     id: r.id, kind: "reminder" as const, title: r.message_text, whenLocal: toIsraelTimeStr(r.send_at),
   }));
-  return [...events, ...reminders].slice(0, 10);
+  // Render parents with a [recurring] tag in the candidate list so Sonnet
+  // knows it's targeting the series, not a single occurrence.
+  const parents: CandidateRow[] = (parentRes.data || []).map((r: any) => {
+    const rec = r.recurrence || {};
+    let cadence = "recurring";
+    if (rec.type === "monthly" && rec.day_of_month) cadence = `monthly day ${rec.day_of_month}`;
+    else if (Array.isArray(rec.days)) cadence = `weekly days=[${rec.days.join(",")}]`;
+    if (rec.time) cadence += ` @ ${rec.time}`;
+    return {
+      id: r.id, kind: "reminder" as const,
+      title: `[recurring] ${r.message_text}`,
+      whenLocal: cadence,
+    };
+  });
+  return [...events, ...reminders, ...parents].slice(0, 12);
 }
 
 async function gatherRecentGroupContext(
