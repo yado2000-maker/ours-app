@@ -3485,6 +3485,95 @@ async function findDuplicateReminder(
   }
 }
 
+// ─── Interim Nudge-Stub Ack-Stop (2026-04-27) ───
+//
+// Until the proper nudge_series schema lands (plan: docs/plans/
+// 2026-04-26-nudge-reminders-plan.md), households flagged with
+// metadata.intended_nudge_config on their recurring-reminder parents
+// (currently only Netzer) need an ack-stop interim. When a high-conf
+// completion intent arrives, scan their nudge-stub parents, fuzzy-match
+// the user's text against each parent's prompt_completion, and DELETE
+// today's unsent children for matching parents. Tomorrow's children
+// re-materialize fresh via the existing materialize_recurring_reminders
+// daily cron, so this only stops *today*.
+//
+// Returns count of children deleted. Designed to be a no-op for any
+// household without the metadata.intended_nudge_config flag.
+async function stopNudgeStubsForToday(
+  householdId: string,
+  userText: string,
+): Promise<number> {
+  if (!householdId || !userText) return 0;
+
+  // Only consider parents explicitly flagged as nudge stubs.
+  const { data: parents } = await supabase
+    .from("reminder_queue")
+    .select("id, metadata")
+    .eq("household_id", householdId)
+    .eq("sent", true)
+    .is("recurrence_parent_id", null)
+    .not("recurrence", "is", null)
+    .not("metadata->intended_nudge_config", "is", null);
+
+  if (!parents || parents.length === 0) return 0;
+
+  // Tokenize user text + each parent's prompt_completion into meaningful words
+  // (length ≥ 3, drop common Hebrew filler words). Match if any parent token
+  // appears in user text or vice versa (substring either direction — tolerates
+  // Hebrew prefix variations like "ה"/"ל"/"ב"/"ש" + "כדור" / "הכדור" / "לכדור").
+  const STOPWORDS = new Set([
+    "את", "של", "לא", "כן", "זה", "זו", "הוא", "היא", "אני", "אנחנו",
+    "the", "and", "for", "was", "are",
+  ]);
+  const tokenize = (s: string): string[] =>
+    s.split(/[\s.,!?;:()"'״׳]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w.toLowerCase()));
+
+  const userTokens = tokenize(userText);
+  if (userTokens.length === 0) return 0;
+
+  const matchingParentIds: string[] = [];
+  for (const p of parents) {
+    const completion: string = p.metadata?.intended_nudge_config?.prompt_completion || "";
+    if (!completion) continue;
+    const parentTokens = tokenize(completion);
+    const overlap = parentTokens.some((pt) =>
+      userTokens.some((ut) => ut.includes(pt) || pt.includes(ut))
+    );
+    if (overlap) matchingParentIds.push(p.id);
+  }
+  if (matchingParentIds.length === 0) return 0;
+
+  // Compute today's IL bounds (Asia/Jerusalem). The recurrence children's send_at
+  // is stored as TIMESTAMPTZ; today's IL midnight in UTC depends on DST. Easiest
+  // safe bound: anything between (now - 12h) and (now + 12h) effectively covers
+  // "today's remaining nudges" without touching tomorrow's already-materialized rows.
+  const now = new Date();
+  const halfDayAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString();
+  const endOfDayWindow = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString();
+
+  const { data: deleted, error } = await supabase
+    .from("reminder_queue")
+    .delete()
+    .in("recurrence_parent_id", matchingParentIds)
+    .eq("sent", false)
+    .gte("send_at", halfDayAgo)
+    .lt("send_at", endOfDayWindow)
+    .select("id");
+
+  if (error) {
+    console.warn(`[NudgeStubAckStop] delete error for hh=${householdId}: ${error.message}`);
+    return 0;
+  }
+  const count = deleted?.length || 0;
+  if (count > 0) {
+    console.log(
+      `[NudgeStubAckStop] hh=${householdId} stopped ${count} nudge-stub children for today ` +
+      `(matched ${matchingParentIds.length} parent(s); user text: "${userText.slice(0, 60)}")`,
+    );
+  }
+  return count;
+}
+
 // ─── Conversation Context Fetcher ───
 
 async function fetchRecentConversation(
@@ -9753,10 +9842,29 @@ Deno.serve(async (req: Request) => {
     // ambient_ambiguous is ALREADY falling through for all groups, so the override
     // would be a no-op. group_mode is still detected and stored for future
     // product/analytics use, but does not currently change routing.
-    if (!isExplicit && layer === "living") {
+    // 2026-04-27 (Netzer): completion intents (complete_task / complete_shopping /
+    // claim_task) at high confidence MUST escape the ambient_living silencer.
+    // Otherwise messages like "הוצאתי אותו" (אריק, family group, after a recurring
+    // dog-walk reminder fired) get silenced even though Haiku correctly classifies
+    // them as complete_task @ 0.92 — the architectural mistake was running the
+    // matrix gate before the intent gate. Threshold 0.85 keeps the AMOR/Tamar
+    // regression patched (silenced unaddressed living chatter) while not deafening
+    // Sheli to crisp ack signals on in-flight reminders.
+    const NUDGE_ACK_INTENTS = new Set(["complete_task", "complete_shopping", "claim_task"]);
+    const isHighConfCompletion =
+      NUDGE_ACK_INTENTS.has(classification.intent) &&
+      (classification.confidence ?? 0) >= 0.85;
+
+    if (!isExplicit && layer === "living" && !isHighConfCompletion) {
       console.log(`[Webhook] Matrix: ${matrixCell} → silent`);
       await logMessage(message, `suppressed_${matrixCell}`, householdId, classification);
       return new Response("OK", { status: 200 });
+    }
+    if (isHighConfCompletion && !isExplicit && layer === "living") {
+      console.log(
+        `[Webhook] Matrix: ${matrixCell} → ALLOWED through ` +
+        `(completion-ack escape: ${classification.intent} @ ${classification.confidence})`
+      );
     }
 
     if (isExplicit && layer === "living") {
@@ -10237,6 +10345,35 @@ Deno.serve(async (req: Request) => {
 
     // 10. Convert Haiku entities to ClassifiedAction format and execute
     const actions = haikuEntitiesToActions(classification);
+
+    // 2026-04-27 (Netzer): Interim nudge-stub ack-stop. Runs BEFORE H7 because
+    // nudge stubs (recurring reminders flagged metadata.intended_nudge_config)
+    // have no corresponding `tasks` row — Haiku correctly classifies "הוצאתי
+    // אותו" / "לקחתי כדור" as complete_task but with no task_id, which would
+    // otherwise hit the H7 "which task?" clarification fallback. Short-circuits
+    // when a stub match deletes today's remaining nudges. Documented in plan
+    // docs/plans/2026-04-26-nudge-reminders-plan.md as the Path C interim until
+    // the proper nudge_series schema lands.
+    if (
+      NUDGE_ACK_INTENTS.has(classification.intent) &&
+      (classification.confidence ?? 0) >= 0.85
+    ) {
+      const stopped = await stopNudgeStubsForToday(householdId, message.text || "");
+      if (stopped > 0) {
+        const ackReply = config.language === "he"
+          ? `✓ סימנתי. עוצרת את שאר התזכורות להיום 🙌`
+          : `✓ Got it. Stopping today's remaining reminders 🙌`;
+        await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+          householdId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "nudge_stub_acked",
+        });
+        await logMessage(message, "nudge_stub_acked", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+      // No stub match → fall through to normal complete_task / complete_shopping handling.
+    }
 
     // H7 fix: if Haiku classified as actionable but couldn't extract entity IDs,
     // the actions array is empty. Don't execute + don't send a false "done!" reply.
