@@ -9640,6 +9640,59 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
+      // Step 2.5: Nudge-series ack via reaction (Phase 3 Task 3.2, 2026-04-26).
+      // ✅/💪/👍 on a Sheli nudge-attempt message acks the series. Matching
+      // strategy v1: check if any active series in this chat has its
+      // prompt_completion as a substring of the reacted-to bot message text
+      // (drain prepends "⏰ תזכורת " to message_text, then "{target_name} —
+      // {prompt_completion}", so substring match on prompt_completion catches
+      // every attempt of every active series). Picks the OLDEST active
+      // series if multiple match — same heuristic as the regex fast-path.
+      //
+      // Skip for negative reactions: a 👎 on a nudge isn't an ack, it's
+      // displeasure with the nudge itself. Falls through to step 3.
+      if (isConfirm && botMsg.message_text) {
+        const chatTargetForReaction = message.groupId.endsWith("@g.us")
+          ? message.groupId
+          : `${message.senderPhone}@s.whatsapp.net`;
+        const { data: activeForReaction } = await supabase
+          .from("reminder_queue")
+          .select("id, nudge_config, created_at")
+          .eq("household_id", hhId)
+          .eq("series_status", "active")
+          .eq("group_id", chatTargetForReaction)
+          .order("created_at", { ascending: true })
+          .limit(10);
+        if (activeForReaction && activeForReaction.length > 0) {
+          const match = activeForReaction.find((s: { nudge_config?: { prompt_completion?: string } }) => {
+            const completion = s.nudge_config?.prompt_completion || "";
+            return completion.length > 0 && botMsg.message_text!.includes(completion);
+          });
+          if (match) {
+            const cancelled = await ackNudgeSeries(
+              match.id, message.senderPhone, "reaction_emoji",
+            );
+            const targetName = (match.nudge_config as { target_name?: string } | undefined)?.target_name || "";
+            const completion = (match.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
+            const ackReply = targetName && completion
+              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              : `מעולה! סימנתי. עוצרת תזכורות ✓`;
+            await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+              householdId: hhId,
+              groupId: message.groupId,
+              inReplyTo: message.messageId,
+              replyType: "nudge_acked_reaction",
+            });
+            await logMessage(message, "nudge_acked_reaction", hhId);
+            console.log(
+              `[Reaction] Nudge ack: series=${match.id} target=${targetName} ` +
+              `cancelled=${cancelled} via ${message.reactionEmoji}`
+            );
+            return new Response("OK", { status: 200 });
+          }
+        }
+      }
+
       // Step 3: No pending confirmation — log as feedback on Sheli's message
       if (isConfirm) {
         console.log(`[Reaction] Positive ${message.reactionEmoji} from ${message.senderName} on: "${botMsg.message_text?.slice(0, 60)}"`);
