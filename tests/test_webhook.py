@@ -1912,6 +1912,131 @@ def _dedup_poll_bot_reply(after_iso, timeout=20):
     return ""
 
 
+# ─── Nudge Reminders (state-machine reminders, 2026-04-26) ───────────────────
+NUDGE_TEST_HOUSEHOLD_ID = "hh_nudge_reminders_test"
+NUDGE_TEST_GROUP_CHAT_ID = "120363777777777777@g.us"
+NUDGE_TEST_SENDER_PHONE = "972500000200"
+NUDGE_TEST_SENDER_NAME = "עינת"
+NUDGE_PHONE_OFRI = "972500000211"
+NUDGE_PHONE_ARIK = "972500000212"
+
+
+def _nudge_reset_household():
+    for table in ["reminder_queue", "tasks", "shopping_items", "events", "whatsapp_messages"]:
+        try:
+            sb_delete(table, {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+    for table, params in [
+        ("whatsapp_config", {"group_id": f"eq.{NUDGE_TEST_GROUP_CHAT_ID}"}),
+        ("whatsapp_member_mapping", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"}),
+        ("household_members", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"}),
+        ("households_v2", {"id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"}),
+    ]:
+        try:
+            sb_delete(table, params)
+        except Exception:
+            pass
+
+
+def _nudge_create_household():
+    sb_post("households_v2", {"id": NUDGE_TEST_HOUSEHOLD_ID, "name": "Nudge Test Family", "lang": "he"})
+    sb_post("whatsapp_config", {
+        "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+        "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+        "bot_active": True,
+        "language": "he",
+        "group_message_count": 50,
+    })
+
+
+def _nudge_create_member(name, phone=None, gender="male"):
+    sb_post("household_members", {
+        "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+        "display_name": name,
+        "gender": gender,
+    })
+    if phone:
+        sb_post("whatsapp_member_mapping", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "phone_number": phone,
+            "member_name": name,
+        })
+
+
+def _nudge_send(text, msg_id=None):
+    if msg_id is None:
+        msg_id = generate_msg_id("nudge")
+    send_webhook(text, msg_id=msg_id, sender_phone=NUDGE_TEST_SENDER_PHONE, group_id=NUDGE_TEST_GROUP_CHAT_ID)
+    return msg_id
+
+
+@unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
+class TestNudgeReminders(unittest.TestCase):
+    """Integration tests — nudge reminders (2026-04-26).
+
+    Phase 2 Task 2.2 covers HAIKU CLASSIFICATION ONLY (intent + entities).
+    End-to-end DB writes + sub-floor refusal templates land in Task 2.5
+    after the executor + SHARED_NUDGE_RULES ship (Tasks 2.3 + 2.4).
+
+    Requires deployed Edge Function with the Phase 2 Task 2.1 changes:
+      - 'add_nudge_reminder' added to ClassificationOutput.intent union
+      - nudge_* entity fields on ClassificationOutput.entities
+      - NUDGE VOCABULARY rules + 6 examples in the Haiku prompt
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _nudge_reset_household()
+        _nudge_create_household()
+        _nudge_create_member(NUDGE_TEST_SENDER_NAME, NUDGE_TEST_SENDER_PHONE, "female")
+        _nudge_create_member("עופרי", NUDGE_PHONE_OFRI, "female")
+        _nudge_create_member("אריק", NUDGE_PHONE_ARIK, "male")
+
+    @classmethod
+    def tearDownClass(cls):
+        _nudge_reset_household()
+
+    def setUp(self):
+        try:
+            sb_delete("reminder_queue", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+
+    def _classify(self, text):
+        msg_id = _nudge_send(text)
+        row = poll_for_message(msg_id, timeout=20)
+        self.assertIsNotNone(row, f"no classification row for msg_id={msg_id}, text={text!r}")
+        cd = row.get("classification_data") or {}
+        return cd, row
+
+    def test_01_classifies_simple_nudge_with_target_and_interval(self):
+        cd, _ = self._classify("שלי תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו")
+        self.assertEqual(cd.get("intent"), "add_nudge_reminder",
+                         f"expected add_nudge_reminder, got {cd.get('intent')}; full={cd}")
+        ent = cd.get("entities") or {}
+        self.assertEqual(ent.get("nudge_interval_min"), 30,
+                         f"expected interval_min=30 (חצי שעה), got {ent.get('nudge_interval_min')}; full={ent}")
+        self.assertEqual(ent.get("nudge_target_name"), "עופרי",
+                         f"expected target_name=עופרי, got {ent.get('nudge_target_name')}; full={ent}")
+
+    def test_02_classifies_short_interval_nudge(self):
+        cd, _ = self._classify("שלי כל 15 דק תזכירי לי לבדוק את התנור")
+        self.assertEqual(cd.get("intent"), "add_nudge_reminder",
+                         f"expected add_nudge_reminder, got {cd.get('intent')}; full={cd}")
+        ent = cd.get("entities") or {}
+        self.assertEqual(ent.get("nudge_interval_min"), 15,
+                         f"expected interval_min=15, got {ent.get('nudge_interval_min')}; full={ent}")
+
+    def test_03_classifies_with_deadline(self):
+        cd, _ = self._classify("שלי נדנדי לי כל חצי שעה עד 22:00 לקחת כדור")
+        self.assertEqual(cd.get("intent"), "add_nudge_reminder",
+                         f"expected add_nudge_reminder, got {cd.get('intent')}; full={cd}")
+        ent = cd.get("entities") or {}
+        self.assertEqual(ent.get("nudge_deadline_time_il"), "22:00",
+                         f"expected deadline_time_il=22:00, got {ent.get('nudge_deadline_time_il')}; full={ent}")
+
+
 @unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
 class TestReminderDedup(unittest.TestCase):
     """Integration tests — reminder triple-fire dedup (2026-04-24).
