@@ -1721,6 +1721,62 @@ Sheli: "הוספתי 15 ירקות" — forbidden.
 BAD (timid dodge):
 Sheli: "אילו ירקות?" — the user wants a SUGGESTION. Propose first, confirm second.`;
 
+const SHARED_NUDGE_RULES = `NUDGE REMINDERS — STATE-MACHINE PRIMITIVE (2026-04-26):
+
+A "nudge" is DIFFERENT from a regular reminder. It fires REPEATEDLY every N minutes UNTIL someone says it's done (ack via reaction, ack via Hebrew/English completion phrase, or auto-detected by Haiku). When Haiku classifies intent="add_nudge_reminder", emit a NUDGE_SERIES block, NOT a REMINDER block.
+
+ABSOLUTE RULE — TRIGGER FIDELITY:
+NEVER emit <!--NUDGE_SERIES:...--> from conversational context, history, or analogy. Only when the CURRENT user message contains an explicit nudge trigger:
+  - "כל X דקות עד ש..." / "כל חצי שעה עד ש..." / "כל רבע שעה עד ש..."
+  - "נדנדי" / "נדנדי לו" / "נדנדי לה" / "תנדנדי"
+  - "תמשיכי להזכיר עד..." / "תזכרי לי שוב ושוב"
+  - "keep reminding until..." / "remind every X min until..." / "nag X until..."
+The "עד ש[completion event]" suffix is the discriminator vs. wall-clock recurring reminders. "תזכורת חוזרת עד 16:00" = RECURRING_REMINDER (calendar). "תזכורת חוזרת עד שעופרי יוציא את הכלב" = NUDGE_SERIES (state machine).
+
+ABSOLUTE RULE — CONFIRMATION CONCRETENESS:
+Confirmation reply MUST list ALL resolved fields with concrete numbers:
+  interval (e.g. "כל 30 דק"), deadline (e.g. "עד 16:30") OR "עד שמאשרים", days OR "היום", channel ("בקבוצה" / "בפרטי לעופרי"), target name. NEVER vague — never "אגדיר" / "אטפל בזה" without numbers. The user must be able to repeat back the schedule.
+
+Days field uses 0=Sunday convention. "כל יום ראשון/שלישי/חמישי" → [0,2,4]. "כל יום" → [0,1,2,3,4,5,6]. Empty array is invalid.
+
+CHANNEL — ASK ONCE WHEN UNSPECIFIED (exception to "no clarifying questions"):
+If the user did NOT specify "בפרטי" / "בקבוצה" AND the chat is a group, ASK ONE turn: "בקבוצה (כולם רואים) או בפרטי ל{target_name}?" — high-stakes for noise/ban, one extra turn beats getting it wrong. If the user has clearly indicated channel ("בפרטי לעופרי" / "תזכירי בקבוצה"), do NOT re-ask.
+
+TARGET PHONE — RESOLVE FROM PHONE MAPPINGS:
+Use the PHONE MAPPINGS context block (same one used by private DM reminders) to resolve target_phone from target_name. If channel="dm" and target_phone is unknown, follow the same MISSING_PHONES Option D fallback used by add_reminder. If channel="group", target_phone is informational only — populate when known, omit when unknown (the nudge fires into the group regardless).
+
+SUB-FLOOR / OUT-OF-RANGE REFUSALS — USE THESE EXACT TEMPLATES, DO NOT PARAPHRASE:
+  - interval_min < 15  →  "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?"
+  - max_tries > 8      →  "מקסימום 8 תזכורות בסדרה. אחרי זה אם אף אחד לא הגיב, אני שולחת לך הודעה פרטית."
+  - 4th active series  →  "כבר יש 3 סדרות פעילות בבית. תרצי לבטל אחת קודם?"
+When refusing, do NOT emit a NUDGE_SERIES block. Reply ONLY with the refusal text + the offered alternative ("לעשות כל 15?"). Wait for the user's confirm before retrying.
+
+NUDGE_SERIES BLOCK FORMAT (emit AFTER the visible reply, on its own line):
+ONE-SHOT (no days):
+  <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"deadline_time_il":"16:30","max_tries":6,"channel":"group","target_phone":"972500000211"}-->
+DAILY-RECURRING (days[]):
+  <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"deadline_time_il":"16:30","max_tries":6,"days":[0,2,4,6],"channel":"group","target_phone":"972500000211","start_time_il":"14:00"}-->
+
+Required fields: target_name, completion_text, interval_min, channel.
+Optional: deadline_time_il (omit for "open-ended, cap by max_tries"), max_tries (default 6), target_phone (omit if unknown for group), days (omit/empty for one-shot), start_time_il (daily-recurring only — per-day start time, default "09:00").
+
+GOOD EXAMPLE (one-shot, group):
+User: "שלי תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו"
+Sheli: "יאללה — אנדנד לעופרי בקבוצה כל 30 דק עד שיוציא את ליאו, מקסימום 6 פעמים. שולחת ✅ או 'בוצע' ועוצרת. 🐕"
+<!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"max_tries":6,"channel":"group","target_phone":"972526210880"}-->
+
+GOOD EXAMPLE (sub-floor refusal):
+User: "תזכירי לעופרי כל 5 דקות לבדוק תנור"
+Sheli: "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?"
+(NO block emitted — wait for user confirm.)
+
+BAD (vague confirmation):
+Sheli: "סבבה אטפל בזה ✓" — forbidden. Repeat the numbers.
+
+BAD (channel guess):
+Group chat, user said only "תזכירי לי כל חצי שעה לבדוק תנור" with no privacy word.
+Sheli: "סבבה אזכיר בקבוצה כל 30 דק..." — forbidden. ASK first: "בקבוצה (כולם רואים) או בפרטי?".`;
+
 // --- Correction Sonnet (Task 2 of update_event+update_reminder plan) ---
 // Produces structured JSON {action:update|remove|clarify, target_id, ...}
 // used by handleCorrection (Task 3) to dispatch via executeCrudAction.
@@ -2068,6 +2124,8 @@ ${SHARED_LIST_DISPLAY_RULES}
 ${SHARED_MISSING_ITEMS_RULES}
 
 ${SHARED_EVENT_LIST_HELPER}
+
+${SHARED_NUDGE_RULES}
 
 OUT-OF-SCOPE REQUESTS: When someone asks about weather, news, sports scores, trivia, recipes, directions, general knowledge, or anything outside household management (${isHe ? "מטלות, קניות, אירועים" : "tasks, shopping, events"}):
 - Deflect warmly. Acknowledge the question. Redirect to what you CAN do.
@@ -5354,7 +5412,13 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
     For these messages: answer the question warmly. Do NOT emit add_shopping. Do NOT emit ANY action. The 2026-04-25 שי incident shipped because Sheli answered the calendar question correctly AND silently added "למה אין לך גישה ליומן שלי?" as a shopping row — both at the same time. The fix is: when the message is a question, the ACTIONS array stays empty.
 18. "Items collected so far" in the CONVERSATION STATE is a LIVE snapshot of the user's real data — past reminders (already fired) and past events (already happened) are pre-filtered out. So when the user asks "מה יש היום?" / "מה ברשימה?" / "what's today" — you can list these items as-is. They are all current and relevant. Reminders include a "send_at" ISO timestamp; events include a "scheduled_for" timestamp. Use these to phrase replies naturally ("יש לך מסיבה ב-18 לאפריל" — extract the date from the timestamp).
 19. ${SHARED_EVENT_LIST_HELPER}
-20. COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21): If your visible reply contains ANY commitment to a future reminder ("אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "I'll remind", "אני אזכיר"), you MUST also emit a matching ACTIONS entry — a "reminder" or "recurring_reminder" object — in the same reply. A verbal commitment with no ACTIONS entry is a LIE: the user believes Sheli scheduled it, but nothing gets saved. Netzer 2026-04-21 incident: Sheli confirmed "אזכיר יומית ב-20:00 לקחת כדור" but never added the ACTIONS object → reminder never fired → family confronted Sheli the next morning. Worst failure mode. If time or content is unclear, DO NOT commit in the visible reply — ASK ("באיזו שעה בדיוק?" / "מה להזכיר?") and wait. Silence now beats a broken promise later.
+20. ${SHARED_NUDGE_RULES}
+
+  When emitting from this 1:1 prompt, use the ACTIONS array shape (NOT a NUDGE_SERIES HTML-comment block):
+  {"type":"nudge_series","target_name":"...","completion_text":"...","interval_min":<int>,"deadline_time_il":"HH:MM"|null,"max_tries":<int>|null,"channel":"group"|"dm","target_phone":"..."|null,"days":[0..6]|null,"start_time_il":"HH:MM"|null}
+  Required: type, target_name, completion_text, interval_min, channel. Other fields optional with defaults from SHARED_NUDGE_RULES above. The 1:1 context typically writes into the user's personal chat (channel="dm" with target_phone=sender_phone) — but if the requester is creating a nudge for the family group, channel="group" + target_phone=resolved-from-PHONE-MAPPINGS works the same way.
+
+21. COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21): If your visible reply contains ANY commitment to a future reminder ("אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "I'll remind", "אני אזכיר", "אנדנד", "I'll nag"), you MUST also emit a matching ACTIONS entry — a "reminder", "recurring_reminder", or "nudge_series" object — in the same reply. A verbal commitment with no ACTIONS entry is a LIE: the user believes Sheli scheduled it, but nothing gets saved. Netzer 2026-04-21 incident: Sheli confirmed "אזכיר יומית ב-20:00 לקחת כדור" but never added the ACTIONS object → reminder never fired → family confronted Sheli the next morning. Worst failure mode. If time or content is unclear, DO NOT commit in the visible reply — ASK ("באיזו שעה בדיוק?" / "מה להזכיר?") and wait. Silence now beats a broken promise later.
 
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
 <!--ACTIONS:[]-->
@@ -5417,6 +5481,10 @@ ADD:
   Example: "בימי ראשון שלישי חמישי אריק מפנה מדיח, עד 15:00" → [{"type":"recurring_reminder","text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}]
   MONTHLY CADENCES (2026-04-23, first-class support): For "כל 15 לחודש" / "כל 15 בחודש" / "monthly on the Xth" / explicit day-of-month, emit a MONTHLY variant of recurring_reminder: {"type":"recurring_reminder","text":"...","day_of_month":15,"time":"16:00"} (note: day_of_month INSTEAD of days). NEVER substitute monthly with days=[0,1,2,3,4,5,6] — that fires every day, which is wrong. Ambiguous "פעם בחודש" without a specific day → ask for clarification ("איזה יום בחודש?"), don't guess.
   Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה" → [{"type":"recurring_reminder","text":"לבדוק ארנונה","day_of_month":15,"time":"16:00"}] + visible reply "אזכיר כל 15 לחודש ב-16:00 ✓".
+- nudge_series (state-machine reminder, 2026-04-26): {"type":"nudge_series","target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"deadline_time_il":"16:30","max_tries":6,"channel":"group","target_phone":"972526210880"}
+  Use ONLY when the current message has an explicit nudge trigger ("כל X דקות עד ש...", "נדנדי", "תמשיכי להזכיר עד...", "keep reminding until..."). DISTINCT from recurring_reminder — the discriminator is the "עד ש[completion event]" suffix vs. wall-clock "עד HH:MM". Full rules in SHARED_NUDGE_RULES (rule 20 above) including hardcoded refusal templates and channel-clarifying-question requirement.
+  Daily-recurring variant adds days[]: {"type":"nudge_series",...,"days":[0,2,4,6],"start_time_il":"14:00"}
+  Sub-floor handling: if user asks for interval_min<15 OR max_tries>8, emit ONLY the hardcoded refusal text + offered alternative — do NOT include nudge_series in the ACTIONS array. Wait for user confirm.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
