@@ -11328,6 +11328,98 @@ Deno.serve(async (req: Request) => {
       else console.log(`[RecurringReminder] Immediate materialize inserted ${matCount} child row(s)`);
     }
 
+    // 13b''. NUDGE_SERIES inline rescue (Phase 3 final fix, 2026-04-27).
+    // Mirrors the recurring block above. The actionable path doesn't call
+    // rescueRemindersAndStrip — it has its own inline rescue chain. Without
+    // this block, NUDGE_SERIES emitted by Sonnet hit cleanReminderFromReply
+    // (line 11338) and got stripped before any DB insert.
+    //
+    // For each parsed block: insert the anchor (one-shot: series_status='active'
+    // sentinel; daily-recurring: recurrence + nudge_config sentinel). One-shot
+    // also inserts attempt #1 firing now. Daily-recurring triggers the nudge
+    // materialize cron inline so today's start time fires this evening
+    // rather than waiting for tomorrow's 22:00 UTC cron.
+    //
+    // Guardrail RAISE EXCEPTIONs from validate_nudge_config are mapped to the
+    // hardcoded SHARED_NUDGE_RULES Hebrew refusal templates by overriding the
+    // visible reply (same defense-in-depth as rescueRemindersAndStrip).
+    const nudgeBlocksInline = reply ? extractNudgeSeriesFromReply(reply) : [];
+    let nudgeRefuseReply: string | null = null;
+    for (const n of nudgeBlocksInline) {
+      const isDaily = !!(n.days && n.days.length > 0);
+      const baseRow: Record<string, unknown> = {
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: `${n.target_name} — ${n.completion_text}`,
+        send_at: new Date().toISOString(),
+        sent: true,
+        sent_at: new Date().toISOString(),
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: n.channel,
+        recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+        nudge_config: {
+          interval_min: n.interval_min,
+          max_tries: n.max_tries ?? 6,
+          deadline_time_il: n.deadline_time_il ?? null,
+          channel: n.channel,
+          target_phone: n.target_phone ?? null,
+          target_name: n.target_name,
+          prompt_completion: n.completion_text,
+        },
+        metadata: { source: "actionable_path_nudge_series", recurring_parent: isDaily },
+      };
+      if (isDaily) {
+        baseRow.recurrence = { days: n.days, time: (n as { start_time_il?: string }).start_time_il || "09:00" };
+      } else {
+        baseRow.series_status = "active";
+      }
+      const { data: anchor, error: anchorErr } = await supabase
+        .from("reminder_queue").insert(baseRow).select("id").single();
+      if (anchorErr) {
+        const errMsg = anchorErr.message || "";
+        if (errMsg.includes("nudge_interval_below_floor")) {
+          if (!nudgeRefuseReply) nudgeRefuseReply = "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?";
+        } else if (errMsg.includes("nudge_max_tries_out_of_range")) {
+          if (!nudgeRefuseReply) nudgeRefuseReply = "מקסימום 8 תזכורות בסדרה. אחרי זה אם אף אחד לא הגיב, אני שולחת לך הודעה פרטית.";
+        } else if (errMsg.includes("too_many_active_series")) {
+          if (!nudgeRefuseReply) nudgeRefuseReply = "כבר יש 3 סדרות פעילות בבית. תרצי לבטל אחת קודם?";
+        } else {
+          console.error("[NudgeSeries:actionable] Insert error:", anchorErr);
+        }
+        continue;
+      }
+      const anchorId = anchor?.id;
+      if (!isDaily && anchorId) {
+        const { error: attemptErr } = await supabase.from("reminder_queue").insert({
+          household_id: householdId,
+          group_id: message.groupId,
+          message_text: `${n.target_name} — ${n.completion_text}`,
+          send_at: new Date().toISOString(),
+          sent: false,
+          reminder_type: "user",
+          created_by_phone: message.senderPhone,
+          created_by_name: message.senderName,
+          delivery_mode: n.channel,
+          recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+          nudge_series_id: anchorId,
+          nudge_attempt: 1,
+          metadata: { nudge_attempt_of_series: anchorId, attempt_num: 1 },
+        });
+        if (attemptErr) console.error("[NudgeSeries:actionable] Attempt #1 insert error:", attemptErr);
+        else console.log(`[NudgeSeries:actionable] One-shot anchor + attempt #1 created (${n.channel}): target=${n.target_name} task="${n.completion_text}" anchor=${anchorId}`);
+      } else {
+        console.log(`[NudgeSeries:actionable] Daily-recurring parent created (${n.channel}): target=${n.target_name} days=${JSON.stringify(n.days)} parent=${anchorId}`);
+        const { data: spawned, error: spawnErr } = await supabase.rpc("materialize_nudge_series_daily");
+        if (spawnErr) console.warn("[NudgeSeries:actionable] Immediate materialize failed:", spawnErr.message);
+        else console.log(`[NudgeSeries:actionable] Immediate materialize spawned ${spawned} series anchor(s)`);
+      }
+    }
+    if (nudgeRefuseReply && nudgeBlocksInline.length > 0) {
+      reply = nudgeRefuseReply;
+    }
+
     // If enrichment (one-shot OR recurring) produced a refuse but no rows got inserted,
     // override Sonnet's reply with the explanation.
     if (refuseReply_ && enrichedReminders_.length === 0 && recurringBlocks.length > 0) {
