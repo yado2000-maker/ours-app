@@ -336,6 +336,9 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
         }}
       >
         <div style={{ display: "flex", gap: 20, justifyContent: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <a href="/privacy" style={{ color: "#2D8E6F", textDecoration: "none", fontWeight: 600 }}>
+            {c.footerPrivacy}
+          </a>
           <a href="/terms" style={{ color: "#2D8E6F", textDecoration: "none", fontWeight: 600 }}>
             {c.footerTerms}
           </a>
