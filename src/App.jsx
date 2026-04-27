@@ -9,6 +9,8 @@ import AuthScreen from "./components/AuthScreen.jsx";
 import WelcomeScreen from "./components/WelcomeScreen.jsx";
 import LandingPage from "./components/LandingPage.jsx";
 import WaitlistPage from "./components/WaitlistPage.jsx";
+import PrivacyPage from "./components/PrivacyPage.jsx";
+import TermsPage from "./components/TermsPage.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import TasksView from "./components/TasksView.jsx";
 import ShoppingView from "./components/ShoppingView.jsx";
@@ -51,8 +53,20 @@ function isWaitlistPath() {
   return window.location.pathname.replace(/\/+$/, "") === "/waitlist";
 }
 
+function isPrivacyPath() {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.replace(/\/+$/, "") === "/privacy";
+}
+
+function isTermsPath() {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.replace(/\/+$/, "") === "/terms";
+}
+
 export default function Sheli() {
   if (isWaitlistPath()) return <WaitlistPage />;
+  if (isPrivacyPath()) return <PrivacyPage />;
+  if (isTermsPath()) return <TermsPage />;
   return <SheliApp />;
 }
 

@@ -76,6 +76,10 @@ const CONTENT = {
     bottomLink: "קחו אותי לאפליקציה",
     bottomOr: "או",
     langToggle: "EN",
+    footerPrivacy: "פרטיות",
+    footerTerms: "תנאי שימוש",
+    footerContact: "צרו קשר",
+    footerRights: "\u00A9 2026 שלי",
   },
   en: {
     dir: "ltr",
@@ -131,6 +135,10 @@ const CONTENT = {
     bottomLink: "Take me to the app",
     bottomOr: "or",
     langToggle: "\u05E2\u05D1",
+    footerPrivacy: "Privacy",
+    footerTerms: "Terms",
+    footerContact: "Contact us",
+    footerRights: "\u00A9 2026 Sheli",
   },
 };
 
@@ -315,6 +323,28 @@ export default function LandingPage({ onGetStarted, onSignIn }) {
           {c.bottomLink}
         </button>
       </section>
+
+      {/* ─── Footer ─── */}
+      <footer
+        style={{
+          padding: "32px 20px calc(40px + env(safe-area-inset-bottom))",
+          textAlign: "center",
+          fontSize: 14,
+          color: "#888",
+          borderTop: "1px solid #eee",
+          marginTop: 24,
+        }}
+      >
+        <div style={{ display: "flex", gap: 20, justifyContent: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <a href="/terms" style={{ color: "#2D8E6F", textDecoration: "none", fontWeight: 600 }}>
+            {c.footerTerms}
+          </a>
+          <a href="mailto:service@sheli.family" style={{ color: "#2D8E6F", textDecoration: "none", fontWeight: 600 }}>
+            {c.footerContact}
+          </a>
+        </div>
+        <div>{c.footerRights}</div>
+      </footer>
     </div>
   );
 }
