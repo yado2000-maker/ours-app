@@ -2453,6 +2453,86 @@ function extractRecurringRemindersFromReply(reply: string): RecurringReminder[] 
   return out;
 }
 
+// NUDGE_SERIES block extractor (2026-04-26).
+// Sonnet emits <!--NUDGE_SERIES:{...}--> when intent=add_nudge_reminder. Two shapes:
+//   ONE-SHOT (no days): {target_name, completion_text, interval_min, deadline_time_il?, max_tries?, channel, target_phone}
+//   DAILY-RECURRING:    {..., days:[0..6]}            // 0=Sun
+// Use lazy `[\s\S]*?` content match (NOT [^}]*) because target_phone or future
+// fields may contain braces; hard-stop on '-->' literal.
+//
+// The DB-side guardrail trigger (validate_nudge_config, 2026-04-26) enforces
+// interval_min>=15, max_tries 1..8, and the 3-active-series-per-household cap;
+// this extractor does cheap shape validation so a malformed block doesn't
+// fall through to the rescue insert and surface a confusing PG error.
+export type NudgeSeriesBlock = {
+  target_name: string;
+  completion_text: string;
+  interval_min: number;
+  deadline_time_il?: string;       // "HH:MM" or absent
+  max_tries?: number;              // 1..8 or absent (default 6)
+  channel: "group" | "dm";         // resolved by Sonnet via SHARED_NUDGE_RULES
+  target_phone?: string;           // resolved by Sonnet via PHONE MAPPINGS, or null
+  days?: number[];                 // [0..6] for daily-recurring; absent/empty for one-shot
+};
+
+function extractNudgeSeriesFromReply(reply: string): NudgeSeriesBlock[] {
+  const out: NudgeSeriesBlock[] = [];
+  for (const m of reply.matchAll(/<!--\s*NUDGE_SERIES\s*:\s*([\s\S]*?)\s*-->/g)) {
+    const raw = m[1].trim();
+    try {
+      const p = JSON.parse(raw);
+      if (typeof p.target_name !== "string" || !p.target_name) {
+        console.warn("[NudgeSeries] Missing/invalid target_name:", raw);
+        continue;
+      }
+      if (typeof p.completion_text !== "string" || !p.completion_text) {
+        console.warn("[NudgeSeries] Missing/invalid completion_text:", raw);
+        continue;
+      }
+      if (typeof p.interval_min !== "number" || !Number.isInteger(p.interval_min)) {
+        console.warn("[NudgeSeries] Missing/non-integer interval_min:", raw);
+        continue;
+      }
+      if (p.channel !== "group" && p.channel !== "dm") {
+        console.warn("[NudgeSeries] channel must be 'group' or 'dm':", raw);
+        continue;
+      }
+      if (p.deadline_time_il !== undefined && p.deadline_time_il !== null) {
+        if (typeof p.deadline_time_il !== "string" || !/^\d{1,2}:\d{2}$/.test(p.deadline_time_il)) {
+          console.warn("[NudgeSeries] Invalid deadline_time_il (expected HH:MM):", raw);
+          continue;
+        }
+      }
+      let days: number[] | undefined;
+      if (p.days !== undefined && p.days !== null) {
+        if (!Array.isArray(p.days) || !p.days.every((d: unknown) =>
+              typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6)) {
+          console.warn("[NudgeSeries] Invalid days array (expected int[0..6]):", raw);
+          continue;
+        }
+        if (p.days.length > 0) days = p.days as number[];
+      }
+      const max_tries = (typeof p.max_tries === "number" && Number.isInteger(p.max_tries))
+        ? p.max_tries : undefined;
+      const target_phone = (typeof p.target_phone === "string" && p.target_phone) ? p.target_phone : undefined;
+      const deadline_time_il = (typeof p.deadline_time_il === "string") ? p.deadline_time_il : undefined;
+      out.push({
+        target_name: p.target_name,
+        completion_text: p.completion_text,
+        interval_min: p.interval_min,
+        channel: p.channel,
+        ...(deadline_time_il !== undefined && { deadline_time_il }),
+        ...(max_tries !== undefined && { max_tries }),
+        ...(target_phone !== undefined && { target_phone }),
+        ...(days && { days }),
+      });
+    } catch {
+      console.warn("[NudgeSeries] Failed to parse NUDGE_SERIES block:", raw);
+    }
+  }
+  return out;
+}
+
 // EVENT block extractor — mirrors REMINDER. Sonnet emits <!--EVENT:{...}--> when
 // it recognises a calendar entry but Haiku missed the intent (e.g. "תרשמי ב 12.5 ...").
 // Without rescue, the catch-all HTML-comment strip in cleanReminderFromReply would
@@ -2513,6 +2593,7 @@ function extractMissingPhonesFromReply(reply: string): Array<{
 
 function cleanReminderFromReply(reply: string): string {
   return reply
+    .replace(/<!--\s*NUDGE_SERIES\s*:[\s\S]*?-->/g, "")
     .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
     .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
     .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
@@ -2866,6 +2947,135 @@ async function rescueRemindersAndStrip(
     const { data: count, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
     if (matErr) console.warn("[RecurringReminderRescue] Immediate materialize failed:", matErr.message);
     else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
+  }
+
+  // NUDGE_SERIES rescue (2026-04-26). Sonnet emits one or more
+  // <!--NUDGE_SERIES:{...}--> blocks for state-machine reminders. Two storage
+  // shapes share `reminder_queue` columns:
+  //   - one-shot (no days)        : insert ANCHOR (sent=true sentinel,
+  //                                  series_status='active', nudge_config)
+  //                                  + ATTEMPT #1 (sent=false, nudge_series_id,
+  //                                  nudge_attempt=1, send_at=NOW())
+  //   - daily-recurring (days[])  : insert PARENT (sent=true sentinel,
+  //                                  recurrence + nudge_config, NO series_status —
+  //                                  series_status stays NULL on parents).
+  //                                  Today's anchor + first attempt are spawned
+  //                                  by materialize_nudge_series_daily() (cron
+  //                                  at 22:00 UTC); we trigger it inline so the
+  //                                  series fires today if start_time is in the
+  //                                  future / within the 6h grace window.
+  //
+  // The DB-side guardrail trigger (validate_nudge_config) enforces interval
+  // floor / max-tries ceiling / 3-active-per-household cap with RAISE
+  // EXCEPTION HINTs — we surface the friendly text by setting
+  // refuseReplyFromEnrichment so the rest of the rescue path can short-circuit.
+  const nudgeBlocks = extractNudgeSeriesFromReply(reply);
+  for (const n of nudgeBlocks) {
+    const isDaily = !!(n.days && n.days.length > 0);
+    const baseRow: Record<string, unknown> = {
+      household_id: householdId,
+      group_id: message.groupId,
+      message_text: `${n.target_name} — ${n.completion_text}`,
+      send_at: new Date().toISOString(),
+      sent: true,                  // sentinel — anchors/parents never drained directly
+      sent_at: new Date().toISOString(),
+      reminder_type: "user",
+      created_by_phone: message.senderPhone,
+      created_by_name: message.senderName,
+      delivery_mode: n.channel,    // "group" | "dm"
+      recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+      nudge_config: {
+        interval_min: n.interval_min,
+        max_tries: n.max_tries ?? 6,
+        deadline_time_il: n.deadline_time_il ?? null,
+        channel: n.channel,
+        target_phone: n.target_phone ?? null,
+        target_name: n.target_name,
+        prompt_completion: n.completion_text,
+      },
+      metadata: {
+        source: "sonnet_rescue_nudge_series",
+        recurring_parent: isDaily,
+      },
+    };
+    if (isDaily) {
+      baseRow.recurrence = { days: n.days, time: "09:00" };  // start time inferred per-day from nudge_config? see below
+      // Note: recurrence.time is the per-day START time. Sonnet's NUDGE_SERIES
+      // shape doesn't currently carry start_time_il because the design says
+      // "start time = first attempt fires immediately on creation". For
+      // daily-recurring, we fall back to "09:00" as the reasonable default; if
+      // Sonnet wants a different per-day start, it must include start_time_il
+      // in a future revision (tracked in design doc Open Questions).
+      if (typeof (n as { start_time_il?: string }).start_time_il === "string") {
+        (baseRow.recurrence as { time: string }).time = (n as { start_time_il: string }).start_time_il;
+      }
+    } else {
+      baseRow.series_status = "active";
+    }
+    const { data: anchor, error: anchorErr } = await supabase
+      .from("reminder_queue").insert(baseRow).select("id").single();
+    if (anchorErr) {
+      // Map guardrail RAISE EXCEPTION codes to friendly Hebrew templates.
+      const msg = anchorErr.message || "";
+      if (msg.includes("nudge_interval_below_floor")) {
+        if (!refuseReplyFromEnrichment) {
+          refuseReplyFromEnrichment = "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?";
+        }
+      } else if (msg.includes("nudge_max_tries_out_of_range")) {
+        if (!refuseReplyFromEnrichment) {
+          refuseReplyFromEnrichment = "מקסימום 8 תזכורות בסדרה. אחרי זה אם אף אחד לא הגיב, אני שולחת לך הודעה פרטית.";
+        }
+      } else if (msg.includes("too_many_active_series")) {
+        if (!refuseReplyFromEnrichment) {
+          refuseReplyFromEnrichment = "כבר יש 3 סדרות פעילות בבית. תרצי לבטל אחת קודם?";
+        }
+      } else {
+        console.error("[NudgeSeriesRescue] Insert error:", anchorErr);
+      }
+      continue;
+    }
+    const anchorId = anchor?.id;
+    if (!isDaily && anchorId) {
+      // One-shot: insert attempt #1 firing now. Drain v6 will fire it,
+      // schedule_next_nudge will queue attempt #2 at NOW()+interval_min.
+      const { error: attemptErr } = await supabase.from("reminder_queue").insert({
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: `${n.target_name} — ${n.completion_text}`,
+        send_at: new Date().toISOString(),
+        sent: false,
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: n.channel,
+        recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+        nudge_series_id: anchorId,
+        nudge_attempt: 1,
+        metadata: { nudge_attempt_of_series: anchorId, attempt_num: 1 },
+      });
+      if (attemptErr) {
+        console.error("[NudgeSeriesRescue] Attempt #1 insert error:", attemptErr);
+      } else {
+        console.log(
+          `[NudgeSeriesRescue] One-shot anchor + attempt #1 created (${n.channel}): ` +
+          `target=${n.target_name} task="${n.completion_text}" interval=${n.interval_min}min ` +
+          `deadline=${n.deadline_time_il ?? "none"} (anchor=${anchorId})`
+        );
+        rescueSaveCount++;
+      }
+    } else {
+      console.log(
+        `[NudgeSeriesRescue] Daily-recurring parent created (${n.channel}): ` +
+        `target=${n.target_name} task="${n.completion_text}" days=${JSON.stringify(n.days)} ` +
+        `interval=${n.interval_min}min deadline=${n.deadline_time_il ?? "none"} (parent=${anchorId})`
+      );
+      rescueSaveCount++;
+      // Trigger today's series spawn so the first instance fires today if
+      // start_time is in the future. Cron at 22:00 UTC handles future days.
+      const { data: spawned, error: spawnErr } = await supabase.rpc("materialize_nudge_series_daily");
+      if (spawnErr) console.warn("[NudgeSeriesRescue] Immediate materialize failed:", spawnErr.message);
+      else console.log(`[NudgeSeriesRescue] Immediate materialize spawned ${spawned} series anchor(s)`);
+    }
   }
 
   // If the enrichment pass generated a refuse reply AND nothing was saved,
@@ -6394,6 +6604,113 @@ async function execute1on1Actions(params: {
           const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
           if (matErr) console.warn(`${logPrefix} Immediate materialize failed:`, matErr.message);
           else console.log(`${logPrefix} Immediate materialize inserted ${matCount} child row(s)`);
+          break;
+        }
+        case "nudge_series": {
+          // 1:1 path nudge_series wiring (Phase 2 Task 2.3, 2026-04-26).
+          // Mirrors the group rescue flow in rescueRemindersAndStrip. Two
+          // shapes share schema: one-shot (no days) → anchor + attempt #1;
+          // daily-recurring (days[]) → parent only (materializer cron spawns
+          // anchors per matching day). Both inserts hit the
+          // validate_nudge_config trigger which RAISE EXCEPTIONs on
+          // sub-floor / over-ceiling / 3-active-cap; we map the hint codes
+          // to friendly Hebrew templates.
+          const targetName = (action.target_name as string) || "";
+          const completionText = (action.completion_text as string) || "";
+          const intervalMin = Number(action.interval_min);
+          if (!targetName || !completionText || !Number.isInteger(intervalMin)) {
+            console.warn(`${logPrefix} nudge_series missing target_name/completion_text/interval_min — skipping`, action);
+            break;
+          }
+          const channel: "group" | "dm" = action.channel === "dm" ? "dm" : "group";
+          const targetPhone = typeof action.target_phone === "string" ? action.target_phone as string : null;
+          const days = Array.isArray(action.days) && (action.days as number[]).length > 0
+            ? action.days as number[] : null;
+          const isDaily = !!days;
+          // 1:1 flows write into the user's personal chat by default — mirror
+          // the recurring_reminder pattern at line 6377: group_id = phone JID.
+          const groupIdForRow = phone + "@s.whatsapp.net";
+          const anchorRow: Record<string, unknown> = {
+            household_id: householdId,
+            group_id: groupIdForRow,
+            message_text: `${targetName} — ${completionText}`,
+            send_at: new Date().toISOString(),
+            sent: true,
+            sent_at: new Date().toISOString(),
+            reminder_type: "user",
+            created_by_phone: phone,
+            created_by_name: userName,
+            delivery_mode: channel,
+            recipient_phones: channel === "dm" && targetPhone ? [targetPhone] : null,
+            nudge_config: {
+              interval_min: intervalMin,
+              max_tries: typeof action.max_tries === "number" ? action.max_tries : 6,
+              deadline_time_il: typeof action.deadline_time_il === "string" ? action.deadline_time_il : null,
+              channel,
+              target_phone: targetPhone,
+              target_name: targetName,
+              prompt_completion: completionText,
+            },
+            metadata: { source: "1on1_actions_nudge_series", recurring_parent: isDaily },
+          };
+          if (isDaily) {
+            anchorRow.recurrence = {
+              days,
+              time: typeof action.start_time_il === "string" ? action.start_time_il : "09:00",
+            };
+          } else {
+            anchorRow.series_status = "active";
+          }
+          const { data: anchor, error: anchorErr } = await supabase
+            .from("reminder_queue").insert(anchorRow).select("id").single();
+          if (anchorErr) {
+            const errMsg = anchorErr.message || "";
+            if (errMsg.includes("nudge_interval_below_floor") ||
+                errMsg.includes("nudge_max_tries_out_of_range") ||
+                errMsg.includes("too_many_active_series")) {
+              // Sonnet's reply already carried the user-facing template per
+              // SHARED_NUDGE_RULES — the trigger just kept the bad row out of
+              // the DB. Log + move on.
+              console.warn(`${logPrefix} nudge_series guardrail rejection: ${errMsg}`);
+            } else {
+              console.error(`${logPrefix} nudge_series anchor insert error:`, anchorErr);
+            }
+            break;
+          }
+          const anchorId = anchor?.id;
+          if (!isDaily && anchorId) {
+            const { error: attemptErr } = await supabase.from("reminder_queue").insert({
+              household_id: householdId,
+              group_id: groupIdForRow,
+              message_text: `${targetName} — ${completionText}`,
+              send_at: new Date().toISOString(),
+              sent: false,
+              reminder_type: "user",
+              created_by_phone: phone,
+              created_by_name: userName,
+              delivery_mode: channel,
+              recipient_phones: channel === "dm" && targetPhone ? [targetPhone] : null,
+              nudge_series_id: anchorId,
+              nudge_attempt: 1,
+              metadata: { nudge_attempt_of_series: anchorId, attempt_num: 1 },
+            });
+            if (attemptErr) {
+              console.error(`${logPrefix} nudge_series attempt #1 insert error:`, attemptErr);
+            } else {
+              console.log(
+                `${logPrefix} nudge_series one-shot created (${channel}): target=${targetName} ` +
+                `task="${completionText}" interval=${intervalMin}min anchor=${anchorId}`
+              );
+            }
+          } else {
+            console.log(
+              `${logPrefix} nudge_series daily-recurring parent created: target=${targetName} ` +
+              `task="${completionText}" days=${JSON.stringify(days)} parent=${anchorId}`
+            );
+            const { data: spawned, error: spawnErr } = await supabase.rpc("materialize_nudge_series_daily");
+            if (spawnErr) console.warn(`${logPrefix} Immediate nudge materialize failed:`, spawnErr.message);
+            else console.log(`${logPrefix} Immediate nudge materialize spawned ${spawned} series anchor(s)`);
+          }
           break;
         }
         case "expense": {
