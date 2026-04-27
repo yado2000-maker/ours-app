@@ -3,9 +3,8 @@
   "rewrites": [
     { "source": "/r/:code", "destination": "/api/r/:code" },
     { "source": "/waitlist", "destination": "/index.html" },
-    { "source": "/tasks", "destination": "/index.html" },
-    { "source": "/shopping", "destination": "/index.html" },
-    { "source": "/events", "destination": "/index.html" }
+    { "source": "/privacy", "destination": "/index.html" },
+    { "source": "/terms", "destination": "/index.html" }
   ],
   "headers": [
     {
