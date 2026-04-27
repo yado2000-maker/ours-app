@@ -2085,6 +2085,172 @@ class TestNudgeReminders(unittest.TestCase):
     # the executor catches → still surfaces the same refusal text. So this
     # test verifies BOTH the prompt path (template in reply) AND the DB
     # invariant (no nudge_config row).
+    # Tier 1 ack via regex fast-path. Insert an anchor + attempt #1 directly
+    # (skip Sonnet entirely so the test isolates the regex path), then send
+    # 'בוצע' as a user message. Expect series_status='acked' + child cancelled.
+    def test_06_regex_ack_flips_series_to_acked(self):
+        # Seed an active series for עופרי
+        anchor_id = sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "created_by_name": NUDGE_TEST_SENDER_NAME,
+            "delivery_mode": "group",
+            "nudge_config": {
+                "interval_min": 15, "max_tries": 6, "deadline_time_il": "23:59",
+                "channel": "group", "target_phone": NUDGE_PHONE_OFRI,
+                "target_name": "עופרי", "prompt_completion": "לבדוק תנור",
+            },
+            "series_status": "active",
+            "metadata": {"source": "test_06_regex_ack_seed"},
+        })[0]["id"]
+        # Seed an unsent attempt #1
+        sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+            "sent": False,
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "delivery_mode": "group",
+            "nudge_series_id": anchor_id,
+            "nudge_attempt": 1,
+            "metadata": {"nudge_attempt_of_series": anchor_id, "attempt_num": 1},
+        })
+
+        _nudge_send("בוצע, בדקתי")
+        time.sleep(5)
+
+        anchor_after = sb_get("reminder_queue", {
+            "id": f"eq.{anchor_id}",
+            "select": "series_status,metadata",
+        })
+        self.assertEqual(len(anchor_after), 1, f"anchor missing: {anchor_after}")
+        self.assertEqual(anchor_after[0]["series_status"], "acked",
+                         f"expected 'acked', got {anchor_after[0]}")
+
+        unsent_attempts = sb_get("reminder_queue", {
+            "nudge_series_id": f"eq.{anchor_id}",
+            "sent": "eq.false",
+            "select": "id,nudge_attempt",
+        })
+        self.assertEqual(len(unsent_attempts), 0,
+                         f"expected 0 unsent attempts (all soft-cancelled), got {unsent_attempts}")
+
+    # Deadline expiry: anchor with deadline_time_il in the past,
+    # calling schedule_next_nudge transitions to expired_deadline.
+    def test_07_deadline_expiry(self):
+        # Hardcoded "01:00" IL — guaranteed to be in the past for any test
+        # run after 1am. schedule_next_nudge computes today_at_il(01:00) which
+        # is ~20+ hours in the past for an evening test run; next_send =
+        # NOW + 15 min is far ahead of that, so the > comparison flips
+        # series_status to expired_deadline. Avoids zoneinfo/tzdata dependency
+        # on Windows test runners.
+        past_min = "01:00"
+
+        anchor_id = sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "delivery_mode": "group",
+            "nudge_config": {
+                "interval_min": 15, "max_tries": 6, "deadline_time_il": past_min,
+                "channel": "group", "target_phone": NUDGE_PHONE_OFRI,
+                "target_name": "עופרי", "prompt_completion": "לבדוק תנור",
+            },
+            "series_status": "active",
+            "metadata": {"source": "test_07_deadline_seed"},
+        })[0]["id"]
+
+        # Call schedule_next_nudge directly via PostgREST RPC
+        sb_rpc("schedule_next_nudge", {"p_series_id": anchor_id})
+
+        anchor_after = sb_get("reminder_queue", {
+            "id": f"eq.{anchor_id}",
+            "select": "series_status",
+        })
+        self.assertEqual(anchor_after[0]["series_status"], "expired_deadline",
+                         f"expected 'expired_deadline', got {anchor_after}")
+
+    # Max-tries expiry: insert anchor with max_tries=2 and 2 existing attempt
+    # children, call schedule_next_nudge, expect expired_tries + outbound DM
+    # queued by notify_expired_nudge_series().
+    def test_08_max_tries_expiry_with_outbound(self):
+        anchor_id = sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "delivery_mode": "group",
+            "nudge_config": {
+                "interval_min": 15, "max_tries": 2, "deadline_time_il": "23:59",
+                "channel": "group", "target_phone": NUDGE_PHONE_OFRI,
+                "target_name": "עופרי", "prompt_completion": "לבדוק תנור",
+            },
+            "series_status": "active",
+            "metadata": {"source": "test_08_max_tries_seed"},
+        })[0]["id"]
+        # Seed 2 already-sent attempts so max_tries=2 is exactly reached
+        for i in (1, 2):
+            sb_post("reminder_queue", {
+                "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+                "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+                "message_text": "עופרי — לבדוק תנור",
+                "send_at": (datetime.now(timezone.utc) - timedelta(minutes=30 - 15 * i)).isoformat(),
+                "sent": True,
+                "sent_at": (datetime.now(timezone.utc) - timedelta(minutes=30 - 15 * i)).isoformat(),
+                "reminder_type": "user",
+                "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+                "delivery_mode": "group",
+                "nudge_series_id": anchor_id,
+                "nudge_attempt": i,
+                "metadata": {"nudge_attempt_of_series": anchor_id, "attempt_num": i},
+            })
+
+        # Call schedule_next_nudge: last_attempt=2 >= max_tries=2 → expired_tries
+        sb_rpc("schedule_next_nudge", {"p_series_id": anchor_id})
+        # Then run the expiry notifier — should queue one outbound nudge_expiry row
+        sb_rpc("notify_expired_nudge_series", {})
+
+        anchor_after = sb_get("reminder_queue", {
+            "id": f"eq.{anchor_id}",
+            "select": "series_status,metadata",
+        })
+        self.assertEqual(anchor_after[0]["series_status"], "expired_tries",
+                         f"expected 'expired_tries', got {anchor_after}")
+        self.assertIsNotNone(anchor_after[0]["metadata"].get("expiry_notified"),
+                             f"expected metadata.expiry_notified breadcrumb; got {anchor_after[0]['metadata']}")
+
+        outbound_rows = sb_get("outbound_queue", {
+            "household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}",
+            "message_type": "eq.nudge_expiry",
+            "select": "phone_number,body,metadata",
+            "order": "queued_at.desc",
+            "limit": "5",
+        })
+        match = [r for r in outbound_rows if r.get("metadata", {}).get("series_id") == anchor_id]
+        self.assertEqual(len(match), 1,
+                         f"expected 1 outbound nudge_expiry row for series {anchor_id}; got {outbound_rows}")
+        self.assertEqual(match[0]["phone_number"], NUDGE_TEST_SENDER_PHONE,
+                         f"expected DM to requester {NUDGE_TEST_SENDER_PHONE}; got {match[0]['phone_number']}")
+        # Cleanup: drop the outbound row so it doesn't sit in the queue
+        sb_delete("outbound_queue", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}", "message_type": "eq.nudge_expiry"})
+
     def test_05_sub_floor_interval_refused_no_db_row(self):
         msg_id = _nudge_send("שלי תזכירי לעופרי כל 5 דקות לבדוק תנור")
         # Bot reply should land within ~10s
