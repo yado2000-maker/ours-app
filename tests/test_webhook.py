@@ -2125,6 +2125,384 @@ def _dedup_poll_bot_reply(after_iso, timeout=20):
     return ""
 
 
+# ─── Nudge Reminders (state-machine reminders, 2026-04-26) ───────────────────
+NUDGE_TEST_HOUSEHOLD_ID = "hh_nudge_reminders_test"
+NUDGE_TEST_GROUP_CHAT_ID = "120363777777777777@g.us"
+NUDGE_TEST_SENDER_PHONE = "972500000200"
+NUDGE_TEST_SENDER_NAME = "עינת"
+NUDGE_PHONE_OFRI = "972500000211"
+NUDGE_PHONE_ARIK = "972500000212"
+
+
+def _nudge_reset_household():
+    for table in ["reminder_queue", "tasks", "shopping_items", "events", "whatsapp_messages"]:
+        try:
+            sb_delete(table, {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+    for table, params in [
+        ("whatsapp_config", {"group_id": f"eq.{NUDGE_TEST_GROUP_CHAT_ID}"}),
+        ("whatsapp_member_mapping", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"}),
+        ("household_members", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"}),
+        ("households_v2", {"id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"}),
+    ]:
+        try:
+            sb_delete(table, params)
+        except Exception:
+            pass
+
+
+def _nudge_create_household():
+    sb_post("households_v2", {"id": NUDGE_TEST_HOUSEHOLD_ID, "name": "Nudge Test Family", "lang": "he"})
+    sb_post("whatsapp_config", {
+        "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+        "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+        "bot_active": True,
+        "language": "he",
+        "group_message_count": 50,
+    })
+
+
+def _nudge_create_member(name, phone=None, gender="male"):
+    sb_post("household_members", {
+        "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+        "display_name": name,
+        "gender": gender,
+    })
+    if phone:
+        sb_post("whatsapp_member_mapping", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "phone_number": phone,
+            "member_name": name,
+        })
+
+
+def _nudge_send(text, msg_id=None):
+    if msg_id is None:
+        msg_id = generate_msg_id("nudge")
+    send_webhook(text, msg_id=msg_id, sender_phone=NUDGE_TEST_SENDER_PHONE, group_id=NUDGE_TEST_GROUP_CHAT_ID)
+    return msg_id
+
+
+@unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
+class TestNudgeReminders(unittest.TestCase):
+    """Integration tests — nudge reminders (2026-04-26).
+
+    Phase 2 Task 2.2 covers HAIKU CLASSIFICATION ONLY (intent + entities).
+    End-to-end DB writes + sub-floor refusal templates land in Task 2.5
+    after the executor + SHARED_NUDGE_RULES ship (Tasks 2.3 + 2.4).
+
+    Requires deployed Edge Function with the Phase 2 Task 2.1 changes:
+      - 'add_nudge_reminder' added to ClassificationOutput.intent union
+      - nudge_* entity fields on ClassificationOutput.entities
+      - NUDGE VOCABULARY rules + 6 examples in the Haiku prompt
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _nudge_reset_household()
+        _nudge_create_household()
+        _nudge_create_member(NUDGE_TEST_SENDER_NAME, NUDGE_TEST_SENDER_PHONE, "female")
+        _nudge_create_member("עופרי", NUDGE_PHONE_OFRI, "female")
+        _nudge_create_member("אריק", NUDGE_PHONE_ARIK, "male")
+
+    @classmethod
+    def tearDownClass(cls):
+        _nudge_reset_household()
+
+    def setUp(self):
+        try:
+            sb_delete("reminder_queue", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+
+    def _classify(self, text):
+        msg_id = _nudge_send(text)
+        row = poll_for_message(msg_id, timeout=20)
+        self.assertIsNotNone(row, f"no classification row for msg_id={msg_id}, text={text!r}")
+        cd = row.get("classification_data") or {}
+        return cd, row
+
+    def test_01_classifies_simple_nudge_with_target_and_interval(self):
+        cd, _ = self._classify("שלי תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו")
+        self.assertEqual(cd.get("intent"), "add_nudge_reminder",
+                         f"expected add_nudge_reminder, got {cd.get('intent')}; full={cd}")
+        ent = cd.get("entities") or {}
+        self.assertEqual(ent.get("nudge_interval_min"), 30,
+                         f"expected interval_min=30 (חצי שעה), got {ent.get('nudge_interval_min')}; full={ent}")
+        self.assertEqual(ent.get("nudge_target_name"), "עופרי",
+                         f"expected target_name=עופרי, got {ent.get('nudge_target_name')}; full={ent}")
+
+    def test_02_classifies_short_interval_nudge(self):
+        cd, _ = self._classify("שלי כל 15 דק תזכירי לי לבדוק את התנור")
+        self.assertEqual(cd.get("intent"), "add_nudge_reminder",
+                         f"expected add_nudge_reminder, got {cd.get('intent')}; full={cd}")
+        ent = cd.get("entities") or {}
+        self.assertEqual(ent.get("nudge_interval_min"), 15,
+                         f"expected interval_min=15, got {ent.get('nudge_interval_min')}; full={ent}")
+
+    def test_03_classifies_with_deadline(self):
+        cd, _ = self._classify("שלי נדנדי לי כל חצי שעה עד 22:00 לקחת כדור")
+        self.assertEqual(cd.get("intent"), "add_nudge_reminder",
+                         f"expected add_nudge_reminder, got {cd.get('intent')}; full={cd}")
+        ent = cd.get("entities") or {}
+        self.assertEqual(ent.get("nudge_deadline_time_il"), "22:00",
+                         f"expected deadline_time_il=22:00, got {ent.get('nudge_deadline_time_il')}; full={ent}")
+
+    # End-to-end DB write — verifies the executor + SHARED_NUDGE_RULES + drain
+    # extension all work together. Sonnet must (a) emit a NUDGE_SERIES block,
+    # (b) the rescue must INSERT the anchor + attempt #1 into reminder_queue.
+    #
+    # Trigger phrasing matters: "עד 23:30" (wall-clock) flips the discriminator
+    # to add_recurring_reminder per SHARED_NUDGE_RULES. We use "נדנדי" which is
+    # an unambiguous nudge verb regardless of the "עד" suffix shape.
+    def test_04_one_shot_creates_anchor_and_attempt(self):
+        msg_id = _nudge_send(
+            "שלי נדנדי לעופרי כל 30 דק עד שיוציא את הזבל"
+        )
+        # 5s typical Sonnet+rescue latency (matches _dm_send timing).
+        time.sleep(8)
+        rows = sb_get("reminder_queue", {
+            "household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}",
+            "select": "id,nudge_config,series_status,nudge_series_id,nudge_attempt,sent,message_text,send_at,recurrence",
+            "order": "created_at.desc",
+            "limit": "10",
+        })
+        anchors = [r for r in rows if r.get("nudge_config") and r.get("series_status") == "active"]
+        attempts = [r for r in rows if r.get("nudge_series_id") and r.get("nudge_attempt") == 1]
+        # Surface what DID get classified if no nudge row landed — helps
+        # diagnose Sonnet emit issues (e.g. recurring_reminder fallback).
+        if len(anchors) == 0:
+            classified = sb_get("whatsapp_messages", {
+                "whatsapp_message_id": f"eq.{msg_id}",
+                "select": "classification,classification_data",
+                "limit": "5",
+            })
+            self.fail(
+                f"expected 1+ active nudge anchor; reminder_queue rows={rows}; "
+                f"whatsapp_messages classification={classified}"
+            )
+        self.assertGreaterEqual(len(attempts), 1,
+                                f"expected 1+ attempt #1 row, got rows={rows}")
+        cfg = anchors[0]["nudge_config"]
+        self.assertEqual(cfg.get("interval_min"), 30,
+                         f"expected interval_min=30, got {cfg}")
+        self.assertEqual(cfg.get("target_name"), "עופרי",
+                         f"expected target_name=עופרי, got {cfg}")
+
+    # Sub-floor refusal — interval_min=5 must be rejected with the exact
+    # SHARED_NUDGE_RULES template, AND no row may land in reminder_queue.
+    # Defense-in-depth: SHARED_NUDGE_RULES tells Sonnet to emit only the
+    # refusal text (no NUDGE_SERIES block); if Sonnet ignores that, the SQL
+    # validate_nudge_config trigger raises nudge_interval_below_floor and
+    # the executor catches → still surfaces the same refusal text. So this
+    # test verifies BOTH the prompt path (template in reply) AND the DB
+    # invariant (no nudge_config row).
+    # Tier 1 ack via regex fast-path. Insert an anchor + attempt #1 directly
+    # (skip Sonnet entirely so the test isolates the regex path), then send
+    # 'בוצע' as a user message. Expect series_status='acked' + child cancelled.
+    def test_06_regex_ack_flips_series_to_acked(self):
+        # Seed an active series for עופרי
+        anchor_id = sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "created_by_name": NUDGE_TEST_SENDER_NAME,
+            "delivery_mode": "group",
+            "nudge_config": {
+                "interval_min": 15, "max_tries": 6, "deadline_time_il": "23:59",
+                "channel": "group", "target_phone": NUDGE_PHONE_OFRI,
+                "target_name": "עופרי", "prompt_completion": "לבדוק תנור",
+            },
+            "series_status": "active",
+            "metadata": {"source": "test_06_regex_ack_seed"},
+        })[0]["id"]
+        # Seed an unsent attempt #1
+        sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+            "sent": False,
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "delivery_mode": "group",
+            "nudge_series_id": anchor_id,
+            "nudge_attempt": 1,
+            "metadata": {"nudge_attempt_of_series": anchor_id, "attempt_num": 1},
+        })
+
+        _nudge_send("בוצע, בדקתי")
+        time.sleep(5)
+
+        anchor_after = sb_get("reminder_queue", {
+            "id": f"eq.{anchor_id}",
+            "select": "series_status,metadata",
+        })
+        self.assertEqual(len(anchor_after), 1, f"anchor missing: {anchor_after}")
+        self.assertEqual(anchor_after[0]["series_status"], "acked",
+                         f"expected 'acked', got {anchor_after[0]}")
+
+        unsent_attempts = sb_get("reminder_queue", {
+            "nudge_series_id": f"eq.{anchor_id}",
+            "sent": "eq.false",
+            "select": "id,nudge_attempt",
+        })
+        self.assertEqual(len(unsent_attempts), 0,
+                         f"expected 0 unsent attempts (all soft-cancelled), got {unsent_attempts}")
+
+    # Deadline expiry: anchor with deadline_time_il in the past,
+    # calling schedule_next_nudge transitions to expired_deadline.
+    def test_07_deadline_expiry(self):
+        # Hardcoded "01:00" IL — guaranteed to be in the past for any test
+        # run after 1am. schedule_next_nudge computes today_at_il(01:00) which
+        # is ~20+ hours in the past for an evening test run; next_send =
+        # NOW + 15 min is far ahead of that, so the > comparison flips
+        # series_status to expired_deadline. Avoids zoneinfo/tzdata dependency
+        # on Windows test runners.
+        past_min = "01:00"
+
+        anchor_id = sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "delivery_mode": "group",
+            "nudge_config": {
+                "interval_min": 15, "max_tries": 6, "deadline_time_il": past_min,
+                "channel": "group", "target_phone": NUDGE_PHONE_OFRI,
+                "target_name": "עופרי", "prompt_completion": "לבדוק תנור",
+            },
+            "series_status": "active",
+            "metadata": {"source": "test_07_deadline_seed"},
+        })[0]["id"]
+
+        # Call schedule_next_nudge directly via PostgREST RPC
+        sb_rpc("schedule_next_nudge", {"p_series_id": anchor_id})
+
+        anchor_after = sb_get("reminder_queue", {
+            "id": f"eq.{anchor_id}",
+            "select": "series_status",
+        })
+        self.assertEqual(anchor_after[0]["series_status"], "expired_deadline",
+                         f"expected 'expired_deadline', got {anchor_after}")
+
+    # Max-tries expiry: insert anchor with max_tries=2 and 2 existing attempt
+    # children, call schedule_next_nudge, expect expired_tries + outbound DM
+    # queued by notify_expired_nudge_series().
+    def test_08_max_tries_expiry_with_outbound(self):
+        anchor_id = sb_post("reminder_queue", {
+            "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+            "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+            "message_text": "עופרי — לבדוק תנור",
+            "send_at": datetime.now(timezone.utc).isoformat(),
+            "sent": True,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "reminder_type": "user",
+            "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+            "delivery_mode": "group",
+            "nudge_config": {
+                "interval_min": 15, "max_tries": 2, "deadline_time_il": "23:59",
+                "channel": "group", "target_phone": NUDGE_PHONE_OFRI,
+                "target_name": "עופרי", "prompt_completion": "לבדוק תנור",
+            },
+            "series_status": "active",
+            "metadata": {"source": "test_08_max_tries_seed"},
+        })[0]["id"]
+        # Seed 2 already-sent attempts so max_tries=2 is exactly reached
+        for i in (1, 2):
+            sb_post("reminder_queue", {
+                "household_id": NUDGE_TEST_HOUSEHOLD_ID,
+                "group_id": NUDGE_TEST_GROUP_CHAT_ID,
+                "message_text": "עופרי — לבדוק תנור",
+                "send_at": (datetime.now(timezone.utc) - timedelta(minutes=30 - 15 * i)).isoformat(),
+                "sent": True,
+                "sent_at": (datetime.now(timezone.utc) - timedelta(minutes=30 - 15 * i)).isoformat(),
+                "reminder_type": "user",
+                "created_by_phone": NUDGE_TEST_SENDER_PHONE,
+                "delivery_mode": "group",
+                "nudge_series_id": anchor_id,
+                "nudge_attempt": i,
+                "metadata": {"nudge_attempt_of_series": anchor_id, "attempt_num": i},
+            })
+
+        # Call schedule_next_nudge: last_attempt=2 >= max_tries=2 → expired_tries
+        sb_rpc("schedule_next_nudge", {"p_series_id": anchor_id})
+        # Then run the expiry notifier — should queue one outbound nudge_expiry row
+        sb_rpc("notify_expired_nudge_series", {})
+
+        anchor_after = sb_get("reminder_queue", {
+            "id": f"eq.{anchor_id}",
+            "select": "series_status,metadata",
+        })
+        self.assertEqual(anchor_after[0]["series_status"], "expired_tries",
+                         f"expected 'expired_tries', got {anchor_after}")
+        self.assertIsNotNone(anchor_after[0]["metadata"].get("expiry_notified"),
+                             f"expected metadata.expiry_notified breadcrumb; got {anchor_after[0]['metadata']}")
+
+        outbound_rows = sb_get("outbound_queue", {
+            "household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}",
+            "message_type": "eq.nudge_expiry",
+            "select": "phone_number,body,metadata",
+            "order": "queued_at.desc",
+            "limit": "5",
+        })
+        match = [r for r in outbound_rows if r.get("metadata", {}).get("series_id") == anchor_id]
+        self.assertEqual(len(match), 1,
+                         f"expected 1 outbound nudge_expiry row for series {anchor_id}; got {outbound_rows}")
+        self.assertEqual(match[0]["phone_number"], NUDGE_TEST_SENDER_PHONE,
+                         f"expected DM to requester {NUDGE_TEST_SENDER_PHONE}; got {match[0]['phone_number']}")
+        # Cleanup: drop the outbound row so it doesn't sit in the queue
+        sb_delete("outbound_queue", {"household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}", "message_type": "eq.nudge_expiry"})
+
+    def test_05_sub_floor_interval_refused_no_db_row(self):
+        msg_id = _nudge_send("שלי תזכירי לעופרי כל 5 דקות לבדוק תנור")
+        # Bot reply should land within ~10s
+        bot_reply = ""
+        deadline = time.time() + 15
+        after_iso = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+        while time.time() < deadline:
+            replies = sb_get("whatsapp_messages", {
+                "group_id": f"eq.{NUDGE_TEST_GROUP_CHAT_ID}",
+                "sender_phone": f"eq.{BOT_PHONE}",
+                "created_at": f"gt.{after_iso}",
+                "select": "message_text,created_at",
+                "order": "created_at.desc",
+                "limit": "1",
+            })
+            if replies:
+                bot_reply = replies[0].get("message_text") or ""
+                break
+            time.sleep(2)
+        # Either the prompt-side or the DB-side defense should trigger the
+        # canonical refusal text. Accept either the full sentence or its
+        # diagnostic prefix ("המינימום הוא 15 דקות").
+        self.assertIn(
+            "המינימום הוא 15 דקות", bot_reply,
+            f"expected sub-floor refusal template; got reply: {bot_reply!r}"
+        )
+        # No nudge row should have been created.
+        rows = sb_get("reminder_queue", {
+            "household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}",
+            "select": "id,nudge_config,message_text",
+            "limit": "10",
+        })
+        nudge_rows = [r for r in rows if r.get("nudge_config")]
+        self.assertEqual(
+            len(nudge_rows), 0,
+            f"sub-floor request must NOT create a nudge_config row; got: {nudge_rows}"
+        )
+
+
 @unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
 class TestReminderDedup(unittest.TestCase):
     """Integration tests — reminder triple-fire dedup (2026-04-24).
