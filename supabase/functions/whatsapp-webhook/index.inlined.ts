@@ -99,6 +99,7 @@ interface ClassificationOutput {
     | "info_request"
     | "correct_bot"
     | "add_reminder"
+    | "add_nudge_reminder"
     | "instruct_bot"
     | "save_memory"
     | "recall_memory"
@@ -186,6 +187,20 @@ interface ClassificationOutput {
     // "יצרתי את רשימת X ✓" correctly even if tags is empty downstream).
     is_topic_creation?: boolean;
     topic?: string;
+    // Nudge reminders (2026-04-26). State-machine reminders that fire every
+    // N minutes until ack / max_tries / deadline. Distinct from add_reminder
+    // (one-shot calendar) and recurring reminders (daily calendar). When days
+    // is set, this becomes a daily-recurring nudge series; otherwise one-shot.
+    // channel_hint=null means Sonnet must ask the user "group or DM?" before
+    // emitting nudge_series action. interval_min<15 / max_tries>8 are rejected
+    // by SHARED_NUDGE_RULES with hardcoded refusal templates.
+    nudge_target_name?: string;
+    nudge_completion_text?: string;
+    nudge_interval_min?: number;
+    nudge_deadline_time_il?: string; // "HH:MM"
+    nudge_max_tries?: number;
+    nudge_days?: number[]; // 0=Sunday; null/empty = one-shot
+    nudge_channel_hint?: "group" | "dm" | null;
     raw_text: string;
   };
 }
@@ -758,6 +773,21 @@ HEBREW PATTERNS:
       (no privacy phrase) → omit delivery_mode (Sonnet defaults to group)
   - ROTATION SHORTCUT (set needs_conversation_review=true): "לפי התור" / "בתורות" / "בתורנות" / "תורנות" / "תורנים" / "מתחלפים" / "כל יום ילד אחר" / "כל יום מישהו אחר" / "לפי התורנות" / "מי שהתור שלו" — Sonnet expands to per-member recurring blocks.
   - RECIPIENT NAMES: Extract named people into entities.recipient_names (array).
+- NUDGE VOCABULARY = add_nudge_reminder. DISTINCT from add_reminder: a nudge is a state-machine reminder that fires repeatedly every N minutes UNTIL someone says it's done. Trigger phrases (set add_nudge_reminder, NOT add_reminder):
+  - "כל X דקות עד ש..." / "כל חצי שעה עד..." / "כל רבע שעה עד..." (every X minutes until...)
+  - "נדנדי" / "נדנדי לו" / "נדנדי לה" / "תנדנדי" (Hebrew "nag" verb — Sheli's slang)
+  - "תמשיכי להזכיר עד..." / "תזכרי לי שוב ושוב" / "כל הזמן עד ש..."
+  - "keep reminding until..." / "remind every X min until..." / "nag him/her until..."
+  - "תזכורת חוזרת עד..." ONLY when the עד clause is a COMPLETION EVENT (ack), not a fixed wall-clock time. "תזכורת חוזרת עד 16:00" = add_recurring_reminder (calendar). "תזכורת חוזרת עד שעופרי יוציא את הכלב" = add_nudge_reminder.
+  Distinction from add_reminder: regular reminder = "fires once at time T"; nudge = "fires every N min UNTIL someone acks". The "עד ש[completion]" suffix is the discriminator.
+  Entity extraction (in addition to standard reminder fields):
+  - nudge_target_name: who needs to be nudged ("עופרי", "אריק", "the kids"). Falls back to sender_name if speaker is reminding self.
+  - nudge_completion_text: the task that needs doing, e.g. "להוציא את ליאו", "לקחת את הכדור". Strip the "עד ש" prefix.
+  - nudge_interval_min: int from "כל X דקות". Default 30 if user said "תמשיכי" without an interval. MIN 15 (sub-floor refused by Sheli with template).
+  - nudge_deadline_time_il: "HH:MM" if user said "עד 16:30" / "before 5pm". null if open-ended (cap by max_tries only).
+  - nudge_max_tries: int 1..8. null = use default (6).
+  - nudge_days: int[] (0=Sun) for daily-recurring nudges. null/omitted = one-shot. "כל יום ראשון/שלישי/חמישי" → [0,2,4]. "כל יום" → [0,1,2,3,4,5,6].
+  - nudge_channel_hint: "group" | "dm" | null. Set "dm" for "בפרטי" / "privately"; "group" for "בקבוצה". null (default) means Sonnet must ask.
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
@@ -1043,6 +1073,12 @@ EXAMPLES:
 [ניב]: "תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר" → {"intent":"add_reminder","confidence":0.92,"entities":{"reminder_text":"יונתן — לשטוף כלים","time_raw":"רביעי 7:00","delivery_mode":"both","recipient_names":["יונתן"],"raw_text":"תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר"}}
 [ניב]: "תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7" → {"intent":"add_reminder","confidence":0.85,"needs_conversation_review":true,"entities":{"reminder_text":"לשטוף כלים","time_raw":"כל יום 7:00","delivery_mode":"dm","recipient_names":["הילדים"],"raw_text":"תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7"}}
 [ניב]: "תזכירי ביום חמישי במשפחתי להביא שמיכות" → {"intent":"add_reminder","confidence":0.88,"entities":{"reminder_text":"להביא שמיכות","time_raw":"חמישי","delivery_mode":"group","raw_text":"תזכירי ביום חמישי במשפחתי להביא שמיכות"}}
+[עינת]: "תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו" → {"intent":"add_nudge_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"nudge_target_name":"עופרי","nudge_completion_text":"להוציא את ליאו","nudge_interval_min":30,"raw_text":"תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו"}}
+[עינת]: "נדנדי לאריק להוציא את הזבל" → {"intent":"add_nudge_reminder","confidence":0.88,"addressed_to_bot":true,"entities":{"nudge_target_name":"אריק","nudge_completion_text":"להוציא את הזבל","raw_text":"נדנדי לאריק להוציא את הזבל"}}
+[עינת]: "שלי תזכירי לי כל 15 דק לבדוק תנור עד 21:00" → {"intent":"add_nudge_reminder","confidence":0.95,"addressed_to_bot":true,"entities":{"nudge_target_name":"עינת","nudge_completion_text":"לבדוק תנור","nudge_interval_min":15,"nudge_deadline_time_il":"21:00","raw_text":"שלי תזכירי לי כל 15 דק לבדוק תנור עד 21:00"}}
+[עינת]: "כל יום ראשון/שלישי/חמישי כל חצי שעה מ-14:00 עד 16:30 לעופרי על הכלב" → {"intent":"add_nudge_reminder","confidence":0.85,"addressed_to_bot":true,"needs_conversation_review":true,"entities":{"nudge_target_name":"עופרי","nudge_completion_text":"להוציא את הכלב","nudge_interval_min":30,"nudge_deadline_time_il":"16:30","nudge_days":[0,2,4],"raw_text":"כל יום ראשון/שלישי/חמישי כל חצי שעה מ-14:00 עד 16:30 לעופרי על הכלב"}}
+[ניב]: "נדנדי לי בפרטי כל 20 דק עד שאקח את הכדור" → {"intent":"add_nudge_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"nudge_target_name":"ניב","nudge_completion_text":"לקחת את הכדור","nudge_interval_min":20,"nudge_channel_hint":"dm","raw_text":"נדנדי לי בפרטי כל 20 דק עד שאקח את הכדור"}}
+[עינת]: "תזכירי לעופרי כל 5 דקות לבדוק תנור" → {"intent":"add_nudge_reminder","confidence":0.85,"addressed_to_bot":true,"entities":{"nudge_target_name":"עופרי","nudge_completion_text":"לבדוק תנור","nudge_interval_min":5,"raw_text":"תזכירי לעופרי כל 5 דקות לבדוק תנור"}}
 [אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
