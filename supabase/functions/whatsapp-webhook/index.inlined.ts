@@ -3809,92 +3809,87 @@ async function findDuplicateReminder(
 
 // ─── Interim Nudge-Stub Ack-Stop (2026-04-27) ───
 //
-// Until the proper nudge_series schema lands (plan: docs/plans/
-// 2026-04-26-nudge-reminders-plan.md), households flagged with
-// metadata.intended_nudge_config on their recurring-reminder parents
-// (currently only Netzer) need an ack-stop interim. When a high-conf
-// completion intent arrives, scan their nudge-stub parents, fuzzy-match
-// the user's text against each parent's prompt_completion, and DELETE
-// today's unsent children for matching parents. Tomorrow's children
-// re-materialize fresh via the existing materialize_recurring_reminders
-// daily cron, so this only stops *today*.
+// Nudge-series ack helper (Phase 3 Task 3.1, 2026-04-26).
+// Replaces the interim B2 helper stopNudgeStubsForToday — the proper
+// state-machine schema now lives on reminder_queue.nudge_config +
+// series_status. When an ack signal arrives (regex fast-path / Haiku
+// completes_pending_nudge / reaction), this helper:
+//   1. Flips the anchor's series_status from 'active' → 'acked'
+//      (race-safe: only matches rows still 'active', so two acks
+//      arriving simultaneously become one UPDATE + one no-op).
+//   2. Soft-cancels every unsent attempt child by marking sent=true
+//      with metadata.note='cancelled_by_ack'. Soft-cancel preserves
+//      the audit trail (we keep the count of attempts that were
+//      scheduled but never fired).
 //
-// Returns count of children deleted. Designed to be a no-op for any
-// household without the metadata.intended_nudge_config flag.
-async function stopNudgeStubsForToday(
-  householdId: string,
-  userText: string,
+// Returns the number of attempt children cancelled. Returns 0 if the
+// series was already terminal (acked / expired / superseded).
+async function ackNudgeSeries(
+  seriesId: string,
+  ackPhone: string,
+  reason: string = "ack_received",
 ): Promise<number> {
-  if (!householdId || !userText) return 0;
+  if (!seriesId) return 0;
 
-  // Only consider parents explicitly flagged as nudge stubs.
-  const { data: parents } = await supabase
+  const { data: updated, error: updErr } = await supabase
     .from("reminder_queue")
-    .select("id, metadata")
-    .eq("household_id", householdId)
-    .eq("sent", true)
-    .is("recurrence_parent_id", null)
-    .not("recurrence", "is", null)
-    .not("metadata->intended_nudge_config", "is", null);
-
-  if (!parents || parents.length === 0) return 0;
-
-  // Tokenize user text + each parent's prompt_completion into meaningful words
-  // (length ≥ 3, drop common Hebrew filler words). Match if any parent token
-  // appears in user text or vice versa (substring either direction — tolerates
-  // Hebrew prefix variations like "ה"/"ל"/"ב"/"ש" + "כדור" / "הכדור" / "לכדור").
-  const STOPWORDS = new Set([
-    "את", "של", "לא", "כן", "זה", "זו", "הוא", "היא", "אני", "אנחנו",
-    "the", "and", "for", "was", "are",
-  ]);
-  const tokenize = (s: string): string[] =>
-    s.split(/[\s.,!?;:()"'״׳]+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w.toLowerCase()));
-
-  const userTokens = tokenize(userText);
-  if (userTokens.length === 0) return 0;
-
-  const matchingParentIds: string[] = [];
-  for (const p of parents) {
-    const completion: string = p.metadata?.intended_nudge_config?.prompt_completion || "";
-    if (!completion) continue;
-    const parentTokens = tokenize(completion);
-    const overlap = parentTokens.some((pt) =>
-      userTokens.some((ut) => ut.includes(pt) || pt.includes(ut))
-    );
-    if (overlap) matchingParentIds.push(p.id);
-  }
-  if (matchingParentIds.length === 0) return 0;
-
-  // Compute today's IL bounds (Asia/Jerusalem). The recurrence children's send_at
-  // is stored as TIMESTAMPTZ; today's IL midnight in UTC depends on DST. Easiest
-  // safe bound: anything between (now - 12h) and (now + 12h) effectively covers
-  // "today's remaining nudges" without touching tomorrow's already-materialized rows.
-  const now = new Date();
-  const halfDayAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString();
-  const endOfDayWindow = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString();
-
-  const { data: deleted, error } = await supabase
-    .from("reminder_queue")
-    .delete()
-    .in("recurrence_parent_id", matchingParentIds)
-    .eq("sent", false)
-    .gte("send_at", halfDayAgo)
-    .lt("send_at", endOfDayWindow)
+    .update({
+      series_status: "acked",
+      metadata: {
+        acked_at: new Date().toISOString(),
+        acked_by_phone: ackPhone || null,
+        ack_reason: reason,
+      },
+    })
+    .eq("id", seriesId)
+    .eq("series_status", "active")  // race-safe: only flip if still active
     .select("id");
 
-  if (error) {
-    console.warn(`[NudgeStubAckStop] delete error for hh=${householdId}: ${error.message}`);
+  if (updErr) {
+    console.warn(`[NudgeAck] anchor flip error series=${seriesId}: ${updErr.message}`);
     return 0;
   }
-  const count = deleted?.length || 0;
-  if (count > 0) {
-    console.log(
-      `[NudgeStubAckStop] hh=${householdId} stopped ${count} nudge-stub children for today ` +
-      `(matched ${matchingParentIds.length} parent(s); user text: "${userText.slice(0, 60)}")`,
-    );
+  if (!updated || updated.length === 0) {
+    // Anchor was already terminal — likely a duplicate ack arriving
+    // milliseconds after the first one. Idempotent no-op.
+    console.log(`[NudgeAck] series=${seriesId} already terminal (race-lost) — no-op`);
+    return 0;
   }
+
+  // Soft-cancel unsent attempt children. Drain skips sent=true rows,
+  // so this stops the chain without DELETEs.
+  const { data: cancelled, error: cancelErr } = await supabase
+    .from("reminder_queue")
+    .update({
+      sent: true,
+      sent_at: new Date().toISOString(),
+      metadata: {
+        note: "cancelled_by_ack",
+        cancelled_at: new Date().toISOString(),
+        ack_series_id: seriesId,
+      },
+    })
+    .eq("nudge_series_id", seriesId)
+    .eq("sent", false)
+    .select("id");
+
+  if (cancelErr) {
+    console.warn(`[NudgeAck] child cancel error series=${seriesId}: ${cancelErr.message}`);
+    return 0;
+  }
+  const count = cancelled?.length || 0;
+  console.log(
+    `[NudgeAck] series=${seriesId} acked by ${ackPhone || "unknown"} (${reason}); ` +
+    `cancelled ${count} unsent attempt(s)`
+  );
   return count;
 }
+
+// Hebrew + English ack vocabulary. Matches typical "I did it / I took it
+// out / done" completion phrases. Scoped: only fires when there is at
+// least one ACTIVE nudge_series in the chat the message came from, so a
+// stray "בוצע" in social chatter without an open series stays silent.
+const NUDGE_ACK_REGEX = /(בוצע|בוצעה|עשיתי|הוצאתי|הוצאת|נלקח|לקחתי|לקחת|טיפלתי|טיפלת|done|did it|finished|took it|took out|i did|got it done)/i;
 
 // ─── Conversation Context Fetcher ───
 
@@ -10228,6 +10223,60 @@ Deno.serve(async (req: Request) => {
       ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
       : (cleanedText || message.text);
 
+    // ─── Nudge-series regex ack fast-path (Phase 3 Task 3.1, 2026-04-26) ───
+    // BEFORE Haiku: if any active nudge_series exists in this chat AND the
+    // current message contains an ack-vocabulary word, ack the OLDEST series.
+    // Saves a Haiku call (~$0.0003) on what's otherwise a multi-turn
+    // negotiation. Scoped to "active series in scope" so a stray "done" in
+    // social chatter doesn't false-positive.
+    //
+    // Chat scope:
+    //   group  → reminder_queue.group_id matches message.groupId (full @g.us JID)
+    //   1:1    → reminder_queue.group_id matches phone+'@s.whatsapp.net'
+    // Both keys agree with how the executor wrote the anchor (Task 2.3).
+    if (NUDGE_ACK_REGEX.test(message.text || "")) {
+      const chatTarget = message.groupId.endsWith("@g.us")
+        ? message.groupId
+        : `${message.senderPhone}@s.whatsapp.net`;
+      const { data: activeSeries } = await supabase
+        .from("reminder_queue")
+        .select("id, message_text, nudge_config, created_at")
+        .eq("household_id", householdId)
+        .eq("series_status", "active")
+        .eq("group_id", chatTarget)
+        .order("created_at", { ascending: true })  // oldest = most likely the in-flight one
+        .limit(5);
+      if (activeSeries && activeSeries.length > 0) {
+        const target = activeSeries[0];
+        const cancelled = await ackNudgeSeries(
+          target.id, message.senderPhone, "regex_fast_path",
+        );
+        const targetName = target.nudge_config?.target_name || "";
+        const completion = target.nudge_config?.prompt_completion || "";
+        const ackReply = config.language === "he"
+          ? (targetName && completion
+              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              : `מעולה! סימנתי. עוצרת תזכורות ✓`)
+          : (targetName && completion
+              ? `Got it — marked ${targetName} ${completion} ✓`
+              : `Got it. Stopping reminders ✓`);
+        await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+          householdId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "nudge_acked_regex",
+        });
+        await logMessage(message, "nudge_acked_regex", householdId, null);
+        console.log(
+          `[Webhook] Nudge regex ack: series=${target.id} target=${targetName} ` +
+          `cancelled=${cancelled} from ${message.senderName}`
+        );
+        return new Response("OK", { status: 200 });
+      }
+      // Regex hit but no active series in scope → fall through to Haiku.
+      // Common case: "בוצע" / "done" said after the series already expired.
+    }
+
     const classification = await classifyIntent(
       textForClassifier,
       message.senderName,
@@ -10785,34 +10834,13 @@ Deno.serve(async (req: Request) => {
     // 10. Convert Haiku entities to ClassifiedAction format and execute
     const actions = haikuEntitiesToActions(classification);
 
-    // 2026-04-27 (Netzer): Interim nudge-stub ack-stop. Runs BEFORE H7 because
-    // nudge stubs (recurring reminders flagged metadata.intended_nudge_config)
-    // have no corresponding `tasks` row — Haiku correctly classifies "הוצאתי
-    // אותו" / "לקחתי כדור" as complete_task but with no task_id, which would
-    // otherwise hit the H7 "which task?" clarification fallback. Short-circuits
-    // when a stub match deletes today's remaining nudges. Documented in plan
-    // docs/plans/2026-04-26-nudge-reminders-plan.md as the Path C interim until
-    // the proper nudge_series schema lands.
-    if (
-      NUDGE_ACK_INTENTS.has(classification.intent) &&
-      (classification.confidence ?? 0) >= 0.85
-    ) {
-      const stopped = await stopNudgeStubsForToday(householdId, message.text || "");
-      if (stopped > 0) {
-        const ackReply = config.language === "he"
-          ? `✓ סימנתי. עוצרת את שאר התזכורות להיום 🙌`
-          : `✓ Got it. Stopping today's remaining reminders 🙌`;
-        await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
-          householdId,
-          groupId: message.groupId,
-          inReplyTo: message.messageId,
-          replyType: "nudge_stub_acked",
-        });
-        await logMessage(message, "nudge_stub_acked", householdId, classification);
-        return new Response("OK", { status: 200 });
-      }
-      // No stub match → fall through to normal complete_task / complete_shopping handling.
-    }
+    // (Removed 2026-04-26 Phase 3 Task 3.1: stopNudgeStubsForToday interim
+    // helper. The proper nudge_series ack flow now lives in the regex
+    // fast-path above (BEFORE Haiku, scoped to active series_status='active'
+    // anchors in chat) + reaction handler (Task 3.2) + Haiku
+    // completes_pending_nudge boolean (Task 3.3). When ack fires, the series
+    // is flipped acked + unsent attempts soft-cancelled — no DELETE, no
+    // metadata.intended_nudge_config flag scan, no fuzzy token matching.)
 
     // H7 fix: if Haiku classified as actionable but couldn't extract entity IDs,
     // the actions array is empty. Don't execute + don't send a false "done!" reply.
