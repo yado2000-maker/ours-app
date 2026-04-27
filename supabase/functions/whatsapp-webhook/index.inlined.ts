@@ -6352,6 +6352,13 @@ async function execute1on1Actions(params: {
             const reminderDeliveryMode = action.delivery_mode === "dm"
               ? "dm"
               : (reminderTargetGroupId.endsWith("@g.us") ? "group" : "dm");
+            // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
+            // recipient_phones MUST be populated or fire_due_reminders_inner
+            // marks the row as no_recipients and silently skips it. Solo
+            // households (no paired group) hit this path — the resolved JID is
+            // phone@s.whatsapp.net, so the recipient is the speaker themselves.
+            const reminderRecipientPhones: string[] | null =
+              reminderDeliveryMode === "dm" ? [phone] : null;
             const dup = await findDuplicateReminder(
               reminderTargetGroupId,
               action.text || "",
@@ -6373,6 +6380,7 @@ async function execute1on1Actions(params: {
               sent: false,
               reminder_type: "user",
               delivery_mode: reminderDeliveryMode,
+              recipient_phones: reminderRecipientPhones,
               created_by_phone: phone,
               created_by_name: userName,
             });
@@ -6420,6 +6428,12 @@ async function execute1on1Actions(params: {
           const recurringDeliveryMode = action.delivery_mode === "dm"
             ? "dm"
             : (recurringTargetGroupId.endsWith("@g.us") ? "group" : "dm");
+          // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
+          // recipient_phones MUST be populated. Children inherit recipient_phones
+          // from this parent at materialize time, so getting it right here also
+          // fixes future child rows.
+          const recurringRecipientPhones: string[] | null =
+            recurringDeliveryMode === "dm" ? [phone] : null;
           const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
             household_id: householdId,
             group_id: recurringTargetGroupId,
@@ -6429,6 +6443,7 @@ async function execute1on1Actions(params: {
             sent_at: new Date().toISOString(),
             reminder_type: "user",
             delivery_mode: recurringDeliveryMode,
+            recipient_phones: recurringRecipientPhones,
             created_by_phone: phone,
             created_by_name: userName,
             recurrence: recurrenceJson,
@@ -7330,6 +7345,11 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
       // are usually meant for the family (event flyers, kid-related times).
       const fwdTargetGroupId = await resolve1on1ReminderGroupId(hhId, phone);
       const fwdDeliveryMode = fwdTargetGroupId.endsWith("@g.us") ? "group" : "dm";
+      // Drain v4 (no_recipients fix, 2026-04-27): dm rows need recipient_phones
+      // or fire_due_reminders_inner skips them. Solo households have no paired
+      // group, so the recipient is the speaker themselves.
+      const fwdRecipientPhones: string[] | null =
+        fwdDeliveryMode === "dm" ? [phone] : null;
       const { error: remErr } = await supabase.from("reminder_queue").insert({
         household_id: hhId,
         group_id: fwdTargetGroupId,
@@ -7337,6 +7357,7 @@ async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvi
         send_at: sendAt.toISOString(),
         reminder_type: "user",
         delivery_mode: fwdDeliveryMode,
+        recipient_phones: fwdRecipientPhones,
         created_by_phone: phone,
         created_by_name: userName || null,
         metadata: {
