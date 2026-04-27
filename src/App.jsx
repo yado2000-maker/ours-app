@@ -847,19 +847,18 @@ function SheliApp() {
                 if (!name || pickSaving) return;
                 setPickSaving(true);
                 try {
-                  const uid = session?.user?.id;
-                  const { data: inserted, error } = await supabase
-                    .from("household_members")
-                    .insert({
-                      household_id: household.id,
-                      display_name: name,
-                      role: "founder",
-                      user_id: uid || null,
-                    })
-                    .select("id, display_name")
-                    .single();
+                  // Bug #2 (Tomer 2026-04-27): Google-OAuth users land here with
+                  // an existing unlinked member row from the bot. A direct INSERT
+                  // either creates a duplicate or fails RLS on stale sessions.
+                  // claim_household_member RPC unifies the path: claims the
+                  // unlinked row by name match (UPDATE), falls back to INSERT.
+                  const { data: claim, error } = await supabase.rpc(
+                    "claim_household_member",
+                    { p_household_id: household.id, p_display_name: name },
+                  );
                   if (error) throw error;
-                  const me = { id: inserted?.id, name: inserted?.display_name || name };
+                  const row = Array.isArray(claim) ? claim[0] : claim;
+                  const me = { id: row?.member_id, name };
                   if (!lsGet("sheli-hhid") && household.id) lsSet("sheli-hhid", household.id);
                   lsSet("sheli-user", me);
                   setHousehold({ ...household, members: [...(household.members || []), me] });
@@ -867,7 +866,7 @@ function SheliApp() {
                   setDataLoaded(true);
                   setScreen("chat");
                 } catch (err) {
-                  console.error("[pick] create member failed:", err);
+                  console.error("[pick] claim member failed:", err);
                   alert(pickDir === "rtl" ? "שמירת השם נכשלה, נסו שוב 🙈" : "Couldn't save your name, please try again");
                 } finally {
                   setPickSaving(false);
