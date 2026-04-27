@@ -99,6 +99,7 @@ interface ClassificationOutput {
     | "info_request"
     | "correct_bot"
     | "add_reminder"
+    | "add_nudge_reminder"
     | "instruct_bot"
     | "save_memory"
     | "recall_memory"
@@ -114,6 +115,13 @@ interface ClassificationOutput {
   // ambiguous = could be either without more context — in ambient mode, silent is safer.
   living_vs_operating?: "operating" | "ambiguous" | "living";
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
+  // Nudge ack flag (Phase 3 Task 3.3, 2026-04-26). Only meaningful when
+  // ClassifierContext.activeNudgeSeries is non-empty — Haiku is told about
+  // active series and asked whether the current message acknowledges
+  // completion of one of them. Catches ack phrasings the regex fast-path
+  // misses (e.g. "יש, התנור כבוי", "טוב, לקחתי כבר", "I just took it").
+  // Routed to ackNudgeSeries() the same way as the regex path.
+  completes_pending_nudge?: boolean;
   entities: {
     person?: string;
     items?: Array<{ name: string; qty?: string; category?: string }>;
@@ -186,6 +194,20 @@ interface ClassificationOutput {
     // "יצרתי את רשימת X ✓" correctly even if tags is empty downstream).
     is_topic_creation?: boolean;
     topic?: string;
+    // Nudge reminders (2026-04-26). State-machine reminders that fire every
+    // N minutes until ack / max_tries / deadline. Distinct from add_reminder
+    // (one-shot calendar) and recurring reminders (daily calendar). When days
+    // is set, this becomes a daily-recurring nudge series; otherwise one-shot.
+    // channel_hint=null means Sonnet must ask the user "group or DM?" before
+    // emitting nudge_series action. interval_min<15 / max_tries>8 are rejected
+    // by SHARED_NUDGE_RULES with hardcoded refusal templates.
+    nudge_target_name?: string;
+    nudge_completion_text?: string;
+    nudge_interval_min?: number;
+    nudge_deadline_time_il?: string; // "HH:MM"
+    nudge_max_tries?: number;
+    nudge_days?: number[]; // 0=Sunday; null/empty = one-shot
+    nudge_channel_hint?: "group" | "dm" | null;
     raw_text: string;
   };
 }
@@ -208,6 +230,12 @@ interface ClassifierContext {
   // Used by Haiku to pick living_vs_operating. Computed from conversationHistory
   // window, no additional DB call.
   threadState?: string;
+  // Nudge series in this chat that are still 'active' (Phase 3 Task 3.3,
+  // 2026-04-26). When non-empty, Haiku gets a context section describing
+  // the in-flight task(s) and is asked to set completes_pending_nudge=true
+  // on messages that read as completion acks. Empty/undefined when no
+  // series is in scope — the field is optional, ignored at prompt-build time.
+  activeNudgeSeries?: Array<{ target_name: string; prompt_completion: string }>;
   // (Removed: demoMode — no more Haiku in 1:1, Sonnet handles all)
 }
 
@@ -758,6 +786,21 @@ HEBREW PATTERNS:
       (no privacy phrase) → omit delivery_mode (Sonnet defaults to group)
   - ROTATION SHORTCUT (set needs_conversation_review=true): "לפי התור" / "בתורות" / "בתורנות" / "תורנות" / "תורנים" / "מתחלפים" / "כל יום ילד אחר" / "כל יום מישהו אחר" / "לפי התורנות" / "מי שהתור שלו" — Sonnet expands to per-member recurring blocks.
   - RECIPIENT NAMES: Extract named people into entities.recipient_names (array).
+- NUDGE VOCABULARY = add_nudge_reminder. DISTINCT from add_reminder: a nudge is a state-machine reminder that fires repeatedly every N minutes UNTIL someone says it's done. Trigger phrases (set add_nudge_reminder, NOT add_reminder):
+  - "כל X דקות עד ש..." / "כל חצי שעה עד..." / "כל רבע שעה עד..." (every X minutes until...)
+  - "נדנדי" / "נדנדי לו" / "נדנדי לה" / "תנדנדי" (Hebrew "nag" verb — Sheli's slang)
+  - "תמשיכי להזכיר עד..." / "תזכרי לי שוב ושוב" / "כל הזמן עד ש..."
+  - "keep reminding until..." / "remind every X min until..." / "nag him/her until..."
+  - "תזכורת חוזרת עד..." ONLY when the עד clause is a COMPLETION EVENT (ack), not a fixed wall-clock time. "תזכורת חוזרת עד 16:00" = add_recurring_reminder (calendar). "תזכורת חוזרת עד שעופרי יוציא את הכלב" = add_nudge_reminder.
+  Distinction from add_reminder: regular reminder = "fires once at time T"; nudge = "fires every N min UNTIL someone acks". The "עד ש[completion]" suffix is the discriminator.
+  Entity extraction (in addition to standard reminder fields):
+  - nudge_target_name: who needs to be nudged ("עופרי", "אריק", "the kids"). Falls back to sender_name if speaker is reminding self.
+  - nudge_completion_text: the task that needs doing, e.g. "להוציא את ליאו", "לקחת את הכדור". Strip the "עד ש" prefix.
+  - nudge_interval_min: int from "כל X דקות". Default 30 if user said "תמשיכי" without an interval. MIN 15 (sub-floor refused by Sheli with template).
+  - nudge_deadline_time_il: "HH:MM" if user said "עד 16:30" / "before 5pm". null if open-ended (cap by max_tries only).
+  - nudge_max_tries: int 1..8. null = use default (6).
+  - nudge_days: int[] (0=Sun) for daily-recurring nudges. null/omitted = one-shot. "כל יום ראשון/שלישי/חמישי" → [0,2,4]. "כל יום" → [0,1,2,3,4,5,6].
+  - nudge_channel_hint: "group" | "dm" | null. Set "dm" for "בפרטי" / "privately"; "group" for "בקבוצה". null (default) means Sonnet must ask.
 - Bare noun ("חלב") = add_shopping
 - "[person] [activity] [time]" ("נועה חוג 5") = add_task
 - Personal tasks ("לשלם חשמל", "לתקן ברז", "לקנות מתנה") = add_task
@@ -914,7 +957,17 @@ When the user lists multiple items in one message, recognize obvious typos and t
 - Common Hebrew typo patterns: terminal letter swaps (ן↔ץ↔ם↔ף↔ך), repeated letters, voice-transcription artifacts, missing/extra final ה.
 - When in doubt (the items might be intentionally different), keep them separate. Only merge when it's CLEARLY a typo of an item already mentioned in the same message.
 
-${ctx.threadState ? `
+${ctx.activeNudgeSeries && ctx.activeNudgeSeries.length > 0 ? `
+ACTIVE NUDGE SERIES IN THIS CHAT (Phase 3 Task 3.3, 2026-04-26):
+${ctx.activeNudgeSeries.map((s) => `- target: ${s.target_name}, task: "${s.prompt_completion}"`).join("\n")}
+
+If the CURRENT message indicates one of these tasks is now done (even indirectly, even with typos, even when not explicitly addressing Sheli), set "completes_pending_nudge": true in the output. This signal stops the in-flight nudge series — it's higher priority than re-classifying the message into another intent.
+Examples that COUNT as completion ack (set true):
+  "הוצאתי" / "הוצאתיו" (took out) / "פיניתי" (cleared) / "לקחתי" (took) / "טיפלתי בזה" (handled it) / "ok done" / "did it just now" / "יש, התנור כבוי" (yes, the oven is off) / "טוב, לקחתי כבר" (ok I already took it)
+Examples that do NOT count (leave false):
+  "מתי?" (when?) / "אני בדרך" (on my way) / "בעוד דקה" (in a minute) / "נסיים את זה אחר כך" (we'll finish later) / asking a clarifying question / negative reaction
+When in doubt, prefer false — false negatives cost one extra nudge cycle; false positives prematurely silence an in-flight series and risk a missed deadline.
+` : ""}${ctx.threadState ? `
 THREAD STATE (Phase 5 of Sheli-in-Groups, 2026-04-22):
 ${ctx.threadState}
 Use this signal to pick living_vs_operating: rapid-reactive threads + short gap → living weighting; long gap or sparse thread → ambient/planning weighting.
@@ -1043,6 +1096,12 @@ EXAMPLES:
 [ניב]: "תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר" → {"intent":"add_reminder","confidence":0.92,"entities":{"reminder_text":"יונתן — לשטוף כלים","time_raw":"רביעי 7:00","delivery_mode":"both","recipient_names":["יונתן"],"raw_text":"תזכירי ליונתן גם בפרטי לשטוף כלים רביעי 7 בבוקר"}}
 [ניב]: "תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7" → {"intent":"add_reminder","confidence":0.85,"needs_conversation_review":true,"entities":{"reminder_text":"לשטוף כלים","time_raw":"כל יום 7:00","delivery_mode":"dm","recipient_names":["הילדים"],"raw_text":"תזכירי לילדים בתורנות בפרטי לשטוף כלים כל יום ב-7"}}
 [ניב]: "תזכירי ביום חמישי במשפחתי להביא שמיכות" → {"intent":"add_reminder","confidence":0.88,"entities":{"reminder_text":"להביא שמיכות","time_raw":"חמישי","delivery_mode":"group","raw_text":"תזכירי ביום חמישי במשפחתי להביא שמיכות"}}
+[עינת]: "תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו" → {"intent":"add_nudge_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"nudge_target_name":"עופרי","nudge_completion_text":"להוציא את ליאו","nudge_interval_min":30,"raw_text":"תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו"}}
+[עינת]: "נדנדי לאריק להוציא את הזבל" → {"intent":"add_nudge_reminder","confidence":0.88,"addressed_to_bot":true,"entities":{"nudge_target_name":"אריק","nudge_completion_text":"להוציא את הזבל","raw_text":"נדנדי לאריק להוציא את הזבל"}}
+[עינת]: "שלי תזכירי לי כל 15 דק לבדוק תנור עד 21:00" → {"intent":"add_nudge_reminder","confidence":0.95,"addressed_to_bot":true,"entities":{"nudge_target_name":"עינת","nudge_completion_text":"לבדוק תנור","nudge_interval_min":15,"nudge_deadline_time_il":"21:00","raw_text":"שלי תזכירי לי כל 15 דק לבדוק תנור עד 21:00"}}
+[עינת]: "כל יום ראשון/שלישי/חמישי כל חצי שעה מ-14:00 עד 16:30 לעופרי על הכלב" → {"intent":"add_nudge_reminder","confidence":0.85,"addressed_to_bot":true,"needs_conversation_review":true,"entities":{"nudge_target_name":"עופרי","nudge_completion_text":"להוציא את הכלב","nudge_interval_min":30,"nudge_deadline_time_il":"16:30","nudge_days":[0,2,4],"raw_text":"כל יום ראשון/שלישי/חמישי כל חצי שעה מ-14:00 עד 16:30 לעופרי על הכלב"}}
+[ניב]: "נדנדי לי בפרטי כל 20 דק עד שאקח את הכדור" → {"intent":"add_nudge_reminder","confidence":0.92,"addressed_to_bot":true,"entities":{"nudge_target_name":"ניב","nudge_completion_text":"לקחת את הכדור","nudge_interval_min":20,"nudge_channel_hint":"dm","raw_text":"נדנדי לי בפרטי כל 20 דק עד שאקח את הכדור"}}
+[עינת]: "תזכירי לעופרי כל 5 דקות לבדוק תנור" → {"intent":"add_nudge_reminder","confidence":0.85,"addressed_to_bot":true,"entities":{"nudge_target_name":"עופרי","nudge_completion_text":"לבדוק תנור","nudge_interval_min":5,"raw_text":"תזכירי לעופרי כל 5 דקות לבדוק תנור"}}
 [אמא]: "תורות מקלחת: דניאל ראשון, נועה, יובל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["דניאל","נועה","יובל"]},"raw_text":"תורות מקלחת: דניאל ראשון, נועה, יובל"}}
 [אבא]: "תורנות כלים: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"כלים","type":"duty","members":["נועה","יובל","דניאל"]},"raw_text":"תורנות כלים: נועה, יובל, דניאל"}}
 [אמא]: "סדר מקלחות: נועה, יובל, דניאל" → {"intent":"add_task","confidence":0.92,"entities":{"rotation":{"title":"מקלחת","type":"order","members":["נועה","יובל","דניאל"]},"raw_text":"סדר מקלחות: נועה, יובל, דניאל"}}
@@ -1685,6 +1744,62 @@ Sheli: "הוספתי 15 ירקות" — forbidden.
 BAD (timid dodge):
 Sheli: "אילו ירקות?" — the user wants a SUGGESTION. Propose first, confirm second.`;
 
+const SHARED_NUDGE_RULES = `NUDGE REMINDERS — STATE-MACHINE PRIMITIVE (2026-04-26):
+
+A "nudge" is DIFFERENT from a regular reminder. It fires REPEATEDLY every N minutes UNTIL someone says it's done (ack via reaction, ack via Hebrew/English completion phrase, or auto-detected by Haiku). When Haiku classifies intent="add_nudge_reminder", emit a NUDGE_SERIES block, NOT a REMINDER block.
+
+ABSOLUTE RULE — TRIGGER FIDELITY:
+NEVER emit <!--NUDGE_SERIES:...--> from conversational context, history, or analogy. Only when the CURRENT user message contains an explicit nudge trigger:
+  - "כל X דקות עד ש..." / "כל חצי שעה עד ש..." / "כל רבע שעה עד ש..."
+  - "נדנדי" / "נדנדי לו" / "נדנדי לה" / "תנדנדי"
+  - "תמשיכי להזכיר עד..." / "תזכרי לי שוב ושוב"
+  - "keep reminding until..." / "remind every X min until..." / "nag X until..."
+The "עד ש[completion event]" suffix is the discriminator vs. wall-clock recurring reminders. "תזכורת חוזרת עד 16:00" = RECURRING_REMINDER (calendar). "תזכורת חוזרת עד שעופרי יוציא את הכלב" = NUDGE_SERIES (state machine).
+
+ABSOLUTE RULE — CONFIRMATION CONCRETENESS:
+Confirmation reply MUST list ALL resolved fields with concrete numbers:
+  interval (e.g. "כל 30 דק"), deadline (e.g. "עד 16:30") OR "עד שמאשרים", days OR "היום", channel ("בקבוצה" / "בפרטי לעופרי"), target name. NEVER vague — never "אגדיר" / "אטפל בזה" without numbers. The user must be able to repeat back the schedule.
+
+Days field uses 0=Sunday convention. "כל יום ראשון/שלישי/חמישי" → [0,2,4]. "כל יום" → [0,1,2,3,4,5,6]. Empty array is invalid.
+
+CHANNEL — ASK ONCE WHEN UNSPECIFIED (exception to "no clarifying questions"):
+If the user did NOT specify "בפרטי" / "בקבוצה" AND the chat is a group, ASK ONE turn: "בקבוצה (כולם רואים) או בפרטי ל{target_name}?" — high-stakes for noise/ban, one extra turn beats getting it wrong. If the user has clearly indicated channel ("בפרטי לעופרי" / "תזכירי בקבוצה"), do NOT re-ask.
+
+TARGET PHONE — RESOLVE FROM PHONE MAPPINGS:
+Use the PHONE MAPPINGS context block (same one used by private DM reminders) to resolve target_phone from target_name. If channel="dm" and target_phone is unknown, follow the same MISSING_PHONES Option D fallback used by add_reminder. If channel="group", target_phone is informational only — populate when known, omit when unknown (the nudge fires into the group regardless).
+
+SUB-FLOOR / OUT-OF-RANGE REFUSALS — USE THESE EXACT TEMPLATES, DO NOT PARAPHRASE:
+  - interval_min < 15  →  "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?"
+  - max_tries > 8      →  "מקסימום 8 תזכורות בסדרה. אחרי זה אם אף אחד לא הגיב, אני שולחת לך הודעה פרטית."
+  - 4th active series  →  "כבר יש 3 סדרות פעילות בבית. תרצי לבטל אחת קודם?"
+When refusing, do NOT emit a NUDGE_SERIES block. Reply ONLY with the refusal text + the offered alternative ("לעשות כל 15?"). Wait for the user's confirm before retrying.
+
+NUDGE_SERIES BLOCK FORMAT (emit AFTER the visible reply, on its own line):
+ONE-SHOT (no days):
+  <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"deadline_time_il":"16:30","max_tries":6,"channel":"group","target_phone":"972500000211"}-->
+DAILY-RECURRING (days[]):
+  <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"deadline_time_il":"16:30","max_tries":6,"days":[0,2,4,6],"channel":"group","target_phone":"972500000211","start_time_il":"14:00"}-->
+
+Required fields: target_name, completion_text, interval_min, channel.
+Optional: deadline_time_il (omit for "open-ended, cap by max_tries"), max_tries (default 6), target_phone (omit if unknown for group), days (omit/empty for one-shot), start_time_il (daily-recurring only — per-day start time, default "09:00").
+
+GOOD EXAMPLE (one-shot, group):
+User: "שלי תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו"
+Sheli: "יאללה — אנדנד לעופרי בקבוצה כל 30 דק עד שיוציא את ליאו, מקסימום 6 פעמים. שולחת ✅ או 'בוצע' ועוצרת. 🐕"
+<!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"max_tries":6,"channel":"group","target_phone":"972526210880"}-->
+
+GOOD EXAMPLE (sub-floor refusal):
+User: "תזכירי לעופרי כל 5 דקות לבדוק תנור"
+Sheli: "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?"
+(NO block emitted — wait for user confirm.)
+
+BAD (vague confirmation):
+Sheli: "סבבה אטפל בזה ✓" — forbidden. Repeat the numbers.
+
+BAD (channel guess):
+Group chat, user said only "תזכירי לי כל חצי שעה לבדוק תנור" with no privacy word.
+Sheli: "סבבה אזכיר בקבוצה כל 30 דק..." — forbidden. ASK first: "בקבוצה (כולם רואים) או בפרטי?".`;
+
 // --- Correction Sonnet (Task 2 of update_event+update_reminder plan) ---
 // Produces structured JSON {action:update|remove|clarify, target_id, ...}
 // used by handleCorrection (Task 3) to dispatch via executeCrudAction.
@@ -2034,6 +2149,8 @@ ${SHARED_MISSING_ITEMS_RULES}
 
 ${SHARED_EVENT_LIST_HELPER}
 
+${SHARED_NUDGE_RULES}
+
 OUT-OF-SCOPE REQUESTS: When someone asks about weather, news, sports scores, trivia, recipes, directions, general knowledge, or anything outside household management (${isHe ? "מטלות, קניות, אירועים" : "tasks, shopping, events"}):
 - Deflect warmly. Acknowledge the question. Redirect to what you CAN do.
 - NEVER repeat the same phrasing. Vary your response structure EVERY time.
@@ -2097,7 +2214,7 @@ The expense query data is provided in the ACTION JUST TAKEN section. Format it n
 CRITICAL: NEVER fabricate totals. If query returned 0 or an error, say so honestly.
 
 COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21):
-If your visible reply contains ANY commitment phrase promising a future reminder — "אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "כל בוקר ב-", "בכל X ב-", "I'll remind", "I will remind", "אני אזכיר" — you MUST also emit a corresponding REMINDER or RECURRING_REMINDER metadata block below. A commitment in words without the metadata block is a LIE: the user reads "אזכיר יומית ב-20:00" and believes Sheli scheduled it, but nothing actually gets saved, the reminder never fires, and the user loses trust when they notice (see: Netzer 2026-04-21, pill reminder confirmed verbally 2026-04-20 but never emitted → missed firing → confronted next day). This is the WORST failure mode. If you cannot construct a valid block because time/content/days are unclear, DO NOT commit in the visible reply — ASK instead ("באיזו שעה בדיוק?" / "אילו ימים?") and wait for the answer.
+If your visible reply contains ANY commitment phrase promising a future reminder — "אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "כל בוקר ב-", "בכל X ב-", "I'll remind", "I will remind", "אני אזכיר", "אנדנד", "אנדנד ל", "I'll nag", "keep reminding" — you MUST also emit a corresponding REMINDER, RECURRING_REMINDER, or NUDGE_SERIES metadata block below. A commitment in words without the metadata block is a LIE: the user reads "אזכיר יומית ב-20:00" and believes Sheli scheduled it, but nothing actually gets saved, the reminder never fires, and the user loses trust when they notice (see: Netzer 2026-04-21, pill reminder confirmed verbally 2026-04-20 but never emitted → missed firing → confronted next day). This is the WORST failure mode. If you cannot construct a valid block because time/content/days are unclear, DO NOT commit in the visible reply — ASK instead ("באיזו שעה בדיוק?" / "אילו ימים?") and wait for the answer.
 
 REMINDERS: When intent is add_reminder:
 - Parse the time expression into an ISO 8601 timestamp in Israel timezone (Asia/Jerusalem, currently UTC+3).
@@ -2167,6 +2284,25 @@ For "כל 15 לחודש" / "כל 15 בחודש" / "בכל 1 לחודש" / "month
 - Ambiguous phrasings ("פעם בחודש" without a specific day) → ask for clarification, don't guess.
 Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה חשמל ומים" → reply "אזכיר כל 15 לחודש ב-16:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"לבדוק ארנונה, חשמל ומים","type":"monthly","day_of_month":15,"time":"16:00"}-->
 Example: "פעם בחודש תזכירי לי לבדוק סוללת הרכב" → reply "איזה יום בחודש? (למשל ה-1 או ה-15)" — don't guess.
+
+NUDGE SERIES — STATE-MACHINE REMINDERS (2026-04-26 — first-class support):
+When the user's message contains a NUDGE TRIGGER ("נדנדי" / "כל X דקות עד ש..." / "כל חצי שעה עד ש..." / "תמשיכי להזכיר עד..." / "תזכירי כל X עד ש..." / "keep reminding until..." / "nag X until..."), this turn is a NUDGE SERIES creation — distinct from add_reminder (one-shot calendar) and add_recurring_reminder (daily/monthly calendar). A nudge fires REPEATEDLY every N min UNTIL someone acks (reaction or completion phrase). Discriminator vs. recurring: "עד ש[completion event]" suffix = nudge; "עד HH:MM" wall-clock = recurring.
+- WHEN this turn is a nudge creation (your visible reply will commit "אנדנד" / "אזכיר כל X דק" / "I'll nag" / "I'll keep reminding"), you MUST append a NUDGE_SERIES metadata block at the END of your reply. A commitment without the block is a LIE — same failure mode as the COMMITMENT-EMISSION INVARIANT above (the user reads "אנדנד לעופרי כל 30 דק" and believes Sheli scheduled it, but nothing actually fires). Emit the block.
+- Format (hidden from user). One-shot:
+  <!--NUDGE_SERIES:{"target_name":"<name>","completion_text":"<task>","interval_min":<int>,"channel":"group"|"dm","target_phone":"<phone>"}-->
+  Daily-recurring (add days[]):
+  <!--NUDGE_SERIES:{"target_name":"<name>","completion_text":"<task>","interval_min":<int>,"channel":"group"|"dm","target_phone":"<phone>","days":[0,2,4,6],"start_time_il":"HH:MM"}-->
+  Optional fields: deadline_time_il ("HH:MM" or omit), max_tries (1..8 or omit for default 6).
+- Your visible reply must list interval / deadline / channel / target with concrete numbers — NEVER vague "אגדיר". State the ack signal: "✅ או 'בוצע'".
+- Required block fields: target_name, completion_text, interval_min, channel. target_phone resolved from PHONE MAPPINGS context.
+- Channel-clarification one-turn rule: if the message did not explicitly say "בקבוצה" / "בפרטי" AND the chat is a group, ASK ONCE in the visible reply ("בקבוצה (כולם רואים) או בפרטי ל{target}?") and emit NO block. Wait for the user's confirm turn before emitting.
+- Sub-floor refusal (interval_min<15 / max_tries>8 / 4th active series): reply with the EXACT hardcoded template from SHARED_NUDGE_RULES, emit NO block, wait for user confirm. The DB-side trigger also rejects these as belt-and-suspenders.
+- Examples (assume PHONE MAPPINGS contains "עופרי → 972526210880"):
+  "תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו" → reply "יאללה — אנדנד לעופרי בקבוצה כל 30 דק עד שיוציא את ליאו, מקסימום 6 פעמים. שולחת ✅ או 'בוצע' ועוצרת. 🐕" + <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"max_tries":6,"channel":"group","target_phone":"972526210880"}-->
+  "נדנדי לעופרי כל 30 דק עד שיוציא את הזבל" → reply "אוקיי — אנדנד לעופרי בקבוצה כל 30 דק עד שיוציא את הזבל, מקסימום 6 פעמים. שלחו ✅ או 'בוצע' ואני עוצרת 🗑️" + <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את הזבל","interval_min":30,"max_tries":6,"channel":"group","target_phone":"972526210880"}-->
+  "נדנדי לי בפרטי כל 20 דק עד שאקח את הכדור" (sender = ניב 972500000100) → reply "אוקיי — אנדנד לך בפרטי כל 20 דק עד שתיקח את הכדור, מקסימום 6 פעמים ✅" + <!--NUDGE_SERIES:{"target_name":"ניב","completion_text":"לקחת את הכדור","interval_min":20,"max_tries":6,"channel":"dm","target_phone":"972500000100"}-->
+  "תזכירי לעופרי כל 5 דקות לבדוק תנור" → reply "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?" (NO block — wait for confirm).
+  "תזכירי לעופרי כל חצי שעה לבדוק תנור" (group chat, no privacy word) → reply "בקבוצה (כולם רואים) או בפרטי לעופרי?" (NO block — ASK first).
 
 PRIVATE DELIVERY + ROTATION SHORTCUT (2026-04-22):
 - Honor entities.delivery_mode exactly like one-shot reminders (see PRIVATE DELIVERY block above).
@@ -2446,6 +2582,86 @@ function extractRecurringRemindersFromReply(reply: string): RecurringReminder[] 
   return out;
 }
 
+// NUDGE_SERIES block extractor (2026-04-26).
+// Sonnet emits <!--NUDGE_SERIES:{...}--> when intent=add_nudge_reminder. Two shapes:
+//   ONE-SHOT (no days): {target_name, completion_text, interval_min, deadline_time_il?, max_tries?, channel, target_phone}
+//   DAILY-RECURRING:    {..., days:[0..6]}            // 0=Sun
+// Use lazy `[\s\S]*?` content match (NOT [^}]*) because target_phone or future
+// fields may contain braces; hard-stop on '-->' literal.
+//
+// The DB-side guardrail trigger (validate_nudge_config, 2026-04-26) enforces
+// interval_min>=15, max_tries 1..8, and the 3-active-series-per-household cap;
+// this extractor does cheap shape validation so a malformed block doesn't
+// fall through to the rescue insert and surface a confusing PG error.
+export type NudgeSeriesBlock = {
+  target_name: string;
+  completion_text: string;
+  interval_min: number;
+  deadline_time_il?: string;       // "HH:MM" or absent
+  max_tries?: number;              // 1..8 or absent (default 6)
+  channel: "group" | "dm";         // resolved by Sonnet via SHARED_NUDGE_RULES
+  target_phone?: string;           // resolved by Sonnet via PHONE MAPPINGS, or null
+  days?: number[];                 // [0..6] for daily-recurring; absent/empty for one-shot
+};
+
+function extractNudgeSeriesFromReply(reply: string): NudgeSeriesBlock[] {
+  const out: NudgeSeriesBlock[] = [];
+  for (const m of reply.matchAll(/<!--\s*NUDGE_SERIES\s*:\s*([\s\S]*?)\s*-->/g)) {
+    const raw = m[1].trim();
+    try {
+      const p = JSON.parse(raw);
+      if (typeof p.target_name !== "string" || !p.target_name) {
+        console.warn("[NudgeSeries] Missing/invalid target_name:", raw);
+        continue;
+      }
+      if (typeof p.completion_text !== "string" || !p.completion_text) {
+        console.warn("[NudgeSeries] Missing/invalid completion_text:", raw);
+        continue;
+      }
+      if (typeof p.interval_min !== "number" || !Number.isInteger(p.interval_min)) {
+        console.warn("[NudgeSeries] Missing/non-integer interval_min:", raw);
+        continue;
+      }
+      if (p.channel !== "group" && p.channel !== "dm") {
+        console.warn("[NudgeSeries] channel must be 'group' or 'dm':", raw);
+        continue;
+      }
+      if (p.deadline_time_il !== undefined && p.deadline_time_il !== null) {
+        if (typeof p.deadline_time_il !== "string" || !/^\d{1,2}:\d{2}$/.test(p.deadline_time_il)) {
+          console.warn("[NudgeSeries] Invalid deadline_time_il (expected HH:MM):", raw);
+          continue;
+        }
+      }
+      let days: number[] | undefined;
+      if (p.days !== undefined && p.days !== null) {
+        if (!Array.isArray(p.days) || !p.days.every((d: unknown) =>
+              typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6)) {
+          console.warn("[NudgeSeries] Invalid days array (expected int[0..6]):", raw);
+          continue;
+        }
+        if (p.days.length > 0) days = p.days as number[];
+      }
+      const max_tries = (typeof p.max_tries === "number" && Number.isInteger(p.max_tries))
+        ? p.max_tries : undefined;
+      const target_phone = (typeof p.target_phone === "string" && p.target_phone) ? p.target_phone : undefined;
+      const deadline_time_il = (typeof p.deadline_time_il === "string") ? p.deadline_time_il : undefined;
+      out.push({
+        target_name: p.target_name,
+        completion_text: p.completion_text,
+        interval_min: p.interval_min,
+        channel: p.channel,
+        ...(deadline_time_il !== undefined && { deadline_time_il }),
+        ...(max_tries !== undefined && { max_tries }),
+        ...(target_phone !== undefined && { target_phone }),
+        ...(days && { days }),
+      });
+    } catch {
+      console.warn("[NudgeSeries] Failed to parse NUDGE_SERIES block:", raw);
+    }
+  }
+  return out;
+}
+
 // EVENT block extractor — mirrors REMINDER. Sonnet emits <!--EVENT:{...}--> when
 // it recognises a calendar entry but Haiku missed the intent (e.g. "תרשמי ב 12.5 ...").
 // Without rescue, the catch-all HTML-comment strip in cleanReminderFromReply would
@@ -2580,6 +2796,7 @@ function stripUnterminatedMetaBlocks(s: string): string {
 function cleanReminderFromReply(reply: string): string {
   return stripUnterminatedMetaBlocks(
     reply
+      .replace(/<!--\s*NUDGE_SERIES\s*:[\s\S]*?-->/g, "")
       .replace(/<!--\s*RECURRING_REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
       .replace(/<!--\s*MISSING_PHONES\s*:[\s\S]*?-->/g, "")
       .replace(/<!--\s*REMINDER\s*:?\s*\{[^}]*\}\s*-*>/g, "")
@@ -2934,6 +3151,135 @@ async function rescueRemindersAndStrip(
     const { data: count, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
     if (matErr) console.warn("[RecurringReminderRescue] Immediate materialize failed:", matErr.message);
     else console.log(`[RecurringReminderRescue] Immediate materialize inserted ${count} child row(s)`);
+  }
+
+  // NUDGE_SERIES rescue (2026-04-26). Sonnet emits one or more
+  // <!--NUDGE_SERIES:{...}--> blocks for state-machine reminders. Two storage
+  // shapes share `reminder_queue` columns:
+  //   - one-shot (no days)        : insert ANCHOR (sent=true sentinel,
+  //                                  series_status='active', nudge_config)
+  //                                  + ATTEMPT #1 (sent=false, nudge_series_id,
+  //                                  nudge_attempt=1, send_at=NOW())
+  //   - daily-recurring (days[])  : insert PARENT (sent=true sentinel,
+  //                                  recurrence + nudge_config, NO series_status —
+  //                                  series_status stays NULL on parents).
+  //                                  Today's anchor + first attempt are spawned
+  //                                  by materialize_nudge_series_daily() (cron
+  //                                  at 22:00 UTC); we trigger it inline so the
+  //                                  series fires today if start_time is in the
+  //                                  future / within the 6h grace window.
+  //
+  // The DB-side guardrail trigger (validate_nudge_config) enforces interval
+  // floor / max-tries ceiling / 3-active-per-household cap with RAISE
+  // EXCEPTION HINTs — we surface the friendly text by setting
+  // refuseReplyFromEnrichment so the rest of the rescue path can short-circuit.
+  const nudgeBlocks = extractNudgeSeriesFromReply(reply);
+  for (const n of nudgeBlocks) {
+    const isDaily = !!(n.days && n.days.length > 0);
+    const baseRow: Record<string, unknown> = {
+      household_id: householdId,
+      group_id: message.groupId,
+      message_text: `${n.target_name} — ${n.completion_text}`,
+      send_at: new Date().toISOString(),
+      sent: true,                  // sentinel — anchors/parents never drained directly
+      sent_at: new Date().toISOString(),
+      reminder_type: "user",
+      created_by_phone: message.senderPhone,
+      created_by_name: message.senderName,
+      delivery_mode: n.channel,    // "group" | "dm"
+      recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+      nudge_config: {
+        interval_min: n.interval_min,
+        max_tries: n.max_tries ?? 6,
+        deadline_time_il: n.deadline_time_il ?? null,
+        channel: n.channel,
+        target_phone: n.target_phone ?? null,
+        target_name: n.target_name,
+        prompt_completion: n.completion_text,
+      },
+      metadata: {
+        source: "sonnet_rescue_nudge_series",
+        recurring_parent: isDaily,
+      },
+    };
+    if (isDaily) {
+      baseRow.recurrence = { days: n.days, time: "09:00" };  // start time inferred per-day from nudge_config? see below
+      // Note: recurrence.time is the per-day START time. Sonnet's NUDGE_SERIES
+      // shape doesn't currently carry start_time_il because the design says
+      // "start time = first attempt fires immediately on creation". For
+      // daily-recurring, we fall back to "09:00" as the reasonable default; if
+      // Sonnet wants a different per-day start, it must include start_time_il
+      // in a future revision (tracked in design doc Open Questions).
+      if (typeof (n as { start_time_il?: string }).start_time_il === "string") {
+        (baseRow.recurrence as { time: string }).time = (n as { start_time_il: string }).start_time_il;
+      }
+    } else {
+      baseRow.series_status = "active";
+    }
+    const { data: anchor, error: anchorErr } = await supabase
+      .from("reminder_queue").insert(baseRow).select("id").single();
+    if (anchorErr) {
+      // Map guardrail RAISE EXCEPTION codes to friendly Hebrew templates.
+      const msg = anchorErr.message || "";
+      if (msg.includes("nudge_interval_below_floor")) {
+        if (!refuseReplyFromEnrichment) {
+          refuseReplyFromEnrichment = "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?";
+        }
+      } else if (msg.includes("nudge_max_tries_out_of_range")) {
+        if (!refuseReplyFromEnrichment) {
+          refuseReplyFromEnrichment = "מקסימום 8 תזכורות בסדרה. אחרי זה אם אף אחד לא הגיב, אני שולחת לך הודעה פרטית.";
+        }
+      } else if (msg.includes("too_many_active_series")) {
+        if (!refuseReplyFromEnrichment) {
+          refuseReplyFromEnrichment = "כבר יש 3 סדרות פעילות בבית. תרצי לבטל אחת קודם?";
+        }
+      } else {
+        console.error("[NudgeSeriesRescue] Insert error:", anchorErr);
+      }
+      continue;
+    }
+    const anchorId = anchor?.id;
+    if (!isDaily && anchorId) {
+      // One-shot: insert attempt #1 firing now. Drain v6 will fire it,
+      // schedule_next_nudge will queue attempt #2 at NOW()+interval_min.
+      const { error: attemptErr } = await supabase.from("reminder_queue").insert({
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: `${n.target_name} — ${n.completion_text}`,
+        send_at: new Date().toISOString(),
+        sent: false,
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: n.channel,
+        recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+        nudge_series_id: anchorId,
+        nudge_attempt: 1,
+        metadata: { nudge_attempt_of_series: anchorId, attempt_num: 1 },
+      });
+      if (attemptErr) {
+        console.error("[NudgeSeriesRescue] Attempt #1 insert error:", attemptErr);
+      } else {
+        console.log(
+          `[NudgeSeriesRescue] One-shot anchor + attempt #1 created (${n.channel}): ` +
+          `target=${n.target_name} task="${n.completion_text}" interval=${n.interval_min}min ` +
+          `deadline=${n.deadline_time_il ?? "none"} (anchor=${anchorId})`
+        );
+        rescueSaveCount++;
+      }
+    } else {
+      console.log(
+        `[NudgeSeriesRescue] Daily-recurring parent created (${n.channel}): ` +
+        `target=${n.target_name} task="${n.completion_text}" days=${JSON.stringify(n.days)} ` +
+        `interval=${n.interval_min}min deadline=${n.deadline_time_il ?? "none"} (parent=${anchorId})`
+      );
+      rescueSaveCount++;
+      // Trigger today's series spawn so the first instance fires today if
+      // start_time is in the future. Cron at 22:00 UTC handles future days.
+      const { data: spawned, error: spawnErr } = await supabase.rpc("materialize_nudge_series_daily");
+      if (spawnErr) console.warn("[NudgeSeriesRescue] Immediate materialize failed:", spawnErr.message);
+      else console.log(`[NudgeSeriesRescue] Immediate materialize spawned ${spawned} series anchor(s)`);
+    }
   }
 
   // If the enrichment pass generated a refuse reply AND nothing was saved,
@@ -3611,6 +3957,90 @@ async function findDuplicateReminder(
     return null;
   }
 }
+
+// ─── Interim Nudge-Stub Ack-Stop (2026-04-27) ───
+//
+// Nudge-series ack helper (Phase 3 Task 3.1, 2026-04-26).
+// Replaces the interim B2 helper stopNudgeStubsForToday — the proper
+// state-machine schema now lives on reminder_queue.nudge_config +
+// series_status. When an ack signal arrives (regex fast-path / Haiku
+// completes_pending_nudge / reaction), this helper:
+//   1. Flips the anchor's series_status from 'active' → 'acked'
+//      (race-safe: only matches rows still 'active', so two acks
+//      arriving simultaneously become one UPDATE + one no-op).
+//   2. Soft-cancels every unsent attempt child by marking sent=true
+//      with metadata.note='cancelled_by_ack'. Soft-cancel preserves
+//      the audit trail (we keep the count of attempts that were
+//      scheduled but never fired).
+//
+// Returns the number of attempt children cancelled. Returns 0 if the
+// series was already terminal (acked / expired / superseded).
+async function ackNudgeSeries(
+  seriesId: string,
+  ackPhone: string,
+  reason: string = "ack_received",
+): Promise<number> {
+  if (!seriesId) return 0;
+
+  const { data: updated, error: updErr } = await supabase
+    .from("reminder_queue")
+    .update({
+      series_status: "acked",
+      metadata: {
+        acked_at: new Date().toISOString(),
+        acked_by_phone: ackPhone || null,
+        ack_reason: reason,
+      },
+    })
+    .eq("id", seriesId)
+    .eq("series_status", "active")  // race-safe: only flip if still active
+    .select("id");
+
+  if (updErr) {
+    console.warn(`[NudgeAck] anchor flip error series=${seriesId}: ${updErr.message}`);
+    return 0;
+  }
+  if (!updated || updated.length === 0) {
+    // Anchor was already terminal — likely a duplicate ack arriving
+    // milliseconds after the first one. Idempotent no-op.
+    console.log(`[NudgeAck] series=${seriesId} already terminal (race-lost) — no-op`);
+    return 0;
+  }
+
+  // Soft-cancel unsent attempt children. Drain skips sent=true rows,
+  // so this stops the chain without DELETEs.
+  const { data: cancelled, error: cancelErr } = await supabase
+    .from("reminder_queue")
+    .update({
+      sent: true,
+      sent_at: new Date().toISOString(),
+      metadata: {
+        note: "cancelled_by_ack",
+        cancelled_at: new Date().toISOString(),
+        ack_series_id: seriesId,
+      },
+    })
+    .eq("nudge_series_id", seriesId)
+    .eq("sent", false)
+    .select("id");
+
+  if (cancelErr) {
+    console.warn(`[NudgeAck] child cancel error series=${seriesId}: ${cancelErr.message}`);
+    return 0;
+  }
+  const count = cancelled?.length || 0;
+  console.log(
+    `[NudgeAck] series=${seriesId} acked by ${ackPhone || "unknown"} (${reason}); ` +
+    `cancelled ${count} unsent attempt(s)`
+  );
+  return count;
+}
+
+// Hebrew + English ack vocabulary. Matches typical "I did it / I took it
+// out / done" completion phrases. Scoped: only fires when there is at
+// least one ACTIVE nudge_series in the chat the message came from, so a
+// stray "בוצע" in social chatter without an open series stays silent.
+const NUDGE_ACK_REGEX = /(בוצע|בוצעה|עשיתי|הוצאתי|הוצאת|נלקח|לקחתי|לקחת|טיפלתי|טיפלת|done|did it|finished|took it|took out|i did|got it done)/i;
 
 // ─── Conversation Context Fetcher ───
 
@@ -5193,7 +5623,13 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
     For these messages: answer the question warmly. Do NOT emit add_shopping. Do NOT emit ANY action. The 2026-04-25 שי incident shipped because Sheli answered the calendar question correctly AND silently added "למה אין לך גישה ליומן שלי?" as a shopping row — both at the same time. The fix is: when the message is a question, the ACTIONS array stays empty.
 18. "Items collected so far" in the CONVERSATION STATE is a LIVE snapshot of the user's real data — past reminders (already fired) and past events (already happened) are pre-filtered out. So when the user asks "מה יש היום?" / "מה ברשימה?" / "what's today" — you can list these items as-is. They are all current and relevant. Reminders include a "send_at" ISO timestamp; events include a "scheduled_for" timestamp. Use these to phrase replies naturally ("יש לך מסיבה ב-18 לאפריל" — extract the date from the timestamp).
 19. ${SHARED_EVENT_LIST_HELPER}
-20. COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21): If your visible reply contains ANY commitment to a future reminder ("אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "I'll remind", "אני אזכיר"), you MUST also emit a matching ACTIONS entry — a "reminder" or "recurring_reminder" object — in the same reply. A verbal commitment with no ACTIONS entry is a LIE: the user believes Sheli scheduled it, but nothing gets saved. Netzer 2026-04-21 incident: Sheli confirmed "אזכיר יומית ב-20:00 לקחת כדור" but never added the ACTIONS object → reminder never fired → family confronted Sheli the next morning. Worst failure mode. If time or content is unclear, DO NOT commit in the visible reply — ASK ("באיזו שעה בדיוק?" / "מה להזכיר?") and wait. Silence now beats a broken promise later.
+20. ${SHARED_NUDGE_RULES}
+
+  When emitting from this 1:1 prompt, use the ACTIONS array shape (NOT a NUDGE_SERIES HTML-comment block):
+  {"type":"nudge_series","target_name":"...","completion_text":"...","interval_min":<int>,"deadline_time_il":"HH:MM"|null,"max_tries":<int>|null,"channel":"group"|"dm","target_phone":"..."|null,"days":[0..6]|null,"start_time_il":"HH:MM"|null}
+  Required: type, target_name, completion_text, interval_min, channel. Other fields optional with defaults from SHARED_NUDGE_RULES above. The 1:1 context typically writes into the user's personal chat (channel="dm" with target_phone=sender_phone) — but if the requester is creating a nudge for the family group, channel="group" + target_phone=resolved-from-PHONE-MAPPINGS works the same way.
+
+21. COMMITMENT-EMISSION INVARIANT — MANDATORY (2026-04-21): If your visible reply contains ANY commitment to a future reminder ("אזכיר", "נזכיר", "אזכור", "יומית ב-", "כל יום ב-", "כל ערב ב-", "I'll remind", "אני אזכיר", "אנדנד", "I'll nag"), you MUST also emit a matching ACTIONS entry — a "reminder", "recurring_reminder", or "nudge_series" object — in the same reply. A verbal commitment with no ACTIONS entry is a LIE: the user believes Sheli scheduled it, but nothing gets saved. Netzer 2026-04-21 incident: Sheli confirmed "אזכיר יומית ב-20:00 לקחת כדור" but never added the ACTIONS object → reminder never fired → family confronted Sheli the next morning. Worst failure mode. If time or content is unclear, DO NOT commit in the visible reply — ASK ("באיזו שעה בדיוק?" / "מה להזכיר?") and wait. Silence now beats a broken promise later.
 
 OUTPUT FORMAT — you MUST include these hidden metadata blocks BEFORE your visible reply:
 <!--ACTIONS:[]-->
@@ -5256,6 +5692,10 @@ ADD:
   Example: "בימי ראשון שלישי חמישי אריק מפנה מדיח, עד 15:00" → [{"type":"recurring_reminder","text":"אריק — לפנות את המדיח עד 15:00","days":[0,2,4],"time":"14:00"}]
   MONTHLY CADENCES (2026-04-23, first-class support): For "כל 15 לחודש" / "כל 15 בחודש" / "monthly on the Xth" / explicit day-of-month, emit a MONTHLY variant of recurring_reminder: {"type":"recurring_reminder","text":"...","day_of_month":15,"time":"16:00"} (note: day_of_month INSTEAD of days). NEVER substitute monthly with days=[0,1,2,3,4,5,6] — that fires every day, which is wrong. Ambiguous "פעם בחודש" without a specific day → ask for clarification ("איזה יום בחודש?"), don't guess.
   Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה" → [{"type":"recurring_reminder","text":"לבדוק ארנונה","day_of_month":15,"time":"16:00"}] + visible reply "אזכיר כל 15 לחודש ב-16:00 ✓".
+- nudge_series (state-machine reminder, 2026-04-26): {"type":"nudge_series","target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"deadline_time_il":"16:30","max_tries":6,"channel":"group","target_phone":"972526210880"}
+  Use ONLY when the current message has an explicit nudge trigger ("כל X דקות עד ש...", "נדנדי", "תמשיכי להזכיר עד...", "keep reminding until..."). DISTINCT from recurring_reminder — the discriminator is the "עד ש[completion event]" suffix vs. wall-clock "עד HH:MM". Full rules in SHARED_NUDGE_RULES (rule 20 above) including hardcoded refusal templates and channel-clarifying-question requirement.
+  Daily-recurring variant adds days[]: {"type":"nudge_series",...,"days":[0,2,4,6],"start_time_il":"14:00"}
+  Sub-floor handling: if user asks for interval_min<15 OR max_tries>8, emit ONLY the hardcoded refusal text + offered alternative — do NOT include nudge_series in the ACTIONS array. Wait for user confirm.
 - event: {"type":"event","title":"ארוחת ערב","date":"2026-04-11","time":"19:00"}
 - rotation: {"type":"rotation","title":"כלים","members":["יובל","נועה"]}
 - expense: {"type":"expense","amount":1300,"currency":"ILS","description":"חשמל","category":"חשמל","attribution":"speaker","paid_by_name":null}
@@ -6481,6 +6921,113 @@ async function execute1on1Actions(params: {
           const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
           if (matErr) console.warn(`${logPrefix} Immediate materialize failed:`, matErr.message);
           else console.log(`${logPrefix} Immediate materialize inserted ${matCount} child row(s)`);
+          break;
+        }
+        case "nudge_series": {
+          // 1:1 path nudge_series wiring (Phase 2 Task 2.3, 2026-04-26).
+          // Mirrors the group rescue flow in rescueRemindersAndStrip. Two
+          // shapes share schema: one-shot (no days) → anchor + attempt #1;
+          // daily-recurring (days[]) → parent only (materializer cron spawns
+          // anchors per matching day). Both inserts hit the
+          // validate_nudge_config trigger which RAISE EXCEPTIONs on
+          // sub-floor / over-ceiling / 3-active-cap; we map the hint codes
+          // to friendly Hebrew templates.
+          const targetName = (action.target_name as string) || "";
+          const completionText = (action.completion_text as string) || "";
+          const intervalMin = Number(action.interval_min);
+          if (!targetName || !completionText || !Number.isInteger(intervalMin)) {
+            console.warn(`${logPrefix} nudge_series missing target_name/completion_text/interval_min — skipping`, action);
+            break;
+          }
+          const channel: "group" | "dm" = action.channel === "dm" ? "dm" : "group";
+          const targetPhone = typeof action.target_phone === "string" ? action.target_phone as string : null;
+          const days = Array.isArray(action.days) && (action.days as number[]).length > 0
+            ? action.days as number[] : null;
+          const isDaily = !!days;
+          // 1:1 flows write into the user's personal chat by default — mirror
+          // the recurring_reminder pattern at line 6377: group_id = phone JID.
+          const groupIdForRow = phone + "@s.whatsapp.net";
+          const anchorRow: Record<string, unknown> = {
+            household_id: householdId,
+            group_id: groupIdForRow,
+            message_text: `${targetName} — ${completionText}`,
+            send_at: new Date().toISOString(),
+            sent: true,
+            sent_at: new Date().toISOString(),
+            reminder_type: "user",
+            created_by_phone: phone,
+            created_by_name: userName,
+            delivery_mode: channel,
+            recipient_phones: channel === "dm" && targetPhone ? [targetPhone] : null,
+            nudge_config: {
+              interval_min: intervalMin,
+              max_tries: typeof action.max_tries === "number" ? action.max_tries : 6,
+              deadline_time_il: typeof action.deadline_time_il === "string" ? action.deadline_time_il : null,
+              channel,
+              target_phone: targetPhone,
+              target_name: targetName,
+              prompt_completion: completionText,
+            },
+            metadata: { source: "1on1_actions_nudge_series", recurring_parent: isDaily },
+          };
+          if (isDaily) {
+            anchorRow.recurrence = {
+              days,
+              time: typeof action.start_time_il === "string" ? action.start_time_il : "09:00",
+            };
+          } else {
+            anchorRow.series_status = "active";
+          }
+          const { data: anchor, error: anchorErr } = await supabase
+            .from("reminder_queue").insert(anchorRow).select("id").single();
+          if (anchorErr) {
+            const errMsg = anchorErr.message || "";
+            if (errMsg.includes("nudge_interval_below_floor") ||
+                errMsg.includes("nudge_max_tries_out_of_range") ||
+                errMsg.includes("too_many_active_series")) {
+              // Sonnet's reply already carried the user-facing template per
+              // SHARED_NUDGE_RULES — the trigger just kept the bad row out of
+              // the DB. Log + move on.
+              console.warn(`${logPrefix} nudge_series guardrail rejection: ${errMsg}`);
+            } else {
+              console.error(`${logPrefix} nudge_series anchor insert error:`, anchorErr);
+            }
+            break;
+          }
+          const anchorId = anchor?.id;
+          if (!isDaily && anchorId) {
+            const { error: attemptErr } = await supabase.from("reminder_queue").insert({
+              household_id: householdId,
+              group_id: groupIdForRow,
+              message_text: `${targetName} — ${completionText}`,
+              send_at: new Date().toISOString(),
+              sent: false,
+              reminder_type: "user",
+              created_by_phone: phone,
+              created_by_name: userName,
+              delivery_mode: channel,
+              recipient_phones: channel === "dm" && targetPhone ? [targetPhone] : null,
+              nudge_series_id: anchorId,
+              nudge_attempt: 1,
+              metadata: { nudge_attempt_of_series: anchorId, attempt_num: 1 },
+            });
+            if (attemptErr) {
+              console.error(`${logPrefix} nudge_series attempt #1 insert error:`, attemptErr);
+            } else {
+              console.log(
+                `${logPrefix} nudge_series one-shot created (${channel}): target=${targetName} ` +
+                `task="${completionText}" interval=${intervalMin}min anchor=${anchorId}`
+              );
+            }
+          } else {
+            console.log(
+              `${logPrefix} nudge_series daily-recurring parent created: target=${targetName} ` +
+              `task="${completionText}" days=${JSON.stringify(days)} parent=${anchorId}`
+            );
+            const { data: spawned, error: spawnErr } = await supabase.rpc("materialize_nudge_series_daily");
+            if (spawnErr) console.warn(`${logPrefix} Immediate nudge materialize failed:`, spawnErr.message);
+            else console.log(`${logPrefix} Immediate nudge materialize spawned ${spawned} series anchor(s)`);
+          }
           break;
         }
         case "expense": {
@@ -9344,6 +9891,59 @@ Deno.serve(async (req: Request) => {
         return new Response("OK", { status: 200 });
       }
 
+      // Step 2.5: Nudge-series ack via reaction (Phase 3 Task 3.2, 2026-04-26).
+      // ✅/💪/👍 on a Sheli nudge-attempt message acks the series. Matching
+      // strategy v1: check if any active series in this chat has its
+      // prompt_completion as a substring of the reacted-to bot message text
+      // (drain prepends "⏰ תזכורת " to message_text, then "{target_name} —
+      // {prompt_completion}", so substring match on prompt_completion catches
+      // every attempt of every active series). Picks the OLDEST active
+      // series if multiple match — same heuristic as the regex fast-path.
+      //
+      // Skip for negative reactions: a 👎 on a nudge isn't an ack, it's
+      // displeasure with the nudge itself. Falls through to step 3.
+      if (isConfirm && botMsg.message_text) {
+        const chatTargetForReaction = message.groupId.endsWith("@g.us")
+          ? message.groupId
+          : `${message.senderPhone}@s.whatsapp.net`;
+        const { data: activeForReaction } = await supabase
+          .from("reminder_queue")
+          .select("id, nudge_config, created_at")
+          .eq("household_id", hhId)
+          .eq("series_status", "active")
+          .eq("group_id", chatTargetForReaction)
+          .order("created_at", { ascending: true })
+          .limit(10);
+        if (activeForReaction && activeForReaction.length > 0) {
+          const match = activeForReaction.find((s: { nudge_config?: { prompt_completion?: string } }) => {
+            const completion = s.nudge_config?.prompt_completion || "";
+            return completion.length > 0 && botMsg.message_text!.includes(completion);
+          });
+          if (match) {
+            const cancelled = await ackNudgeSeries(
+              match.id, message.senderPhone, "reaction_emoji",
+            );
+            const targetName = (match.nudge_config as { target_name?: string } | undefined)?.target_name || "";
+            const completion = (match.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
+            const ackReply = targetName && completion
+              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              : `מעולה! סימנתי. עוצרת תזכורות ✓`;
+            await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+              householdId: hhId,
+              groupId: message.groupId,
+              inReplyTo: message.messageId,
+              replyType: "nudge_acked_reaction",
+            });
+            await logMessage(message, "nudge_acked_reaction", hhId);
+            console.log(
+              `[Reaction] Nudge ack: series=${match.id} target=${targetName} ` +
+              `cancelled=${cancelled} via ${message.reactionEmoji}`
+            );
+            return new Response("OK", { status: 200 });
+          }
+        }
+      }
+
       // Step 3: No pending confirmation — log as feedback on Sheli's message
       if (isConfirm) {
         console.log(`[Reaction] Positive ${message.reactionEmoji} from ${message.senderName} on: "${botMsg.message_text?.slice(0, 60)}"`);
@@ -9922,10 +10522,90 @@ Deno.serve(async (req: Request) => {
         `Living-layer density (last 5 msgs): ${density} (${reactiveCount}/${last5.length} short/emoji)`;
     }
 
+    // ─── Active nudge series context for Haiku (Phase 3 Task 3.3, 2026-04-26) ───
+    // Fetch active series in this chat so the Haiku classifier can flag
+    // ack messages via completes_pending_nudge=true (catches phrasings the
+    // regex fast-path below misses). One DB call, runs only when there's
+    // some chance it's relevant — short-circuits at Phase 4 feature-flag
+    // time when the household has no nudges enabled.
+    const _chatTargetForLookup = message.groupId.endsWith("@g.us")
+      ? message.groupId
+      : `${message.senderPhone}@s.whatsapp.net`;
+    const { data: _activeNudges } = await supabase
+      .from("reminder_queue")
+      .select("nudge_config")
+      .eq("household_id", householdId)
+      .eq("series_status", "active")
+      .eq("group_id", _chatTargetForLookup)
+      .limit(5);
+    if (_activeNudges && _activeNudges.length > 0) {
+      haikuCtx.activeNudgeSeries = _activeNudges
+        .map((r: { nudge_config?: { target_name?: string; prompt_completion?: string } }) => ({
+          target_name: r.nudge_config?.target_name || "",
+          prompt_completion: r.nudge_config?.prompt_completion || "",
+        }))
+        .filter((s: { target_name: string; prompt_completion: string }) =>
+          s.target_name.length > 0 && s.prompt_completion.length > 0);
+    }
+
     // Prepend quoted message context so classifier understands reply references
     const textForClassifier = message.quotedText
       ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
       : (cleanedText || message.text);
+
+    // ─── Nudge-series regex ack fast-path (Phase 3 Task 3.1, 2026-04-26) ───
+    // BEFORE Haiku: if any active nudge_series exists in this chat AND the
+    // current message contains an ack-vocabulary word, ack the OLDEST series.
+    // Saves a Haiku call (~$0.0003) on what's otherwise a multi-turn
+    // negotiation. Scoped to "active series in scope" so a stray "done" in
+    // social chatter doesn't false-positive.
+    //
+    // Chat scope:
+    //   group  → reminder_queue.group_id matches message.groupId (full @g.us JID)
+    //   1:1    → reminder_queue.group_id matches phone+'@s.whatsapp.net'
+    // Both keys agree with how the executor wrote the anchor (Task 2.3).
+    if (NUDGE_ACK_REGEX.test(message.text || "")) {
+      const chatTarget = message.groupId.endsWith("@g.us")
+        ? message.groupId
+        : `${message.senderPhone}@s.whatsapp.net`;
+      const { data: activeSeries } = await supabase
+        .from("reminder_queue")
+        .select("id, message_text, nudge_config, created_at")
+        .eq("household_id", householdId)
+        .eq("series_status", "active")
+        .eq("group_id", chatTarget)
+        .order("created_at", { ascending: true })  // oldest = most likely the in-flight one
+        .limit(5);
+      if (activeSeries && activeSeries.length > 0) {
+        const target = activeSeries[0];
+        const cancelled = await ackNudgeSeries(
+          target.id, message.senderPhone, "regex_fast_path",
+        );
+        const targetName = target.nudge_config?.target_name || "";
+        const completion = target.nudge_config?.prompt_completion || "";
+        const ackReply = config.language === "he"
+          ? (targetName && completion
+              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              : `מעולה! סימנתי. עוצרת תזכורות ✓`)
+          : (targetName && completion
+              ? `Got it — marked ${targetName} ${completion} ✓`
+              : `Got it. Stopping reminders ✓`);
+        await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+          householdId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "nudge_acked_regex",
+        });
+        await logMessage(message, "nudge_acked_regex", householdId, null);
+        console.log(
+          `[Webhook] Nudge regex ack: series=${target.id} target=${targetName} ` +
+          `cancelled=${cancelled} from ${message.senderName}`
+        );
+        return new Response("OK", { status: 200 });
+      }
+      // Regex hit but no active series in scope → fall through to Haiku.
+      // Common case: "בוצע" / "done" said after the series already expired.
+    }
 
     const classification = await classifyIntent(
       textForClassifier,
@@ -9934,6 +10614,54 @@ Deno.serve(async (req: Request) => {
     );
 
     console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} addressed=${classification.addressed_to_bot} layer=${classification.living_vs_operating} contextReview=${classification.needs_conversation_review} from ${message.senderName}`);
+
+    // ─── Nudge-series ack via Haiku boolean (Phase 3 Task 3.3, 2026-04-26) ───
+    // When the regex fast-path didn't fire BUT Haiku saw active series in
+    // scope and judged the message as a completion ack, route to ack here.
+    // Same matching strategy as the regex path: ack the OLDEST active
+    // series in this chat. Skipped when haikuCtx didn't carry any active
+    // series (Haiku had no context to set the flag against, so any value
+    // is unreliable).
+    if (
+      classification.completes_pending_nudge === true &&
+      haikuCtx.activeNudgeSeries && haikuCtx.activeNudgeSeries.length > 0
+    ) {
+      const { data: ackTargets } = await supabase
+        .from("reminder_queue")
+        .select("id, nudge_config, created_at")
+        .eq("household_id", householdId)
+        .eq("series_status", "active")
+        .eq("group_id", _chatTargetForLookup)
+        .order("created_at", { ascending: true })
+        .limit(5);
+      if (ackTargets && ackTargets.length > 0) {
+        const target = ackTargets[0];
+        const cancelled = await ackNudgeSeries(
+          target.id, message.senderPhone, "haiku_completes_pending_nudge",
+        );
+        const targetName = (target.nudge_config as { target_name?: string } | undefined)?.target_name || "";
+        const completion = (target.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
+        const ackReply = config.language === "he"
+          ? (targetName && completion
+              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              : `מעולה! סימנתי. עוצרת תזכורות ✓`)
+          : (targetName && completion
+              ? `Got it — marked ${targetName} ${completion} ✓`
+              : `Got it. Stopping reminders ✓`);
+        await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+          householdId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "nudge_acked_haiku",
+        });
+        await logMessage(message, "nudge_acked_haiku", householdId, classification);
+        console.log(
+          `[Webhook] Nudge Haiku ack: series=${target.id} target=${targetName} ` +
+          `cancelled=${cancelled} from ${message.senderName} (intent=${classification.intent} conf=${classification.confidence.toFixed(2)})`
+        );
+        return new Response("OK", { status: 200 });
+      }
+    }
 
     // Layer 2 merge: if Haiku says addressed_to_bot and Layer 1 didn't catch it, upgrade directAddress
     if (classification.addressed_to_bot && !directAddress) {
@@ -9980,10 +10708,29 @@ Deno.serve(async (req: Request) => {
     // ambient_ambiguous is ALREADY falling through for all groups, so the override
     // would be a no-op. group_mode is still detected and stored for future
     // product/analytics use, but does not currently change routing.
-    if (!isExplicit && layer === "living") {
+    // 2026-04-27 (Netzer): completion intents (complete_task / complete_shopping /
+    // claim_task) at high confidence MUST escape the ambient_living silencer.
+    // Otherwise messages like "הוצאתי אותו" (אריק, family group, after a recurring
+    // dog-walk reminder fired) get silenced even though Haiku correctly classifies
+    // them as complete_task @ 0.92 — the architectural mistake was running the
+    // matrix gate before the intent gate. Threshold 0.85 keeps the AMOR/Tamar
+    // regression patched (silenced unaddressed living chatter) while not deafening
+    // Sheli to crisp ack signals on in-flight reminders.
+    const NUDGE_ACK_INTENTS = new Set(["complete_task", "complete_shopping", "claim_task"]);
+    const isHighConfCompletion =
+      NUDGE_ACK_INTENTS.has(classification.intent) &&
+      (classification.confidence ?? 0) >= 0.85;
+
+    if (!isExplicit && layer === "living" && !isHighConfCompletion) {
       console.log(`[Webhook] Matrix: ${matrixCell} → silent`);
       await logMessage(message, `suppressed_${matrixCell}`, householdId, classification);
       return new Response("OK", { status: 200 });
+    }
+    if (isHighConfCompletion && !isExplicit && layer === "living") {
+      console.log(
+        `[Webhook] Matrix: ${matrixCell} → ALLOWED through ` +
+        `(completion-ack escape: ${classification.intent} @ ${classification.confidence})`
+      );
     }
 
     if (isExplicit && layer === "living") {
@@ -10465,6 +11212,14 @@ Deno.serve(async (req: Request) => {
     // 10. Convert Haiku entities to ClassifiedAction format and execute
     const actions = haikuEntitiesToActions(classification);
 
+    // (Removed 2026-04-26 Phase 3 Task 3.1: stopNudgeStubsForToday interim
+    // helper. The proper nudge_series ack flow now lives in the regex
+    // fast-path above (BEFORE Haiku, scoped to active series_status='active'
+    // anchors in chat) + reaction handler (Task 3.2) + Haiku
+    // completes_pending_nudge boolean (Task 3.3). When ack fires, the series
+    // is flipped acked + unsent attempts soft-cancelled — no DELETE, no
+    // metadata.intended_nudge_config flag scan, no fuzzy token matching.)
+
     // H7 fix: if Haiku classified as actionable but couldn't extract entity IDs,
     // the actions array is empty. Don't execute + don't send a false "done!" reply.
     // Instead, escalate to Sonnet for better entity extraction, or ask for clarification.
@@ -10798,6 +11553,98 @@ Deno.serve(async (req: Request) => {
       const { data: matCount, error: matErr } = await supabase.rpc("materialize_recurring_reminders");
       if (matErr) console.warn("[RecurringReminder] Immediate materialize failed:", matErr.message);
       else console.log(`[RecurringReminder] Immediate materialize inserted ${matCount} child row(s)`);
+    }
+
+    // 13b''. NUDGE_SERIES inline rescue (Phase 3 final fix, 2026-04-27).
+    // Mirrors the recurring block above. The actionable path doesn't call
+    // rescueRemindersAndStrip — it has its own inline rescue chain. Without
+    // this block, NUDGE_SERIES emitted by Sonnet hit cleanReminderFromReply
+    // (line 11338) and got stripped before any DB insert.
+    //
+    // For each parsed block: insert the anchor (one-shot: series_status='active'
+    // sentinel; daily-recurring: recurrence + nudge_config sentinel). One-shot
+    // also inserts attempt #1 firing now. Daily-recurring triggers the nudge
+    // materialize cron inline so today's start time fires this evening
+    // rather than waiting for tomorrow's 22:00 UTC cron.
+    //
+    // Guardrail RAISE EXCEPTIONs from validate_nudge_config are mapped to the
+    // hardcoded SHARED_NUDGE_RULES Hebrew refusal templates by overriding the
+    // visible reply (same defense-in-depth as rescueRemindersAndStrip).
+    const nudgeBlocksInline = reply ? extractNudgeSeriesFromReply(reply) : [];
+    let nudgeRefuseReply: string | null = null;
+    for (const n of nudgeBlocksInline) {
+      const isDaily = !!(n.days && n.days.length > 0);
+      const baseRow: Record<string, unknown> = {
+        household_id: householdId,
+        group_id: message.groupId,
+        message_text: `${n.target_name} — ${n.completion_text}`,
+        send_at: new Date().toISOString(),
+        sent: true,
+        sent_at: new Date().toISOString(),
+        reminder_type: "user",
+        created_by_phone: message.senderPhone,
+        created_by_name: message.senderName,
+        delivery_mode: n.channel,
+        recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+        nudge_config: {
+          interval_min: n.interval_min,
+          max_tries: n.max_tries ?? 6,
+          deadline_time_il: n.deadline_time_il ?? null,
+          channel: n.channel,
+          target_phone: n.target_phone ?? null,
+          target_name: n.target_name,
+          prompt_completion: n.completion_text,
+        },
+        metadata: { source: "actionable_path_nudge_series", recurring_parent: isDaily },
+      };
+      if (isDaily) {
+        baseRow.recurrence = { days: n.days, time: (n as { start_time_il?: string }).start_time_il || "09:00" };
+      } else {
+        baseRow.series_status = "active";
+      }
+      const { data: anchor, error: anchorErr } = await supabase
+        .from("reminder_queue").insert(baseRow).select("id").single();
+      if (anchorErr) {
+        const errMsg = anchorErr.message || "";
+        if (errMsg.includes("nudge_interval_below_floor")) {
+          if (!nudgeRefuseReply) nudgeRefuseReply = "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?";
+        } else if (errMsg.includes("nudge_max_tries_out_of_range")) {
+          if (!nudgeRefuseReply) nudgeRefuseReply = "מקסימום 8 תזכורות בסדרה. אחרי זה אם אף אחד לא הגיב, אני שולחת לך הודעה פרטית.";
+        } else if (errMsg.includes("too_many_active_series")) {
+          if (!nudgeRefuseReply) nudgeRefuseReply = "כבר יש 3 סדרות פעילות בבית. תרצי לבטל אחת קודם?";
+        } else {
+          console.error("[NudgeSeries:actionable] Insert error:", anchorErr);
+        }
+        continue;
+      }
+      const anchorId = anchor?.id;
+      if (!isDaily && anchorId) {
+        const { error: attemptErr } = await supabase.from("reminder_queue").insert({
+          household_id: householdId,
+          group_id: message.groupId,
+          message_text: `${n.target_name} — ${n.completion_text}`,
+          send_at: new Date().toISOString(),
+          sent: false,
+          reminder_type: "user",
+          created_by_phone: message.senderPhone,
+          created_by_name: message.senderName,
+          delivery_mode: n.channel,
+          recipient_phones: n.channel === "dm" && n.target_phone ? [n.target_phone] : null,
+          nudge_series_id: anchorId,
+          nudge_attempt: 1,
+          metadata: { nudge_attempt_of_series: anchorId, attempt_num: 1 },
+        });
+        if (attemptErr) console.error("[NudgeSeries:actionable] Attempt #1 insert error:", attemptErr);
+        else console.log(`[NudgeSeries:actionable] One-shot anchor + attempt #1 created (${n.channel}): target=${n.target_name} task="${n.completion_text}" anchor=${anchorId}`);
+      } else {
+        console.log(`[NudgeSeries:actionable] Daily-recurring parent created (${n.channel}): target=${n.target_name} days=${JSON.stringify(n.days)} parent=${anchorId}`);
+        const { data: spawned, error: spawnErr } = await supabase.rpc("materialize_nudge_series_daily");
+        if (spawnErr) console.warn("[NudgeSeries:actionable] Immediate materialize failed:", spawnErr.message);
+        else console.log(`[NudgeSeries:actionable] Immediate materialize spawned ${spawned} series anchor(s)`);
+      }
+    }
+    if (nudgeRefuseReply && nudgeBlocksInline.length > 0) {
+      reply = nudgeRefuseReply;
     }
 
     // If enrichment (one-shot OR recurring) produced a refuse but no rows got inserted,
