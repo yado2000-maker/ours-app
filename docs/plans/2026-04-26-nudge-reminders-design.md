@@ -312,3 +312,25 @@ Ahead of Phase 1, the Netzer family DB was repaired to fire correctly tomorrow m
   - Each carries `metadata.intended_nudge_config` with the target Phase 1 shape (`interval_min:30, max_tries:6, deadline_time_il:'22:30', channel:'group', target:'עופרי', prompt_completion:'לקחת את הכדור'`) so the Phase 1 backfill script can read intent directly.
 
 **Materialized:** 78 children for the next 7 days via `materialize_recurring_reminders()`. Tonight's 6 pill nudges (20:00–22:30) and tomorrow's 6 אריק dog nudges (14:00–16:30) are queued in family group.
+
+## Phase 1 Backfill Log (2026-04-27, 20:10 IL)
+
+Phase 1 schema + helpers shipped (Tasks 1.1–1.5). Task 1.6 collapsed Netzer's 18 calendar-style interim parents into the 3 logical nudge_series the design specifies. Live state at backfill time was 18 parents (12 dog `netzer_dog_rotation_cleanup_2026_04_26` + 6 pill `netzer_pill_nudge_cleanup_2026_04_26`) with 90 children (13 already fired, 77 unsent — 5 tonight, 72 tomorrow+).
+
+**Materializer fix (Task 1.6a):** `materialize_recurring_reminders` was patched to add `AND nudge_config IS NULL` to its parent SELECT. Without this, both the calendar materializer and the new nudge materializer would walk the same parents and double-fire every matching day.
+
+**Cleanup (Task 1.6b, single transaction):**
+
+1. **Detached** 5 tonight pill children (20:30 / 21:00 / 21:30 / 22:00 / 22:30 IL) by setting `recurrence_parent_id=NULL` + `metadata.detached_during_nudge_migration=true` + `metadata.former_parent_id`. They keep firing tonight as plain reminders. Yaron will tell Sheli when עופרי acks the pill so we can soft-cancel the unsent ones.
+2. **Deleted** 70 unsent tomorrow-plus children of all 18 interim parents (30 dog + 40 pill).
+3. **Deleted** 15 redundant parents — 10 dog (all non-14:00 slots × 2 targets) + 5 pill (all non-20:00 slots).
+4. **Updated** the 3 kept parents with proper `nudge_config`:
+    - עופרי dog `1fa96db7` — `days:[0,2,4,6]`, `time:14:00`, deadline `16:30`, interval 30, max 6, target עופרי `972526210880`, completion `להוציא את ליאו`
+    - אריק dog `2953ec9f` — `days:[1,3,5]`, `time:14:00`, deadline `16:30`, interval 30, max 6, target אריק `972526255413`, completion `להוציא את ליאו`
+    - עופרי pill `e761a0c4` — `days:[0..6]`, `time:20:00`, deadline `22:30`, interval 30, max 6, target עופרי `972526210880`, completion `לקחת את הכדור`
+
+**Materialize NOT called today.** It's already 20:07 IL. Today's אריק dog 14:00 series start would have fired in-the-past at 19:45 IL with the deadline already crossed. Today's 20:00 pill series start would have raced the existing 20:00 pill child (which already fired). Cleaner to wait for tonight's 22:00 UTC nudge cron to spawn tomorrow's series anchors fresh. Today's nudge sequence completes via the 5 detached pill children → manual ack → soft cancel.
+
+**Preserved for audit:** 13 already-sent children of the 18 parents are kept (no DELETE on `sent=true`).
+
+**Out of scope, still firing:** 6 lunch-walk children (13:00 IL, separate `manual_backfill_einat_2026_04_20` parents `28984da4` + `23c96c80`) keep firing as plain calendar reminders for the next 6 matching days. The day-set drift question (עופרי `[0,2,4,6]` 13:00 vs. עופרי `[0,2,4,6]` 14:00) noted in Open Questions remains open — both align after the 2026-04-26 fix.
