@@ -2036,6 +2036,93 @@ class TestNudgeReminders(unittest.TestCase):
         self.assertEqual(ent.get("nudge_deadline_time_il"), "22:00",
                          f"expected deadline_time_il=22:00, got {ent.get('nudge_deadline_time_il')}; full={ent}")
 
+    # End-to-end DB write — verifies the executor + SHARED_NUDGE_RULES + drain
+    # extension all work together. Sonnet must (a) emit a NUDGE_SERIES block,
+    # (b) the rescue must INSERT the anchor + attempt #1 into reminder_queue.
+    #
+    # Trigger phrasing matters: "עד 23:30" (wall-clock) flips the discriminator
+    # to add_recurring_reminder per SHARED_NUDGE_RULES. We use "נדנדי" which is
+    # an unambiguous nudge verb regardless of the "עד" suffix shape.
+    def test_04_one_shot_creates_anchor_and_attempt(self):
+        msg_id = _nudge_send(
+            "שלי נדנדי לעופרי כל 30 דק עד שיוציא את הזבל"
+        )
+        # 5s typical Sonnet+rescue latency (matches _dm_send timing).
+        time.sleep(8)
+        rows = sb_get("reminder_queue", {
+            "household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}",
+            "select": "id,nudge_config,series_status,nudge_series_id,nudge_attempt,sent,message_text,send_at,recurrence",
+            "order": "created_at.desc",
+            "limit": "10",
+        })
+        anchors = [r for r in rows if r.get("nudge_config") and r.get("series_status") == "active"]
+        attempts = [r for r in rows if r.get("nudge_series_id") and r.get("nudge_attempt") == 1]
+        # Surface what DID get classified if no nudge row landed — helps
+        # diagnose Sonnet emit issues (e.g. recurring_reminder fallback).
+        if len(anchors) == 0:
+            classified = sb_get("whatsapp_messages", {
+                "whatsapp_message_id": f"eq.{msg_id}",
+                "select": "classification,classification_data",
+                "limit": "5",
+            })
+            self.fail(
+                f"expected 1+ active nudge anchor; reminder_queue rows={rows}; "
+                f"whatsapp_messages classification={classified}"
+            )
+        self.assertGreaterEqual(len(attempts), 1,
+                                f"expected 1+ attempt #1 row, got rows={rows}")
+        cfg = anchors[0]["nudge_config"]
+        self.assertEqual(cfg.get("interval_min"), 30,
+                         f"expected interval_min=30, got {cfg}")
+        self.assertEqual(cfg.get("target_name"), "עופרי",
+                         f"expected target_name=עופרי, got {cfg}")
+
+    # Sub-floor refusal — interval_min=5 must be rejected with the exact
+    # SHARED_NUDGE_RULES template, AND no row may land in reminder_queue.
+    # Defense-in-depth: SHARED_NUDGE_RULES tells Sonnet to emit only the
+    # refusal text (no NUDGE_SERIES block); if Sonnet ignores that, the SQL
+    # validate_nudge_config trigger raises nudge_interval_below_floor and
+    # the executor catches → still surfaces the same refusal text. So this
+    # test verifies BOTH the prompt path (template in reply) AND the DB
+    # invariant (no nudge_config row).
+    def test_05_sub_floor_interval_refused_no_db_row(self):
+        msg_id = _nudge_send("שלי תזכירי לעופרי כל 5 דקות לבדוק תנור")
+        # Bot reply should land within ~10s
+        bot_reply = ""
+        deadline = time.time() + 15
+        after_iso = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+        while time.time() < deadline:
+            replies = sb_get("whatsapp_messages", {
+                "group_id": f"eq.{NUDGE_TEST_GROUP_CHAT_ID}",
+                "sender_phone": f"eq.{BOT_PHONE}",
+                "created_at": f"gt.{after_iso}",
+                "select": "message_text,created_at",
+                "order": "created_at.desc",
+                "limit": "1",
+            })
+            if replies:
+                bot_reply = replies[0].get("message_text") or ""
+                break
+            time.sleep(2)
+        # Either the prompt-side or the DB-side defense should trigger the
+        # canonical refusal text. Accept either the full sentence or its
+        # diagnostic prefix ("המינימום הוא 15 דקות").
+        self.assertIn(
+            "המינימום הוא 15 דקות", bot_reply,
+            f"expected sub-floor refusal template; got reply: {bot_reply!r}"
+        )
+        # No nudge row should have been created.
+        rows = sb_get("reminder_queue", {
+            "household_id": f"eq.{NUDGE_TEST_HOUSEHOLD_ID}",
+            "select": "id,nudge_config,message_text",
+            "limit": "10",
+        })
+        nudge_rows = [r for r in rows if r.get("nudge_config")]
+        self.assertEqual(
+            len(nudge_rows), 0,
+            f"sub-floor request must NOT create a nudge_config row; got: {nudge_rows}"
+        )
+
 
 @unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
 class TestReminderDedup(unittest.TestCase):

@@ -2257,6 +2257,24 @@ For "כל 15 לחודש" / "כל 15 בחודש" / "בכל 1 לחודש" / "month
 Example: "תזכירי לי כל 15 לחודש ב-16:00 לבדוק ארנונה חשמל ומים" → reply "אזכיר כל 15 לחודש ב-16:00 ✓" + <!--RECURRING_REMINDER:{"reminder_text":"לבדוק ארנונה, חשמל ומים","type":"monthly","day_of_month":15,"time":"16:00"}-->
 Example: "פעם בחודש תזכירי לי לבדוק סוללת הרכב" → reply "איזה יום בחודש? (למשל ה-1 או ה-15)" — don't guess.
 
+NUDGE SERIES — STATE-MACHINE REMINDERS (2026-04-26 — first-class support):
+Use ONLY when classification.intent === "add_nudge_reminder". A nudge fires REPEATEDLY every N min UNTIL someone acks (reaction or completion phrase) — distinct from add_reminder (one-shot calendar) and add_recurring_reminder (daily/monthly calendar). Discriminator: "כל X דקות עד ש[completion event]" / "נדנדי" / "תמשיכי להזכיר עד..." / "keep reminding until...". The "עד ש[completion]" suffix vs. "עד HH:MM" wall-clock is the key — wall-clock = recurring, completion-event = nudge.
+- Append this EXACT format at the END of your reply (hidden from user). One-shot:
+  <!--NUDGE_SERIES:{"target_name":"<name>","completion_text":"<task>","interval_min":<int>,"channel":"group"|"dm","target_phone":"<phone>"}-->
+  Daily-recurring (add days[]):
+  <!--NUDGE_SERIES:{"target_name":"<name>","completion_text":"<task>","interval_min":<int>,"channel":"group"|"dm","target_phone":"<phone>","days":[0,2,4,6],"start_time_il":"HH:MM"}-->
+  Optional fields: deadline_time_il ("HH:MM" or omit), max_tries (1..8 or omit for default 6).
+- Your visible reply must list interval / deadline / channel / target with concrete numbers — NEVER vague "אגדיר". State the ack signal: "✅ או 'בוצע'".
+- Required block fields: target_name, completion_text, interval_min, channel. target_phone resolved from PHONE MAPPINGS context.
+- Channel-clarification one-turn rule: if the message did not explicitly say "בקבוצה" / "בפרטי" AND the chat is a group, ASK ONCE in the visible reply ("בקבוצה (כולם רואים) או בפרטי ל{target}?") and emit NO block. Wait for the user's confirm turn before emitting.
+- Sub-floor refusal (interval_min<15 / max_tries>8 / 4th active series): reply with the EXACT hardcoded template from SHARED_NUDGE_RULES, emit NO block, wait for user confirm. The DB-side trigger also rejects these as belt-and-suspenders.
+- Examples (assume PHONE MAPPINGS contains "עופרי → 972526210880"):
+  "תזכירי לעופרי כל חצי שעה עד שתוציא את ליאו" → reply "יאללה — אנדנד לעופרי בקבוצה כל 30 דק עד שיוציא את ליאו, מקסימום 6 פעמים. שולחת ✅ או 'בוצע' ועוצרת. 🐕" + <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את ליאו","interval_min":30,"max_tries":6,"channel":"group","target_phone":"972526210880"}-->
+  "נדנדי לעופרי כל 30 דק עד שיוציא את הזבל" → reply "אוקיי — אנדנד לעופרי בקבוצה כל 30 דק עד שיוציא את הזבל, מקסימום 6 פעמים. שלחו ✅ או 'בוצע' ואני עוצרת 🗑️" + <!--NUDGE_SERIES:{"target_name":"עופרי","completion_text":"להוציא את הזבל","interval_min":30,"max_tries":6,"channel":"group","target_phone":"972526210880"}-->
+  "נדנדי לי בפרטי כל 20 דק עד שאקח את הכדור" (sender = ניב 972500000100) → reply "אוקיי — אנדנד לך בפרטי כל 20 דק עד שתיקח את הכדור, מקסימום 6 פעמים ✅" + <!--NUDGE_SERIES:{"target_name":"ניב","completion_text":"לקחת את הכדור","interval_min":20,"max_tries":6,"channel":"dm","target_phone":"972500000100"}-->
+  "תזכירי לעופרי כל 5 דקות לבדוק תנור" → reply "המינימום הוא 15 דקות בין תזכורות — וואטסאפ מגביל אותי כדי לא להיתקע. לעשות כל 15?" (NO block — wait for confirm).
+  "תזכירי לעופרי כל חצי שעה לבדוק תנור" (group chat, no privacy word) → reply "בקבוצה (כולם רואים) או בפרטי לעופרי?" (NO block — ASK first).
+
 PRIVATE DELIVERY + ROTATION SHORTCUT (2026-04-22):
 - Honor entities.delivery_mode exactly like one-shot reminders (see PRIVATE DELIVERY block above).
 - When delivery_mode is "dm" or "both", add recipient_phones to each RECURRING_REMINDER block:
