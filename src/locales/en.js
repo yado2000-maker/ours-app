@@ -6,7 +6,7 @@ const en = {
   langEn: "English", langHe: "\u05E2\u05D1\u05E8\u05D9\u05EA",
   setupSub: "Set up in 30 seconds.",
   hhLabel: "What do you call home?",
-  hhPlaceholder: "The Cohen Home",
+  hhPlaceholder: "The Smith Family, Our Home, anything you like",
   whoLabel: "Who\u2019s in the household?",
   whoSub: "Add everyone\u2019s names \u2014 each person picks theirs when they open the app.",
   addPlaceholder: "Add a name\u2026",

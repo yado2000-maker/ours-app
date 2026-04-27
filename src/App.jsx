@@ -889,6 +889,8 @@ function SheliApp() {
                   fontFamily: pickFont,
                   textAlign: pickDir === "rtl" ? "right" : "left",
                   background: "var(--white, #fff)",
+                  color: "var(--dark, #1E2D2D)",
+                  outline: "none",
                 }}
               />
               <button
