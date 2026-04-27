@@ -115,6 +115,13 @@ interface ClassificationOutput {
   // ambiguous = could be either without more context — in ambient mode, silent is safer.
   living_vs_operating?: "operating" | "ambiguous" | "living";
   needs_conversation_review?: boolean; // true when context makes intent ambiguous
+  // Nudge ack flag (Phase 3 Task 3.3, 2026-04-26). Only meaningful when
+  // ClassifierContext.activeNudgeSeries is non-empty — Haiku is told about
+  // active series and asked whether the current message acknowledges
+  // completion of one of them. Catches ack phrasings the regex fast-path
+  // misses (e.g. "יש, התנור כבוי", "טוב, לקחתי כבר", "I just took it").
+  // Routed to ackNudgeSeries() the same way as the regex path.
+  completes_pending_nudge?: boolean;
   entities: {
     person?: string;
     items?: Array<{ name: string; qty?: string; category?: string }>;
@@ -223,6 +230,12 @@ interface ClassifierContext {
   // Used by Haiku to pick living_vs_operating. Computed from conversationHistory
   // window, no additional DB call.
   threadState?: string;
+  // Nudge series in this chat that are still 'active' (Phase 3 Task 3.3,
+  // 2026-04-26). When non-empty, Haiku gets a context section describing
+  // the in-flight task(s) and is asked to set completes_pending_nudge=true
+  // on messages that read as completion acks. Empty/undefined when no
+  // series is in scope — the field is optional, ignored at prompt-build time.
+  activeNudgeSeries?: Array<{ target_name: string; prompt_completion: string }>;
   // (Removed: demoMode — no more Haiku in 1:1, Sonnet handles all)
 }
 
@@ -944,7 +957,17 @@ When the user lists multiple items in one message, recognize obvious typos and t
 - Common Hebrew typo patterns: terminal letter swaps (ן↔ץ↔ם↔ף↔ך), repeated letters, voice-transcription artifacts, missing/extra final ה.
 - When in doubt (the items might be intentionally different), keep them separate. Only merge when it's CLEARLY a typo of an item already mentioned in the same message.
 
-${ctx.threadState ? `
+${ctx.activeNudgeSeries && ctx.activeNudgeSeries.length > 0 ? `
+ACTIVE NUDGE SERIES IN THIS CHAT (Phase 3 Task 3.3, 2026-04-26):
+${ctx.activeNudgeSeries.map((s) => `- target: ${s.target_name}, task: "${s.prompt_completion}"`).join("\n")}
+
+If the CURRENT message indicates one of these tasks is now done (even indirectly, even with typos, even when not explicitly addressing Sheli), set "completes_pending_nudge": true in the output. This signal stops the in-flight nudge series — it's higher priority than re-classifying the message into another intent.
+Examples that COUNT as completion ack (set true):
+  "הוצאתי" / "הוצאתיו" (took out) / "פיניתי" (cleared) / "לקחתי" (took) / "טיפלתי בזה" (handled it) / "ok done" / "did it just now" / "יש, התנור כבוי" (yes, the oven is off) / "טוב, לקחתי כבר" (ok I already took it)
+Examples that do NOT count (leave false):
+  "מתי?" (when?) / "אני בדרך" (on my way) / "בעוד דקה" (in a minute) / "נסיים את זה אחר כך" (we'll finish later) / asking a clarifying question / negative reaction
+When in doubt, prefer false — false negatives cost one extra nudge cycle; false positives prematurely silence an in-flight series and risk a missed deadline.
+` : ""}${ctx.threadState ? `
 THREAD STATE (Phase 5 of Sheli-in-Groups, 2026-04-22):
 ${ctx.threadState}
 Use this signal to pick living_vs_operating: rapid-reactive threads + short gap → living weighting; long gap or sparse thread → ambient/planning weighting.
@@ -10271,6 +10294,32 @@ Deno.serve(async (req: Request) => {
         `Living-layer density (last 5 msgs): ${density} (${reactiveCount}/${last5.length} short/emoji)`;
     }
 
+    // ─── Active nudge series context for Haiku (Phase 3 Task 3.3, 2026-04-26) ───
+    // Fetch active series in this chat so the Haiku classifier can flag
+    // ack messages via completes_pending_nudge=true (catches phrasings the
+    // regex fast-path below misses). One DB call, runs only when there's
+    // some chance it's relevant — short-circuits at Phase 4 feature-flag
+    // time when the household has no nudges enabled.
+    const _chatTargetForLookup = message.groupId.endsWith("@g.us")
+      ? message.groupId
+      : `${message.senderPhone}@s.whatsapp.net`;
+    const { data: _activeNudges } = await supabase
+      .from("reminder_queue")
+      .select("nudge_config")
+      .eq("household_id", householdId)
+      .eq("series_status", "active")
+      .eq("group_id", _chatTargetForLookup)
+      .limit(5);
+    if (_activeNudges && _activeNudges.length > 0) {
+      haikuCtx.activeNudgeSeries = _activeNudges
+        .map((r: { nudge_config?: { target_name?: string; prompt_completion?: string } }) => ({
+          target_name: r.nudge_config?.target_name || "",
+          prompt_completion: r.nudge_config?.prompt_completion || "",
+        }))
+        .filter((s: { target_name: string; prompt_completion: string }) =>
+          s.target_name.length > 0 && s.prompt_completion.length > 0);
+    }
+
     // Prepend quoted message context so classifier understands reply references
     const textForClassifier = message.quotedText
       ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
@@ -10337,6 +10386,54 @@ Deno.serve(async (req: Request) => {
     );
 
     console.log(`[Webhook] Haiku: intent=${classification.intent} conf=${classification.confidence.toFixed(2)} addressed=${classification.addressed_to_bot} layer=${classification.living_vs_operating} contextReview=${classification.needs_conversation_review} from ${message.senderName}`);
+
+    // ─── Nudge-series ack via Haiku boolean (Phase 3 Task 3.3, 2026-04-26) ───
+    // When the regex fast-path didn't fire BUT Haiku saw active series in
+    // scope and judged the message as a completion ack, route to ack here.
+    // Same matching strategy as the regex path: ack the OLDEST active
+    // series in this chat. Skipped when haikuCtx didn't carry any active
+    // series (Haiku had no context to set the flag against, so any value
+    // is unreliable).
+    if (
+      classification.completes_pending_nudge === true &&
+      haikuCtx.activeNudgeSeries && haikuCtx.activeNudgeSeries.length > 0
+    ) {
+      const { data: ackTargets } = await supabase
+        .from("reminder_queue")
+        .select("id, nudge_config, created_at")
+        .eq("household_id", householdId)
+        .eq("series_status", "active")
+        .eq("group_id", _chatTargetForLookup)
+        .order("created_at", { ascending: true })
+        .limit(5);
+      if (ackTargets && ackTargets.length > 0) {
+        const target = ackTargets[0];
+        const cancelled = await ackNudgeSeries(
+          target.id, message.senderPhone, "haiku_completes_pending_nudge",
+        );
+        const targetName = (target.nudge_config as { target_name?: string } | undefined)?.target_name || "";
+        const completion = (target.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
+        const ackReply = config.language === "he"
+          ? (targetName && completion
+              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              : `מעולה! סימנתי. עוצרת תזכורות ✓`)
+          : (targetName && completion
+              ? `Got it — marked ${targetName} ${completion} ✓`
+              : `Got it. Stopping reminders ✓`);
+        await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
+          householdId,
+          groupId: message.groupId,
+          inReplyTo: message.messageId,
+          replyType: "nudge_acked_haiku",
+        });
+        await logMessage(message, "nudge_acked_haiku", householdId, classification);
+        console.log(
+          `[Webhook] Nudge Haiku ack: series=${target.id} target=${targetName} ` +
+          `cancelled=${cancelled} from ${message.senderName} (intent=${classification.intent} conf=${classification.confidence.toFixed(2)})`
+        );
+        return new Response("OK", { status: 200 });
+      }
+    }
 
     // Layer 2 merge: if Haiku says addressed_to_bot and Layer 1 didn't catch it, upgrade directAddress
     if (classification.addressed_to_bot && !directAddress) {
