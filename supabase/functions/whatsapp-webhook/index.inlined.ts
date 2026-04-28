@@ -1430,14 +1430,6 @@ If the user asks to clear a list ("תמחקי את הרשימה" / "נקי הכ�
 
 Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".
 
-RENAME HONESTY — ABSOLUTE RULE (חביב 2026-04-28):
-NEVER claim "תיקנתי את השם" / "שיניתי את התג" / "renamed" / "fixed the name" / "השם תוקן" without emitting a real rename_tag action AND seeing its result in the prompt. The 2026-04-28 incident: voice transcription created "אלקטרוסלנואיד" instead of "אלקטרוסליל"; user corrected; Sheli replied "אה סליחה! תיקנתי את השם לאלקטרוסליל 🔧" — but the DB still had three different spellings on three rows. Pure fabrication. The correct flow when the user says "the name is X not Y" / "השם הוא X לא Y" / "תקני את התג מ-Y ל-X":
-- Emit a {"type":"rename_tag","table":"both","old_tag":"Y","new_tag":"X"} action.
-- Wait for the result in the next prompt turn (count of rows updated).
-- THEN say "שיניתי את השם של ${count} פריטים מ-Y ל-X ✓" using the REAL count.
-- If the action returns count=0, say honestly "לא מצאתי פריטים עם התג Y — אולי הוא נכתב אחרת?".
-Do NOT bundle the rename inside the same turn's reply text as if it already executed — that is the lie pattern.
-
 CAPABILITIES HONESTY — MANDATORY (Bait family 2026-04-23):
 You coordinate the household INSIDE THIS CHAT only. You do NOT have tools to:
 - Send emails. NEVER say "אשלח מייל" / "אשלח לך מייל" / "I'll email you" / "I'll send an email" / "אמייל ל-X". You have zero email capability. If a user asks, say honestly in Hebrew: "אני לא יכולה לשלוח מיילים בעצמי 🙏 אבל אני יכולה להזכיר לך לשלוח, או לרשום את הפרטים שלא תשכחי".
@@ -1916,10 +1908,10 @@ function buildReplyPrompt(
   const genderMap = ctx.memberGenders || {};
   const senderGender = genderMap[sender] || null;
   const genderNote = senderGender === "male"
-    ? `The sender ${sender} is MALE — address him with masculine forms: אתה, רוצה, תנסה, שטפת, עשית, תגיד, תוסיף, תזכור.`
+    ? `The sender ${sender} is MALE — address him with masculine forms: אתה, רוצה, תנסה, שטפת, עשית.`
     : senderGender === "female"
-    ? `The sender ${sender} is FEMALE — address her with feminine forms: את, רוצה, תנסי, שטפת, עשית, תגידי, תוסיפי, תזכרי.`
-    : `The sender ${sender}'s gender is UNKNOWN. STRICT RULE: use ONLY plural (אתם / רוצים / נסו / שטפתם / עשיתם / תגידו / תוסיפו / תזכרו) OR infinitive ("אפשר להוסיף", "להגיד לי", "לנסות") OR impersonal ("צריך ש...", "אפשר ש...") so the reply is gender-neutral. NEVER use feminine singular (תגידי / תוסיפי / תזכרי / את / יכולה / רוצה / צריכה / יודעת) — that wrongly assumes the sender is a woman, which is the #1 way Sheli gets a man's gender wrong (Or Adar 2026-04-28: "פשוט תגידי" was sent to a male user). NEVER use masculine singular (תגיד / תוסיף / תזכור / אתה / יכול / צריך) either — that wrongly assumes male. PLURAL or INFINITIVE only.`;
+    ? `The sender ${sender} is FEMALE — address her with feminine forms: את, רוצה, תנסי, שטפת, עשית.`
+    : `The sender ${sender}'s gender is unknown — use plural: אתם, רוצים, נסו, שטפתם, עשיתם.`;
 
   const langInstructions = isHe
     ? `ALWAYS respond in Hebrew. You are Sheli (שלי) — the organized older sister.
@@ -2082,14 +2074,10 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
     // pre-filter so Sheli only sees the matching subset. Each row's `tags` is
     // a TEXT[] of lowercased tags (or undefined for old rows). Match is exact
     // membership — no partial / synonym fuzzing here.
-    // Whitespace-tolerant match: "אלקטרוסליל" matches "אלקטרו סליל". Same
-    // queryTag-side normalization is applied below so user-typed spelling
-    // drift between query and stored rows doesn't drop matches.
-    const queryTagKey = queryTag ? tagMatchKey(queryTag) : "";
     const matchesTag = (rowTags: unknown): boolean => {
       if (!queryTag) return true;
       if (!Array.isArray(rowTags)) return false;
-      return rowTags.some((t) => tagMatchKey(t) === queryTagKey);
+      return rowTags.some((t) => String(t || "").trim().toLowerCase() === queryTag);
     };
     const openTasks = ctx.currentTasks
       .filter((t) => !t.done)
@@ -2243,14 +2231,6 @@ REMINDERS: When intent is add_reminder:
 - THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
 - CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
 - DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed.
-- AM/PM DISAMBIGUATION (when hour is 1-12 and the user did NOT say "בבוקר"/"בערב"/"בלילה"/"בצהריים"):
-  - Prefer the NEAREST FUTURE OCCURRENCE relative to NOW IL.
-  - If today's AM (hh:mm) is still in the future → use today AM. Example: at 07:49 IL, "בשעה 8:00" → today 08:00.
-  - If today's AM has already passed → use today PM (hh+12). Example: at 09:30 IL, "ב-8" → today 20:00. At 14:00 IL, "ב-5" → today 17:00.
-  - If today's AM AND today's PM have both passed → use tomorrow AM. Example: at 22:30 IL, "ב-8" → tomorrow 08:00.
-  - When you pick PM via this rule, your visible reply MUST include the explicit 24h time so the user can spot a wrong guess: "אזכיר היום ב-20:00 (8 בערב) ✓" — NOT just "אזכיר ב-8".
-  - The visible day-word ("היום"/"מחר") and the metadata send_at MUST match exactly per REPLY/METADATA DAY CONSISTENCY rule. If you can't make them match in one pass, ASK instead — don't guess.
-  - WHEN GENUINELY UNSURE (the user clearly meant a specific time but the AM/PM is genuinely ambiguous): ASK "8 בבוקר או 8 בערב היום? 🤔" with NO REMINDER block. One extra question beats a wrong row.
 - If no time specified at all, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
 - If time IS specified, append this EXACT format at the END of your reply (hidden from user):
   <!--REMINDER:{"reminder_text":"what to remind","send_at":"2026-04-08T16:00:00+03:00"}-->
@@ -2366,20 +2346,6 @@ Examples:
   "להעביר את כל מה שב-shopping לרשימת אמזון" → reply "העברתי את הפריטים מ-shopping לאמזון ✓" + <!--RETAG:{"table":"shopping_items","filter":{"where_tag":"shopping"},"add_tags":["אמזון"],"remove_tags":["shopping"]}-->
   "תורידי את הבית מרקחת מהאספירין" → reply "הורדתי את הבית מרקחת מהאספירין ✓" + <!--RETAG:{"table":"shopping_items","old_name":"אספירין","remove_tags":["בית מרקחת"]}-->
 
-RENAME-TAG OPERATIONS (חביב 2026-04-28) — when the user wants to RENAME an entire tag/topic across all rows that carry it (NOT add/remove on a single row), emit a RETAG block with the rename shape:
-- <!--RETAG:{"type":"rename_tag","table":"both","old_tag":"אלקטרוסלנואיד","new_tag":"אלקטרוסליל"}-->
-The server matches old_tag whitespace- and case-insensitively, so "אלקטרו סליל" (with space) matches "אלקטרוסליל" automatically. Use rename_tag when:
-- User says "השם הוא X לא Y" / "תקני את השם של התג מ-Y ל-X" / "rename the tag from Y to X" / "תשני את שם הרשימה מ-Y ל-X".
-- Voice transcription introduced a sound-alike tag (e.g. "אלקטרוסלנואיד" for "אלקטרוסליל") and the user is correcting it.
-- The user notices spelling drift between rows ("מברשת היה אלקטרו סליל ומנגנון אלקטרוסליל — תאחדי").
-DO NOT use rename_tag for single-row tag changes — those still go through old_name/old_text + add_tags/remove_tags. Rename is for CROSS-ROW renames only.
-Reply pattern: "עדכנתי, התג עכשיו {new_tag} ✓" (use the user's spelling). If you're uncertain whether the user wants rename-across-rows vs add-tag-on-this-row, ASK. Do not say "תיקנתי" without emitting the action — see RENAME HONESTY rule.
-
-SHORT-LIST FOLLOW-UP (חביב 2026-04-28) — when answering "מה ב-<tag>?" / "what's in <tag>?":
-- Use the TAG INDEX block in the prompt context as authoritative. Match user's tag against bucket names whitespace- and case-insensitively.
-- If the matching bucket has 1-2 items but the (untagged) bucket has many, the user's mental model probably includes some untagged items. Offer to add: "ב-<tag> יש N פריטים: [list]. אולי כדאי להוסיף עוד מתוך הרשימה הכללית? אגיד לך אילו ותחליטי".
-- If the bucket is empty AND no nearby spelling exists, say so honestly: "אין כלום ברשימת <tag> כרגע" — don't fabricate items, don't claim a rename happened.
-
 ${buildDayAnchor()}
 
 ${ctx.familyMemories ? `
@@ -2449,6 +2415,36 @@ async function generateReply(
   } catch (err) {
     console.error("[ReplyGenerator] Fetch error:", err);
     return { reply: "", model: SONNET_MODEL };
+  }
+}
+
+// ─── Pure Emoji Reply Helper ───
+
+async function generateEmojiReply(emoji: string, sender: string): Promise<string | null> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 32,
+        system: `You are Sheli (שלי), a warm Israeli WhatsApp assistant. ${sender} just sent an emoji reaction in the group. Reply with 1-3 matching emoji. No text unless it genuinely adds warmth (max 3 words). Examples: ❤️→❤️😊 | 💪→💪🔥 | 😂→😂 | 👍→👍✨ | 🙏→💕`,
+        messages: [{ role: "user", content: emoji }],
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.content?.[0]?.text?.trim() || null;
+  } catch {
+    return null;
   }
 }
 
@@ -2731,27 +2727,14 @@ function extractMissingPhonesFromReply(reply: string): Array<{
 // executeBulkTagUpdate. Bulk vs single is determined by the presence of
 // `filter` — bulk shape has `filter.where_tag` or `filter.ids`, single
 // shape has `old_name` (shopping) or `old_text` (task).
-function extractRetagFromReply(reply: string): Array<TagUpdateAction | BulkTagUpdateAction | RenameTagAction> {
-  const out: Array<TagUpdateAction | BulkTagUpdateAction | RenameTagAction> = [];
+function extractRetagFromReply(reply: string): Array<TagUpdateAction | BulkTagUpdateAction> {
+  const out: Array<TagUpdateAction | BulkTagUpdateAction> = [];
   // The block body can contain nested arrays/objects; use [\s\S]*? non-greedy
   // up to "-->" terminator. Multiline fields like recipient_phones aren't a
   // concern here, but be permissive.
   for (const m of reply.matchAll(/<!--\s*RETAG\s*:\s*(\{[\s\S]*?\})\s*-*>/g)) {
     try {
       const parsed = JSON.parse(m[1]);
-      // Rename-tag shape (חביב 2026-04-28): cross-row tag rename. Distinct
-      // from add/remove because it transforms an existing tag value, not
-      // toggles membership. Allows table="both" to cover tasks+shopping in one shot.
-      if (parsed.type === "rename_tag") {
-        const validTable = parsed.table === "tasks" || parsed.table === "shopping_items" || parsed.table === "both";
-        const oldTag = String(parsed.old_tag || "").trim();
-        const newTag = String(parsed.new_tag || "").trim();
-        if (!validTable) { console.warn("[Retag] rename_tag invalid table:", m[1]); continue; }
-        if (!oldTag || !newTag) { console.warn("[Retag] rename_tag missing old_tag/new_tag:", m[1]); continue; }
-        if (newTag.length > 50) { console.warn("[Retag] rename_tag new_tag too long:", m[1]); continue; }
-        out.push({ type: "rename_tag", table: parsed.table, old_tag: oldTag, new_tag: newTag });
-        continue;
-      }
       if (!parsed.table || (parsed.table !== "tasks" && parsed.table !== "shopping_items")) {
         console.warn("[Retag] Invalid or missing table:", m[1]);
         continue;
@@ -2928,10 +2911,7 @@ async function rescueRemindersAndStrip(
       console.warn(
         `[ReminderRescue] DAY MISMATCH HARD REJECT: ${mismatch}; reminder_text="${r.reminder_text}"; reply preview="${reply.slice(0, 200)}"`
       );
-      // Prefer the precise "AM or PM today?" ask when the user's hour is
-      // 1-12 (the common cause of Sonnet's day disagreement); fall back to
-      // the generic "today or tomorrow?" otherwise.
-      return buildDayMismatchAsk(message?.text);
+      return DAY_MISMATCH_CLARIFICATION;
     }
   }
 
@@ -3420,9 +3400,6 @@ async function rescueRemindersAndStrip(
         if (res.truncated) {
           console.warn(`[RetagRescue] Bulk refused (>50 rows) — Sonnet should have asked for narrower scope`);
         }
-      } else if (ra.type === "rename_tag") {
-        // 2026-04-28: cross-row tag rename (חביב incident).
-        await executeRenameTag(householdId, ra, "[RetagRescue]");
       } else {
         await executeTagUpdate(householdId, ra, "[RetagRescue]");
       }
@@ -3874,28 +3851,11 @@ function levenshtein(a: string, b: string): number {
 // any drift between them silently fragmented the household's tag taxonomy.
 // Rules: stringify, trim, lowercase, drop empty, drop length>50. Returns []
 // for non-array input so callers can pass `entities.tags` directly.
-//
-// NOTE: storage-form preserves internal whitespace ("פרויקט בית" stays as-is).
-// Use `tagMatchKey()` for COMPARISON — it strips whitespace so the spelling
-// drift "אלקטרוסליל" vs "אלקטרו סליל" matches as the same conceptual tag.
 function normalizeTags(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return input
     .map((t) => String(t ?? "").trim().toLowerCase())
     .filter((t) => t.length > 0 && t.length <= 50);
-}
-
-// Whitespace-tolerant tag comparison key. Strips ALL whitespace and lowercases,
-// so "אלקטרוסליל", "אלקטרו סליל" and "אלקטרוסליל " all compare equal. Used by
-// matchesTag() in the question-answer pre-filter, mergeTagsDiff() dedup, and
-// the rename_tag executor. Storage form is unchanged — we just compare keys.
-//
-// Why this exists: חביב 2026-04-28 incident — voice transcription + manual
-// typing produced 3 spellings of the same shop tag (אלקטרוסליל / אלקטרו סליל
-// / אלקטרוסלנואיד). Strict-string matching split them into 3 buckets so a
-// "what's in <tag>?" query missed 2/3 of the items the user expected.
-function tagMatchKey(tag: unknown): string {
-  return String(tag ?? "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
 function isSameProduct(a: string, b: string): boolean {
@@ -5005,20 +4965,6 @@ async function executeActions(
           break;
         }
 
-        case "rename_tag": {
-          // 2026-04-28 (חביב): real rename across rows. Without this, Sonnet
-          // says "תיקנתי את השם" but tags drift indefinitely.
-          const renameAction = {
-            type: "rename_tag" as const,
-            table: ((action as any).data?.table || (action as any).table || "both") as "tasks" | "shopping_items" | "both",
-            old_tag: String((action as any).data?.old_tag || (action as any).old_tag || ""),
-            new_tag: String((action as any).data?.new_tag || (action as any).new_tag || ""),
-          };
-          const result = await executeRenameTag(householdId, renameAction, "[ActionExecutor]");
-          summary.push(`Rename-tag: ${renameAction.old_tag} → ${renameAction.new_tag} (${result.count} rows, ${result.ok ? "ok" : result.error})`);
-          break;
-        }
-
         default:
           console.warn(`[ActionExecutor] Unknown action type: ${action.type}`);
       }
@@ -5765,8 +5711,6 @@ RETAG (move existing items between topics — Tier 2 of topic-aware classificati
 - update_task_tags: {"type":"update_task_tags","old_text":"לתאם פגישה","add_tags":["עבודה"],"remove_tags":["בית"]}
 - bulk_update_tags: {"type":"bulk_update_tags","table":"shopping_items","filter":{"where_tag":"shopping"},"add_tags":["בית מרקחת"]}
   Use filter.where_tag for "everything currently tagged X" (most common bulk case). Use filter.ids:[...] when the user named specific items from the snapshot ("Items collected so far"). NEVER omit filter — that would target every row in the household.
-- rename_tag (חביב 2026-04-28): {"type":"rename_tag","table":"both","old_tag":"אלקטרוסלנואיד","new_tag":"אלקטרוסליל"}
-  Use when the user wants to RENAME a tag/topic across all rows that carry it (NOT add/remove on a specific row). Match on old_tag is whitespace-tolerant (אלקטרו סליל ≈ אלקטרוסליל). Triggers: "השם הוא X לא Y", "תקני את התג מ-Y ל-X", "תשני את שם הרשימה מ-Y ל-X", voice-transcription correction, "rename the tag". Reply pattern AFTER the action result lands: "שיניתי את השם ל-X ב-{count} פריטים ✓". DO NOT say "תיקנתי" before the action ran — see RENAME HONESTY rule in SHARED_GROUNDING_RULES.
 REMOVE (delete existing):
 - remove_shopping: {"type":"remove_shopping","name":"פסטה"}
 - remove_task: {"type":"remove_task","text":"לנקות"}
@@ -6086,30 +6030,9 @@ function detectReplyDayMismatch(
 }
 
 // Canonical clarification ask used when a day-mismatch is rejected. Hebrew,
-// short, no robotic apology. Generic fallback when we can't extract a specific
-// AM/PM-ambiguous hour from the user's input. Used by both group rescue path
-// and 1:1 actions path.
+// short, no robotic apology — "I confused myself, want me to remind today or
+// tomorrow?". Used by both group rescue path and 1:1 actions path.
 const DAY_MISMATCH_CLARIFICATION = "רגע, התבלבלתי בין היום למחר 🙈 תוכלו לחזור על זה — להזכיר היום או מחר ובאיזו שעה?";
-
-// Smarter clarification: when the user gave a bare time without AM/PM (e.g.
-// "תזכורת בשעה 8:00" at 07:49 IL), Sonnet's day-disagreement is almost always
-// driven by the AM-vs-PM ambiguity — not by today-vs-tomorrow. Asking the
-// precise question ("8 בבוקר או 8 בערב היום?") is far less robotic than the
-// generic "I got confused" line and lets the user resolve it in one word.
-//
-// Falls back to DAY_MISMATCH_CLARIFICATION when (a) we can't extract an hour
-// from the user's text or (b) the hour is unambiguous (>=13 = clearly PM).
-function buildDayMismatchAsk(userText: string | null | undefined): string {
-  if (!userText) return DAY_MISMATCH_CLARIFICATION;
-  // Try common Hebrew "at X" patterns first, then bare HH:MM.
-  const m = userText.match(/(?:בשעה\s*|ב[-־]?\s*)(\d{1,2})(?:[:.,](\d{2}))?/u)
-         || userText.match(/(\d{1,2})[:.,](\d{2})/);
-  if (!m) return DAY_MISMATCH_CLARIFICATION;
-  const hour = parseInt(m[1], 10);
-  if (Number.isNaN(hour) || hour < 1 || hour > 12) return DAY_MISMATCH_CLARIFICATION;
-  const minPart = m[2] ? `:${m[2]}` : "";
-  return `${hour}${minPart} בבוקר או ${hour}${minPart} בערב היום? 🤔`;
-}
 
 // Format a UTC date as a human-readable Israel time string for Sonnet context.
 // Prevents timezone confusion: Sonnet sees "Wednesday 16/4 16:00" not "2026-04-16T13:00:00+00:00".
@@ -6218,28 +6141,23 @@ function formatTimeWithDayLabel(utcDate: string): string {
 
 // Load active household items (tasks, shopping, events, reminders, expenses) for Sonnet context.
 // Times are converted to Israel timezone strings so Sonnet doesn't misread UTC as local.
-async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; tags?: string[]; scheduled_for?: string; send_at?: string }[]> {
+async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; scheduled_for?: string; send_at?: string }[]> {
   const nowIso = new Date().toISOString();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-  // 2026-04-28 (חביב incident): bumped shopping/tasks limit 10→50 and added
-  // `tags` to the SELECT. Pre-fix, a household with 24 shopping items showed
-  // only the oldest 10 with no tag column — so any tag-related question to
-  // Sonnet missed the recently-tagged items entirely AND had no way to
-  // group/filter by tag. 50 is the new soft cap; events/reminders bumped 10→20.
   const [tasksRes, shopRes, eventsRes, remindersRes, expensesRes] = await Promise.all([
-    supabase.from("tasks").select("title, tags").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(50),
-    supabase.from("shopping_items").select("name, tags").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(50),
-    supabase.from("events").select("title, scheduled_for, tags").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(20),
-    supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(20),
+    supabase.from("tasks").select("title").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(10),
+    supabase.from("shopping_items").select("name").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(10),
+    supabase.from("events").select("title, scheduled_for").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(10),
+    supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(10),
     supabase.from("expenses").select("amount_minor, currency, description, category, paid_by, attribution, occurred_at")
       .eq("household_id", householdId).eq("deleted", false)
       .gte("occurred_at", thirtyDaysAgo)
       .order("occurred_at", { ascending: false }).limit(20),
   ]);
   return [
-    ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [] })),
-    ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name, tags: Array.isArray(r.tags) ? r.tags : [] })),
-    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [], scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
+    ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
+    ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
+    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
     ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: formatTimeWithDayLabel(r.send_at) })),
     ...(expensesRes.data || []).map((r: any) => {
       const unit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100 };
@@ -6249,58 +6167,6 @@ async function loadHouseholdItems(householdId: string): Promise<{ type: string; 
       return { type: "expense", text: `${s}${(r.amount_minor / u).toLocaleString("he-IL")} ${r.description}${r.paid_by ? " (" + r.paid_by + ")" : ""}` };
     }),
   ];
-}
-
-// Build a deterministic "TAG INDEX" block for the Sonnet 1:1 context. Items
-// are grouped by tagMatchKey so spelling variants collapse into one bucket;
-// each bucket lists every item under the FIRST stored spelling encountered.
-// Untagged items get a separate "(untagged)" bucket so Sonnet can spot the
-// user's mental "this should belong to <tag>" gap and offer to fill it.
-//
-// Returns "" when there are no taggable items (no point injecting an empty
-// index). Caller wraps with a header.
-//
-// Why this exists: חביב 2026-04-28 — Sonnet was asked "what's in <tag>?"
-// and replied "I don't see any items tagged that" even though one row was
-// tagged exactly that. The list-by-tag query is too important to leave to
-// Sonnet's reading skill — pre-compute the index here and let Sonnet read
-// off a deterministic table.
-function buildTagIndex(items: { type: string; text: string; tags?: string[] }[]): string {
-  const tagged = items.filter((i) => i.type === "shopping" || i.type === "task" || i.type === "event");
-  if (tagged.length === 0) return "";
-
-  const buckets = new Map<string, { displayTag: string; entries: string[] }>();
-  for (const item of tagged) {
-    const tags = (item.tags || []).filter((t): t is string => typeof t === "string" && t.trim().length > 0);
-    if (tags.length === 0) {
-      const b = buckets.get("") || { displayTag: "(untagged)", entries: [] };
-      b.entries.push(`${item.type}: ${item.text}`);
-      buckets.set("", b);
-      continue;
-    }
-    for (const tag of tags) {
-      const k = tagMatchKey(tag);
-      const b = buckets.get(k) || { displayTag: tag, entries: [] };
-      b.entries.push(`${item.type}: ${item.text}`);
-      buckets.set(k, b);
-    }
-  }
-
-  const lines: string[] = [];
-  const taggedKeys = Array.from(buckets.keys()).filter((k) => k !== "").sort((a, b) => {
-    const ba = buckets.get(a)!.displayTag;
-    const bb = buckets.get(b)!.displayTag;
-    return ba.localeCompare(bb, "he");
-  });
-  for (const k of taggedKeys) {
-    const b = buckets.get(k)!;
-    lines.push(`  ${b.displayTag} (${b.entries.length}): ${b.entries.join(" | ")}`);
-  }
-  if (buckets.has("")) {
-    const b = buckets.get("")!;
-    lines.push(`  (untagged) (${b.entries.length}): ${b.entries.join(" | ")}`);
-  }
-  return lines.join("\n");
 }
 
 // ─── Shared 1:1 action execution (used by both chatting + personal paths) ───
@@ -6510,41 +6376,14 @@ type BulkTagUpdateAction = {
   remove_tags?: string[];
 };
 
-// 2026-04-28 (חביב incident): rename a tag across every row that carries it,
-// in one or both tables. The user said "the store's name is אלקטרוסליל not
-// אלקטרוסלנואיד" and Sheli replied "תיקנתי" without executing anything — this
-// action makes the rename real. Match is whitespace-tolerant via tagMatchKey
-// so "אלקטרו סליל" and "אלקטרוסליל" are treated as the same tag for rename.
-type RenameTagAction = {
-  type: "rename_tag";
-  table: "tasks" | "shopping_items" | "both";
-  old_tag: string;
-  new_tag: string;
-};
-
 // Apply an add/remove diff to an existing tags array. Always passes through
 // normalizeTags for consistency with executor add-* paths. Pure function —
 // no DB side effects.
-//
-// 2026-04-28 (חביב incident): dedup uses tagMatchKey so "אלקטרוסליל" and
-// "אלקטרו סליל" don't both end up on the same row. First spelling encountered
-// wins (we keep the existing form when match-keys collide on add). Removes
-// also match by key, so the user can ask to drop "אלקטרו סליל" and we'll
-// remove "אלקטרוסליל" if that's the actual stored form.
 function mergeTagsDiff(current: unknown, addTags?: string[], removeTags?: string[]): string[] {
-  const seen = new Map<string, string>(); // match-key → stored-form
-  for (const t of normalizeTags(current)) {
-    const k = tagMatchKey(t);
-    if (!seen.has(k)) seen.set(k, t);
-  }
-  for (const t of normalizeTags(addTags)) {
-    const k = tagMatchKey(t);
-    if (!seen.has(k)) seen.set(k, t);
-  }
-  for (const t of normalizeTags(removeTags)) {
-    seen.delete(tagMatchKey(t));
-  }
-  return Array.from(seen.values()).sort();
+  const next = new Set(normalizeTags(current));
+  for (const t of normalizeTags(addTags)) next.add(t);
+  for (const t of normalizeTags(removeTags)) next.delete(t);
+  return Array.from(next).sort();
 }
 
 async function executeTagUpdate(
@@ -6675,84 +6514,6 @@ async function executeBulkTagUpdate(
   return { ok: failed === 0, summary: `bulk_tag_update updated=${updated} noop=${noops}`, count: updated };
 }
 
-// 2026-04-28 (חביב incident): rename a tag across every row that carries it.
-// Match is whitespace-tolerant via tagMatchKey, so the same call covers all
-// drift variants ("אלקטרוסליל" / "אלקטרו סליל" / "אלקטרוסלנואיד") in one shot.
-// Storage form is REPLACED with action.new_tag verbatim — that becomes the
-// canonical spelling going forward.
-//
-// Returns count of UPDATED rows (not matched-but-unchanged). Honest count is
-// what powers Sonnet's reply ("שיניתי את השם ב-3 פריטים ✓").
-async function executeRenameTag(
-  householdId: string,
-  action: RenameTagAction,
-  logPrefix: string,
-): Promise<{ ok: boolean; count: number; summary: string; error?: string }> {
-  const oldKey = tagMatchKey(action.old_tag);
-  const newTagStored = String(action.new_tag || "").trim().toLowerCase();
-  const newKey = tagMatchKey(newTagStored);
-  if (!oldKey) return { ok: false, count: 0, summary: "", error: "empty_old_tag" };
-  if (!newTagStored || !newKey) return { ok: false, count: 0, summary: "", error: "empty_new_tag" };
-  if (newTagStored.length > 50) return { ok: false, count: 0, summary: "", error: "new_tag_too_long" };
-  if (oldKey === newKey) return { ok: true, count: 0, summary: "noop_same_key" };
-
-  const tables: ("tasks" | "shopping_items")[] =
-    action.table === "both" ? ["tasks", "shopping_items"]
-    : action.table === "tasks" ? ["tasks"]
-    : action.table === "shopping_items" ? ["shopping_items"]
-    : [];
-  if (tables.length === 0) return { ok: false, count: 0, summary: "", error: "invalid_table" };
-
-  let totalUpdated = 0;
-  for (const t of tables) {
-    const { data: rows, error: fetchErr } = await supabase
-      .from(t)
-      .select("id, tags")
-      .eq("household_id", householdId);
-    if (fetchErr) {
-      console.error(`${logPrefix} rename_tag fetch error (${t}):`, fetchErr);
-      continue;
-    }
-    const candidates = (rows || []).filter((r: any) => {
-      const tags = Array.isArray(r.tags) ? r.tags : [];
-      return tags.some((tag: unknown) => tagMatchKey(tag) === oldKey);
-    });
-    for (const row of candidates) {
-      const oldTags = (row as any).tags as string[];
-      // Build new tags: replace any tag matching oldKey with newTagStored,
-      // dedup against any existing tag that already matches newKey.
-      const seen = new Map<string, string>();
-      for (const tag of oldTags) {
-        const k = tagMatchKey(tag);
-        if (k === oldKey) {
-          // Replace with new_tag (only the FIRST occurrence wins; subsequent
-          // duplicates collapse via the Map).
-          if (!seen.has(newKey)) seen.set(newKey, newTagStored);
-          continue;
-        }
-        if (!seen.has(k)) seen.set(k, tag);
-      }
-      const newTags = Array.from(seen.values()).sort();
-      const { error: updErr } = await supabase
-        .from(t)
-        .update({ tags: newTags })
-        .eq("id", (row as any).id)
-        .eq("household_id", householdId);
-      if (updErr) {
-        console.error(`${logPrefix} rename_tag update error (${t} ${(row as any).id}):`, updErr);
-        continue;
-      }
-      totalUpdated++;
-    }
-  }
-  console.log(`${logPrefix} Rename-tag: "${action.old_tag}" → "${action.new_tag}" updated ${totalUpdated} row(s) across [${tables.join(",")}]`);
-  return {
-    ok: true,
-    count: totalUpdated,
-    summary: `rename_tag updated=${totalUpdated} ${action.old_tag} → ${action.new_tag}`,
-  };
-}
-
 async function execute1on1Actions(params: {
   raw: string;
   text: string;
@@ -6820,7 +6581,7 @@ async function execute1on1Actions(params: {
       const droppedTypes = actions.map((a: any) => a?.type || "?");
       actions = [];
       console.warn(`${logPrefix} Dropped ALL ${before} action(s) due to day mismatch: types=${JSON.stringify(droppedTypes)}`);
-      visibleReply = buildDayMismatchAsk(text);
+      visibleReply = DAY_MISMATCH_CLARIFICATION;
       break;
     }
   }
@@ -7344,11 +7105,6 @@ async function execute1on1Actions(params: {
         case "bulk_update_tags": {
           if (!householdId) break;
           await executeBulkTagUpdate(householdId, action as BulkTagUpdateAction, logPrefix);
-          break;
-        }
-        case "rename_tag": {
-          if (!householdId) break;
-          await executeRenameTag(householdId, action as RenameTagAction, logPrefix);
           break;
         }
         default:
@@ -8324,12 +8080,6 @@ CONVERSATION STATE:
 - User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Message #${msgCount} in this conversation
 - Items collected so far: ${JSON.stringify(existingItems)}
-${(() => {
-  const idx = buildTagIndex(existingItems);
-  return idx
-    ? `\nTAG INDEX (deterministic — items grouped by tag, spelling-variants collapsed):\nWhen the user asks "מה ב-<tag>?" / "what's in <tag>?", USE THIS INDEX to answer. Match the user's tag against the bucket names case- and whitespace-insensitively (אלקטרוסליל ≈ אלקטרו סליל). If a bucket exists, list its entries verbatim. If no bucket matches but (untagged) has items, OFFER to add some of them to the requested tag — do NOT silently say "nothing found". If the index is genuinely empty for that tag and there are no untagged items, say so honestly.\n${idx}\n`
-    : "";
-})()}
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
@@ -10587,17 +10337,15 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    // 6d. Pure emoji messages in groups → silent skip (no auto-reply, no Haiku).
-    // Previously Sheli mirrored ("💥" → "💥🔥💪") as social engagement, but that
-    // fires unwanted in family banter where she wasn't addressed (regression
-    // observed 2026-04-28 in לה פמיליה: bot mirrored 💥 between siblings joking).
-    // 1:1 messages divert via handleDirectMessage at line 10034 before reaching
-    // this point, so removing the mirror only affects groups. If a family member
-    // actually wants Sheli to react they can tag "שלי" — that path stays open
-    // via directAddress + Haiku/Sonnet downstream (the message wouldn't be pure
-    // emoji once "שלי" is in it, so this branch fires only for ambient emoji).
+    // 6d. Pure emoji messages → skip Haiku, reply with matching emoji via Sonnet
     const PURE_EMOJI = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s\u200d\ufe0f]{1,20}$/u;
     if (PURE_EMOJI.test(message.text.trim()) && message.text.trim().length <= 20 && !message.text.trim().match(/[a-zA-Z\u0590-\u05FF\u0600-\u06FF0-9]/)) {
+      const emojiReply = await generateEmojiReply(message.text.trim(), message.senderName);
+      if (emojiReply) {
+        await sendAndLog(provider, { groupId: message.groupId, text: emojiReply }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "emoji_reaction"
+        });
+      }
       await logMessage(message, "haiku_ignore", householdId);
       return new Response("OK", { status: 200 });
     }
