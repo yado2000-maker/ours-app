@@ -2074,10 +2074,14 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
     // pre-filter so Sheli only sees the matching subset. Each row's `tags` is
     // a TEXT[] of lowercased tags (or undefined for old rows). Match is exact
     // membership — no partial / synonym fuzzing here.
+    // Whitespace-tolerant match (חביב 2026-04-28): "אלקטרוסליל" matches
+    // "אלקטרו סליל". Same queryTag-side normalization is applied below so
+    // user-typed spelling drift between query and stored rows doesn't drop matches.
+    const queryTagKey = queryTag ? tagMatchKey(queryTag) : "";
     const matchesTag = (rowTags: unknown): boolean => {
       if (!queryTag) return true;
       if (!Array.isArray(rowTags)) return false;
-      return rowTags.some((t) => String(t || "").trim().toLowerCase() === queryTag);
+      return rowTags.some((t) => tagMatchKey(t) === queryTagKey);
     };
     const openTasks = ctx.currentTasks
       .filter((t) => !t.done)
@@ -3832,11 +3836,29 @@ function levenshtein(a: string, b: string): number {
 // any drift between them silently fragmented the household's tag taxonomy.
 // Rules: stringify, trim, lowercase, drop empty, drop length>50. Returns []
 // for non-array input so callers can pass `entities.tags` directly.
+//
+// NOTE: storage-form preserves internal whitespace ("פרויקט בית" stays as-is).
+// Use `tagMatchKey()` for COMPARISON — it strips whitespace so the spelling
+// drift "אלקטרוסליל" vs "אלקטרו סליל" matches as the same conceptual tag.
 function normalizeTags(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return input
     .map((t) => String(t ?? "").trim().toLowerCase())
     .filter((t) => t.length > 0 && t.length <= 50);
+}
+
+// Whitespace-tolerant tag comparison key. Strips ALL whitespace and lowercases,
+// so "אלקטרוסליל", "אלקטרו סליל" and "אלקטרוסליל " all compare equal. Used by
+// matchesTag() in the question-answer pre-filter (Tier 4 PR-50/51 will also
+// use it in mergeTagsDiff dedup and the rename_tag executor). Storage form is
+// unchanged — we just compare keys.
+//
+// Why this exists: חביב 2026-04-28 incident — voice transcription + manual
+// typing produced 3 spellings of the same shop tag (אלקטרוסליל / אלקטרו סליל
+// / אלקטרוסלנואיד). Strict-string matching split them into 3 buckets so a
+// "what's in <tag>?" query missed 2/3 of the items the user expected.
+function tagMatchKey(tag: unknown): string {
+  return String(tag ?? "").trim().toLowerCase().replace(/\s+/g, "");
 }
 
 function isSameProduct(a: string, b: string): boolean {
