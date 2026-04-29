@@ -6317,6 +6317,58 @@ async function loadHouseholdItems(householdId: string): Promise<{ type: string; 
   ];
 }
 
+// Build a deterministic "TAG INDEX" block for the Sonnet 1:1 context. Items
+// are grouped by tagMatchKey so spelling variants collapse into one bucket;
+// each bucket lists every item under the FIRST stored spelling encountered.
+// Untagged items get a separate "(untagged)" bucket so Sonnet can spot the
+// user's mental "this should belong to <tag>" gap and offer to fill it.
+//
+// Returns "" when there are no taggable items (no point injecting an empty
+// index). Caller wraps with a header.
+//
+// Why this exists: חביב 2026-04-28 — Sonnet was asked "what's in <tag>?"
+// and replied "I don't see any items tagged that" even though one row was
+// tagged exactly that. The list-by-tag query is too important to leave to
+// Sonnet's reading skill — pre-compute the index here and let Sonnet read
+// off a deterministic table.
+function buildTagIndex(items: { type: string; text: string; tags?: string[] }[]): string {
+  const tagged = items.filter((i) => i.type === "shopping" || i.type === "task" || i.type === "event");
+  if (tagged.length === 0) return "";
+
+  const buckets = new Map<string, { displayTag: string; entries: string[] }>();
+  for (const item of tagged) {
+    const tags = (item.tags || []).filter((t): t is string => typeof t === "string" && t.trim().length > 0);
+    if (tags.length === 0) {
+      const b = buckets.get("") || { displayTag: "(untagged)", entries: [] };
+      b.entries.push(`${item.type}: ${item.text}`);
+      buckets.set("", b);
+      continue;
+    }
+    for (const tag of tags) {
+      const k = tagMatchKey(tag);
+      const b = buckets.get(k) || { displayTag: tag, entries: [] };
+      b.entries.push(`${item.type}: ${item.text}`);
+      buckets.set(k, b);
+    }
+  }
+
+  const lines: string[] = [];
+  const taggedKeys = Array.from(buckets.keys()).filter((k) => k !== "").sort((a, b) => {
+    const ba = buckets.get(a)!.displayTag;
+    const bb = buckets.get(b)!.displayTag;
+    return ba.localeCompare(bb, "he");
+  });
+  for (const k of taggedKeys) {
+    const b = buckets.get(k)!;
+    lines.push(`  ${b.displayTag} (${b.entries.length}): ${b.entries.join(" | ")}`);
+  }
+  if (buckets.has("")) {
+    const b = buckets.get("")!;
+    lines.push(`  (untagged) (${b.entries.length}): ${b.entries.join(" | ")}`);
+  }
+  return lines.join("\n");
+}
+
 // ─── Shared 1:1 action execution (used by both chatting + personal paths) ───
 
 const TRIGGER_WORDS_SET = new Set([
@@ -8228,6 +8280,12 @@ CONVERSATION STATE:
 - User gender: ${userGender ? `${userGender} → LOCK ${userGender === "female" ? "feminine singular" : "masculine singular"} for EVERY reply. ${userGender === "female" ? "Use את, רוצה, תנסי, שלחי, צריכה, יודעת, חושבת. NEVER אתם/אתן/רוצים/תנסו/צריכים." : "Use אתה, רוצה (no ה), תנסה, שלח, צריך, יודע, חושב. NEVER אתם/רוצים/תנסו/צריכים."} Plural to a known singular user is WRONG.` : "unknown → plural אתם fallback only because gender is not yet known"}
 - Message #${msgCount} in this conversation
 - Items collected so far: ${JSON.stringify(existingItems)}
+${(() => {
+  const idx = buildTagIndex(existingItems);
+  return idx
+    ? `\nTAG INDEX (deterministic — items grouped by tag, spelling-variants collapsed):\nWhen the user asks "מה ב-<tag>?" / "what's in <tag>?", USE THIS INDEX to answer. Match the user's tag against the bucket names case- and whitespace-insensitively (אלקטרוסליל ≈ אלקטרו סליל). If a bucket exists, list its entries verbatim. If no bucket matches but (untagged) has items, OFFER to add some of them to the requested tag — do NOT silently say "nothing found". If the index is genuinely empty for that tag and there are no untagged items, say so honestly.\n${idx}\n`
+    : "";
+})()}
 - Capabilities already shown: ${JSON.stringify(triedCaps)}
 - Capabilities NOT yet shown: ${JSON.stringify(untriedCaps)}
 - Group nudge sent: ${convo.context?.group_nudge_sent_at ? "yes (do NOT mention groups)" : "no (system will handle it)"}
