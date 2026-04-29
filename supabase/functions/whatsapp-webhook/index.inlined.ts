@@ -6284,23 +6284,28 @@ function formatTimeWithDayLabel(utcDate: string): string {
 
 // Load active household items (tasks, shopping, events, reminders, expenses) for Sonnet context.
 // Times are converted to Israel timezone strings so Sonnet doesn't misread UTC as local.
-async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; scheduled_for?: string; send_at?: string }[]> {
+async function loadHouseholdItems(householdId: string): Promise<{ type: string; text: string; tags?: string[]; scheduled_for?: string; send_at?: string }[]> {
   const nowIso = new Date().toISOString();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  // 2026-04-28 (חביב incident): bumped shopping/tasks limit 10→50 and added
+  // `tags` to the SELECT. Pre-fix, a household with 24 shopping items showed
+  // only the oldest 10 with no tag column — so any tag-related question to
+  // Sonnet missed the recently-tagged items entirely AND had no way to
+  // group/filter by tag. 50 is the new soft cap; events/reminders bumped 10→20.
   const [tasksRes, shopRes, eventsRes, remindersRes, expensesRes] = await Promise.all([
-    supabase.from("tasks").select("title").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(10),
-    supabase.from("shopping_items").select("name").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(10),
-    supabase.from("events").select("title, scheduled_for").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(10),
-    supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(10),
+    supabase.from("tasks").select("title, tags").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(50),
+    supabase.from("shopping_items").select("name, tags").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(50),
+    supabase.from("events").select("title, scheduled_for, tags").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(20),
+    supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(20),
     supabase.from("expenses").select("amount_minor, currency, description, category, paid_by, attribution, occurred_at")
       .eq("household_id", householdId).eq("deleted", false)
       .gte("occurred_at", thirtyDaysAgo)
       .order("occurred_at", { ascending: false }).limit(20),
   ]);
   return [
-    ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title })),
-    ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name })),
-    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
+    ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [] })),
+    ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name, tags: Array.isArray(r.tags) ? r.tags : [] })),
+    ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [], scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
     ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: formatTimeWithDayLabel(r.send_at) })),
     ...(expensesRes.data || []).map((r: any) => {
       const unit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100 };
