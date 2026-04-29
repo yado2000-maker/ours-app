@@ -1908,10 +1908,10 @@ function buildReplyPrompt(
   const genderMap = ctx.memberGenders || {};
   const senderGender = genderMap[sender] || null;
   const genderNote = senderGender === "male"
-    ? `The sender ${sender} is MALE — address him with masculine forms: אתה, רוצה, תנסה, שטפת, עשית.`
+    ? `The sender ${sender} is MALE — address him with masculine forms: אתה, רוצה, תנסה, שטפת, עשית, תגיד, תוסיף, תזכור.`
     : senderGender === "female"
-    ? `The sender ${sender} is FEMALE — address her with feminine forms: את, רוצה, תנסי, שטפת, עשית.`
-    : `The sender ${sender}'s gender is unknown — use plural: אתם, רוצים, נסו, שטפתם, עשיתם.`;
+    ? `The sender ${sender} is FEMALE — address her with feminine forms: את, רוצה, תנסי, שטפת, עשית, תגידי, תוסיפי, תזכרי.`
+    : `The sender ${sender}'s gender is UNKNOWN. STRICT RULE: use ONLY plural (אתם / רוצים / נסו / שטפתם / עשיתם / תגידו / תוסיפו / תזכרו) OR infinitive ("אפשר להוסיף", "להגיד לי", "לנסות") OR impersonal ("צריך ש...", "אפשר ש...") so the reply is gender-neutral. NEVER use feminine singular (תגידי / תוסיפי / תזכרי / את / יכולה / רוצה / צריכה / יודעת) — that wrongly assumes the sender is a woman, which is the #1 way Sheli gets a man's gender wrong (Or Adar 2026-04-28: "פשוט תגידי" was sent to a male user). NEVER use masculine singular (תגיד / תוסיף / תזכור / אתה / יכול / צריך) either — that wrongly assumes male. PLURAL or INFINITIVE only.`;
 
   const langInstructions = isHe
     ? `ALWAYS respond in Hebrew. You are Sheli (שלי) — the organized older sister.
@@ -2231,6 +2231,14 @@ REMINDERS: When intent is add_reminder:
 - THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
 - CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
 - DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed.
+- AM/PM DISAMBIGUATION (when hour is 1-12 and the user did NOT say "בבוקר"/"בערב"/"בלילה"/"בצהריים"):
+  - Prefer the NEAREST FUTURE OCCURRENCE relative to NOW IL.
+  - If today's AM (hh:mm) is still in the future → use today AM. Example: at 07:49 IL, "בשעה 8:00" → today 08:00.
+  - If today's AM has already passed → use today PM (hh+12). Example: at 09:30 IL, "ב-8" → today 20:00. At 14:00 IL, "ב-5" → today 17:00.
+  - If today's AM AND today's PM have both passed → use tomorrow AM. Example: at 22:30 IL, "ב-8" → tomorrow 08:00.
+  - When you pick PM via this rule, your visible reply MUST include the explicit 24h time so the user can spot a wrong guess: "אזכיר היום ב-20:00 (8 בערב) ✓" — NOT just "אזכיר ב-8".
+  - The visible day-word ("היום"/"מחר") and the metadata send_at MUST match exactly per REPLY/METADATA DAY CONSISTENCY rule. If you can't make them match in one pass, ASK instead — don't guess.
+  - WHEN GENUINELY UNSURE (the user clearly meant a specific time but the AM/PM is genuinely ambiguous): ASK "8 בבוקר או 8 בערב היום? 🤔" with NO REMINDER block. One extra question beats a wrong row.
 - If no time specified at all, ask "מתי לתזכיר?" and do NOT include a REMINDER block.
 - If time IS specified, append this EXACT format at the END of your reply (hidden from user):
   <!--REMINDER:{"reminder_text":"what to remind","send_at":"2026-04-08T16:00:00+03:00"}-->
@@ -2415,36 +2423,6 @@ async function generateReply(
   } catch (err) {
     console.error("[ReplyGenerator] Fetch error:", err);
     return { reply: "", model: SONNET_MODEL };
-  }
-}
-
-// ─── Pure Emoji Reply Helper ───
-
-async function generateEmojiReply(emoji: string, sender: string): Promise<string | null> {
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
-  if (!apiKey) return null;
-
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 32,
-        system: `You are Sheli (שלי), a warm Israeli WhatsApp assistant. ${sender} just sent an emoji reaction in the group. Reply with 1-3 matching emoji. No text unless it genuinely adds warmth (max 3 words). Examples: ❤️→❤️😊 | 💪→💪🔥 | 😂→😂 | 👍→👍✨ | 🙏→💕`,
-        messages: [{ role: "user", content: emoji }],
-      }),
-    });
-
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.content?.[0]?.text?.trim() || null;
-  } catch {
-    return null;
   }
 }
 
@@ -2911,7 +2889,10 @@ async function rescueRemindersAndStrip(
       console.warn(
         `[ReminderRescue] DAY MISMATCH HARD REJECT: ${mismatch}; reminder_text="${r.reminder_text}"; reply preview="${reply.slice(0, 200)}"`
       );
-      return DAY_MISMATCH_CLARIFICATION;
+      // Prefer the precise "AM or PM today?" ask when the user's hour is
+      // 1-12 (the common cause of Sonnet's day disagreement); fall back to
+      // the generic "today or tomorrow?" otherwise.
+      return buildDayMismatchAsk(message?.text);
     }
   }
 
@@ -6030,9 +6011,30 @@ function detectReplyDayMismatch(
 }
 
 // Canonical clarification ask used when a day-mismatch is rejected. Hebrew,
-// short, no robotic apology — "I confused myself, want me to remind today or
-// tomorrow?". Used by both group rescue path and 1:1 actions path.
+// short, no robotic apology. Generic fallback when we can't extract a specific
+// AM/PM-ambiguous hour from the user's input. Used by both group rescue path
+// and 1:1 actions path.
 const DAY_MISMATCH_CLARIFICATION = "רגע, התבלבלתי בין היום למחר 🙈 תוכלו לחזור על זה — להזכיר היום או מחר ובאיזו שעה?";
+
+// Smarter clarification: when the user gave a bare time without AM/PM (e.g.
+// "תזכורת בשעה 8:00" at 07:49 IL), Sonnet's day-disagreement is almost always
+// driven by the AM-vs-PM ambiguity — not by today-vs-tomorrow. Asking the
+// precise question ("8 בבוקר או 8 בערב היום?") is far less robotic than the
+// generic "I got confused" line and lets the user resolve it in one word.
+//
+// Falls back to DAY_MISMATCH_CLARIFICATION when (a) we can't extract an hour
+// from the user's text or (b) the hour is unambiguous (>=13 = clearly PM).
+function buildDayMismatchAsk(userText: string | null | undefined): string {
+  if (!userText) return DAY_MISMATCH_CLARIFICATION;
+  // Try common Hebrew "at X" patterns first, then bare HH:MM.
+  const m = userText.match(/(?:בשעה\s*|ב[-־]?\s*)(\d{1,2})(?:[:.,](\d{2}))?/u)
+         || userText.match(/(\d{1,2})[:.,](\d{2})/);
+  if (!m) return DAY_MISMATCH_CLARIFICATION;
+  const hour = parseInt(m[1], 10);
+  if (Number.isNaN(hour) || hour < 1 || hour > 12) return DAY_MISMATCH_CLARIFICATION;
+  const minPart = m[2] ? `:${m[2]}` : "";
+  return `${hour}${minPart} בבוקר או ${hour}${minPart} בערב היום? 🤔`;
+}
 
 // Format a UTC date as a human-readable Israel time string for Sonnet context.
 // Prevents timezone confusion: Sonnet sees "Wednesday 16/4 16:00" not "2026-04-16T13:00:00+00:00".
@@ -6581,7 +6583,7 @@ async function execute1on1Actions(params: {
       const droppedTypes = actions.map((a: any) => a?.type || "?");
       actions = [];
       console.warn(`${logPrefix} Dropped ALL ${before} action(s) due to day mismatch: types=${JSON.stringify(droppedTypes)}`);
-      visibleReply = DAY_MISMATCH_CLARIFICATION;
+      visibleReply = buildDayMismatchAsk(text);
       break;
     }
   }
@@ -10337,15 +10339,17 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    // 6d. Pure emoji messages → skip Haiku, reply with matching emoji via Sonnet
+    // 6d. Pure emoji messages in groups → silent skip (no auto-reply, no Haiku).
+    // Previously Sheli mirrored ("💥" → "💥🔥💪") as social engagement, but that
+    // fires unwanted in family banter where she wasn't addressed (regression
+    // observed 2026-04-28 in לה פמיליה: bot mirrored 💥 between siblings joking).
+    // 1:1 messages divert via handleDirectMessage at line 10034 before reaching
+    // this point, so removing the mirror only affects groups. If a family member
+    // actually wants Sheli to react they can tag "שלי" — that path stays open
+    // via directAddress + Haiku/Sonnet downstream (the message wouldn't be pure
+    // emoji once "שלי" is in it, so this branch fires only for ambient emoji).
     const PURE_EMOJI = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s\u200d\ufe0f]{1,20}$/u;
     if (PURE_EMOJI.test(message.text.trim()) && message.text.trim().length <= 20 && !message.text.trim().match(/[a-zA-Z\u0590-\u05FF\u0600-\u06FF0-9]/)) {
-      const emojiReply = await generateEmojiReply(message.text.trim(), message.senderName);
-      if (emojiReply) {
-        await sendAndLog(provider, { groupId: message.groupId, text: emojiReply }, {
-          householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "emoji_reaction"
-        });
-      }
       await logMessage(message, "haiku_ignore", householdId);
       return new Response("OK", { status: 200 });
     }
