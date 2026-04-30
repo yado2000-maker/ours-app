@@ -9968,7 +9968,36 @@ Deno.serve(async (req: Request) => {
       }
 
       console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}`);
-      const voiceResult = await transcribeVoice(message.mediaUrl, message.mediaId);
+
+      // Resolve household for Whisper decoder bias (names + recent shopping).
+      // Voice handler runs before household resolution in the main flow, so
+      // we do a quick lookup here. Group → whatsapp_config.group_id; 1:1 →
+      // whatsapp_member_mapping.phone_number. Best-effort: a missing/null id
+      // is fine — buildVoicePromptBias short-circuits to empty string.
+      let voiceHouseholdId: string | null = null;
+      try {
+        if (message.chatType === "group" && message.groupId) {
+          const { data: cfg } = await supabase
+            .from("whatsapp_config")
+            .select("household_id")
+            .eq("group_id", message.groupId)
+            .limit(1)
+            .maybeSingle();
+          voiceHouseholdId = cfg?.household_id ?? null;
+        } else if (message.senderPhone) {
+          const { data: map } = await supabase
+            .from("whatsapp_member_mapping")
+            .select("household_id")
+            .eq("phone_number", message.senderPhone)
+            .limit(1)
+            .maybeSingle();
+          voiceHouseholdId = map?.household_id ?? null;
+        }
+      } catch (e) {
+        console.error("[Voice] household lookup for bias failed (non-fatal):", e);
+      }
+
+      const voiceResult = await transcribeVoice(message.mediaUrl, message.mediaId, voiceHouseholdId);
 
       // Low-quality voice gate (2026-04-21). Rather than letting Sonnet invent
       // an interpretation of a garbled Hebrew-mistranscription (Habib incident:
@@ -12261,6 +12290,7 @@ interface VoiceTranscription {
 async function transcribeVoice(
   mediaUrl: string | undefined,
   mediaId: string | undefined,
+  householdId?: string | null,
 ): Promise<VoiceTranscription> {
   const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || "";
   if (!GROQ_API_KEY) {
@@ -12303,11 +12333,22 @@ async function transcribeVoice(
     // 2. Build multipart form data for Groq Whisper API.
     // response_format=verbose_json returns language + per-segment confidence
     // signals (avg_logprob, no_speech_prob) used by the quality gate below.
-    // No language hint — Whisper auto-detects Hebrew, English, or mixed.
+    // language=he forces Hebrew decoding (auto-detect was misfiring on noisy
+    // audio). temperature=0 disables sampling. `prompt` carries household
+    // vocab as decoder bias.
     const formData = new FormData();
     formData.append("file", audioBlob, "voice.ogg");
     formData.append("model", "whisper-large-v3");
     formData.append("response_format", "verbose_json");
+    formData.append("language", "he");
+    formData.append("temperature", "0");
+
+    // Decoder bias from household vocab (names, recent shopping items).
+    const biasPrompt = await buildVoicePromptBias(householdId ?? null);
+    if (biasPrompt) {
+      formData.append("prompt", biasPrompt);
+      console.log(`[Voice] Bias prompt (${biasPrompt.length} chars): ${biasPrompt.slice(0, 80)}...`);
+    }
 
     // 3. Call Groq Whisper API (OpenAI-compatible endpoint)
     const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
