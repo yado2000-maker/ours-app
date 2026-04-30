@@ -1,4 +1,13 @@
 // supabase/functions/whatsapp-webhook/_tests/voice_bias_test.ts
+//
+// Run from repo root:
+//   SUPABASE_URL=stub SUPABASE_SERVICE_ROLE_KEY=stub deno test \
+//     --no-lock --no-check --node-modules-dir=auto --allow-net --allow-env \
+//     supabase/functions/whatsapp-webhook/_tests/voice_bias_test.ts
+//
+// The flag stack is needed because importing `index.inlined.ts` triggers
+// top-level `Deno.serve` and a real `createClient` call. Tests stub
+// `globalThis.fetch` to isolate `buildVoicePromptBias` from the network.
 import { assertEquals } from "jsr:@std/assert@1";
 import { buildVoicePromptBias } from "../index.inlined.ts";
 
