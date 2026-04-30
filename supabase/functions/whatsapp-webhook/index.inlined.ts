@@ -12270,8 +12270,10 @@ export async function buildVoicePromptBias(householdId: string | null | undefine
 // Voice transcription result carries quality signals so the caller can decide
 // whether to inject into the pipeline or ask the user to repeat. Quality states:
 //   ok              — transcript is trustworthy, inject as normal
-//   wrong_language  — Whisper detected a language other than Hebrew/English
-//                     (Italian/Arabic/etc. — usually a noisy Hebrew misheard)
+//   wrong_language  — Defense-in-depth only. Since 2026-04-30 PR 1 we force
+//                     `language=he` on the Groq call, so this branch should
+//                     not fire in normal operation. Kept in case a future
+//                     change reverts the language hint.
 //   unclear         — Hebrew/English detected but confidence too low
 //                     (avg_logprob below threshold → hallucination risk)
 //   no_speech       — majority silence; user tapped record by accident
@@ -12374,6 +12376,8 @@ async function transcribeVoice(
     //     exact symptom we saw on 2026-04-21.
     const language: string | undefined = result.language;
     const hebrewOrEnglish = !language || ["he", "iw", "hebrew", "en", "english"].includes(language.toLowerCase());
+    // Defense-in-depth — language=he is forced in the form data, so this
+    // branch should not fire. Left in to catch upstream regressions.
     if (!hebrewOrEnglish) {
       return { text, quality: "wrong_language", language };
     }
