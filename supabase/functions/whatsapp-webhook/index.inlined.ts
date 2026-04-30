@@ -12181,6 +12181,63 @@ Deno.serve(async (req: Request) => {
 
 // ─── Helper Functions ───
 
+// ─── Voice prompt biasing ───
+// Whisper accepts a free-text `prompt` (initial_prompt for faster-whisper) up
+// to ~224 tokens. Tokens it sees here get strong decoder bias. We feed it the
+// household's known names + recent shopping vocabulary so proper nouns like
+// "אביטל" or "פיתות" don't get mangled into "הביטל" or "פיתאות".
+//
+// Cap at 600 chars conservatively (Hebrew is ~2-3 tokens per word).
+const VOICE_BIAS_CHAR_CAP = 600;
+
+export async function buildVoicePromptBias(householdId: string | null | undefined): Promise<string> {
+  if (!householdId) return "";
+  try {
+    const headers = {
+      apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""}`,
+    };
+    const base = Deno.env.get("SUPABASE_URL") ?? "";
+
+    const memRes = await fetch(
+      `${base}/rest/v1/whatsapp_member_mapping?household_id=eq.${encodeURIComponent(householdId)}&select=member_name`,
+      { headers },
+    );
+    const members: Array<{ member_name: string }> = memRes.ok ? await memRes.json() : [];
+    const names = members.map((m) => (m.member_name || "").trim()).filter(Boolean);
+
+    const itemRes = await fetch(
+      `${base}/rest/v1/shopping_items?household_id=eq.${encodeURIComponent(householdId)}&select=name&order=created_at.desc&limit=30`,
+      { headers },
+    );
+    const items: Array<{ name: string }> = itemRes.ok ? await itemRes.json() : [];
+    const itemNames = items.map((i) => (i.name || "").trim()).filter(Boolean);
+
+    const seen = new Set<string>();
+    const tokens: string[] = [];
+    for (const t of [...names, ...itemNames]) {
+      if (!seen.has(t)) {
+        seen.add(t);
+        tokens.push(t);
+      }
+    }
+
+    const out: string[] = [];
+    let len = 0;
+    for (const t of tokens) {
+      const sep = out.length === 0 ? "" : ", ";
+      const addLen = sep.length + t.length;
+      if (len + addLen > VOICE_BIAS_CHAR_CAP) break;
+      out.push(t);
+      len += addLen;
+    }
+    return out.join(", ");
+  } catch (err) {
+    console.error("[VoiceBias] Failed to build prompt bias:", err);
+    return "";
+  }
+}
+
 // Voice transcription result carries quality signals so the caller can decide
 // whether to inject into the pipeline or ask the user to repeat. Quality states:
 //   ok              — transcript is trustworthy, inject as normal
