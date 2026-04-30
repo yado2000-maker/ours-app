@@ -10285,12 +10285,18 @@ Deno.serve(async (req: Request) => {
         const chatTargetForReaction = message.groupId.endsWith("@g.us")
           ? message.groupId
           : `${message.senderPhone}@s.whatsapp.net`;
+        // Firing-only gate (Netzer 2026-04-30): the substring-on-prompt_completion
+        // match below already filters by content, but the user is reacting to a
+        // specific bot message — that message can only belong to a series whose
+        // first attempt has already fired. Excluding future series prevents a
+        // stray ✅ on an old/unrelated bot message from acking a yet-to-fire one.
         const { data: activeForReaction } = await supabase
           .from("reminder_queue")
-          .select("id, nudge_config, created_at")
+          .select("id, nudge_config, created_at, send_at")
           .eq("household_id", hhId)
           .eq("series_status", "active")
           .eq("group_id", chatTargetForReaction)
+          .lte("send_at", new Date().toISOString())
           .order("created_at", { ascending: true })
           .limit(10);
         if (activeForReaction && activeForReaction.length > 0) {
@@ -10949,12 +10955,21 @@ Deno.serve(async (req: Request) => {
       const chatTarget = message.groupId.endsWith("@g.us")
         ? message.groupId
         : `${message.senderPhone}@s.whatsapp.net`;
+      // Only ack series that have actually started firing (send_at <= NOW).
+      // Without this gate, an "I did it" said about an already-expired nudge
+      // mistakenly acks a *future* nudge series that happens to still be
+      // 'active' status. Netzer 2026-04-30: Ofri said "הוצאתי אותו" about
+      // the dog at 16:18 IL — dog series was already expired_deadline at
+      // 16:05, but the pill series scheduled for 20:00 was still 'active'
+      // → regex picked the pill series and replied "סימנתי שעופרי לקחת
+      // את הכדור ✓", killing tonight's pill nudge.
       const { data: activeSeries } = await supabase
         .from("reminder_queue")
-        .select("id, message_text, nudge_config, created_at")
+        .select("id, message_text, nudge_config, created_at, send_at")
         .eq("household_id", householdId)
         .eq("series_status", "active")
         .eq("group_id", chatTarget)
+        .lte("send_at", new Date().toISOString())
         .order("created_at", { ascending: true })  // oldest = most likely the in-flight one
         .limit(5);
       if (activeSeries && activeSeries.length > 0) {
@@ -11007,12 +11022,15 @@ Deno.serve(async (req: Request) => {
       classification.completes_pending_nudge === true &&
       haikuCtx.activeNudgeSeries && haikuCtx.activeNudgeSeries.length > 0
     ) {
+      // Same firing-only gate as the regex fast-path above — don't let an
+      // ack collapse a future series whose start time hasn't arrived yet.
       const { data: ackTargets } = await supabase
         .from("reminder_queue")
-        .select("id, nudge_config, created_at")
+        .select("id, nudge_config, created_at, send_at")
         .eq("household_id", householdId)
         .eq("series_status", "active")
         .eq("group_id", _chatTargetForLookup)
+        .lte("send_at", new Date().toISOString())
         .order("created_at", { ascending: true })
         .limit(5);
       if (ackTargets && ackTargets.length > 0) {
