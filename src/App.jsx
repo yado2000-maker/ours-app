@@ -96,6 +96,9 @@ function SheliApp() {
   const [events, setEvents]       = useState([]);
   const [rotations, setRotationsS] = useState([]);
   const [expenses, setExpenses]     = useState([]);
+  // Google access_token captured from OAuth session (used by Google Calendar sync).
+  // Lifetime: ~1hr. Sufficient for demo; production refresh tokens are a follow-up.
+  const [googleAccessToken, setGoogleAccessToken] = useState(null);
   const [input, setInput]         = useState("");
   const [pickName, setPickName]   = useState("");
   const [pickSaving, setPickSaving] = useState(false);
@@ -132,6 +135,10 @@ function SheliApp() {
     const wasNull = lastSessionId.current === null;
     const isNew = currentId && currentId !== lastSessionId.current;
     lastSessionId.current = currentId;
+
+    // Capture Google OAuth provider_token before the same-session early-return,
+    // so token refreshes that re-issue the JWT keep the access_token in sync.
+    if (session?.provider_token) setGoogleAccessToken(session.provider_token);
 
     // Skip if same session (prevents re-runs from token refreshes)
     if (!wasNull && !isNew && currentId) return;
