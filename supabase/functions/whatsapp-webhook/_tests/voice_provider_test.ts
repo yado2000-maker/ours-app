@@ -167,6 +167,73 @@ Deno.test("transcribeVoiceIvritAi parses HF transformers ASR response shape", as
   }
 });
 
+Deno.test("transcribeVoiceIvritAi sends Shape B JSON with generate_kwargs override", async () => {
+  // Regression guard: the model's baked-in `forced_decoder_ids` (in
+  // generation_config.json) conflicts with newer Transformers versions when no
+  // override is provided. Shape B (JSON + base64 + generate_kwargs) is the
+  // only working request shape — assert it stays this way.
+  Deno.env.set("IVRIT_AI_HF_URL", "https://stub.example/hf");
+  Deno.env.set("IVRIT_AI_HF_TOKEN", "hf_stub");
+  let observedBody: Record<string, unknown> | null = null;
+  let observedContentType: string | null = null;
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (String(input).includes("stub.example/hf")) {
+      const headers = (init?.headers as Record<string, string> | undefined) ?? {};
+      observedContentType = headers["Content-Type"] ?? headers["content-type"] ?? null;
+      observedBody = JSON.parse((init?.body as string) ?? "{}");
+      return new Response(JSON.stringify({ text: "אביטל האדריכלית" }), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  };
+  try {
+    const blob = new Blob([new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7])], { type: "audio/ogg" });
+    const result = await transcribeVoiceIvritAi(blob, "");
+    assertEquals(result.text, "אביטל האדריכלית");
+    assertEquals(result.quality, "ok");
+    assertEquals(observedContentType, "application/json");
+    assertEquals(typeof observedBody?.inputs, "string"); // base64 string of audio bytes
+    const params = (observedBody?.parameters ?? {}) as Record<string, unknown>;
+    const gk = (params.generate_kwargs ?? {}) as Record<string, unknown>;
+    assertEquals(gk.language, "hebrew");
+    assertEquals(gk.task, "transcribe");
+    assertEquals(params.return_timestamps, false);
+  } finally {
+    globalThis.fetch = orig;
+    Deno.env.delete("IVRIT_AI_HF_URL");
+    Deno.env.delete("IVRIT_AI_HF_TOKEN");
+  }
+});
+
+Deno.test("audioBlobToBase64 handles 100KB blob without stack overflow (sanity)", async () => {
+  // Indirect test via transcribeVoiceIvritAi — ensures the chunked encoder
+  // doesn't blow the call stack on realistic-sized voice messages (~100KB).
+  Deno.env.set("IVRIT_AI_HF_URL", "https://stub.example/hf");
+  Deno.env.set("IVRIT_AI_HF_TOKEN", "hf_stub");
+  let observedInputsLen = 0;
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (String(input).includes("stub.example/hf")) {
+      const body = JSON.parse((init?.body as string) ?? "{}");
+      observedInputsLen = (body?.inputs as string).length;
+      return new Response(JSON.stringify({ text: "ok" }), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  };
+  try {
+    const blob = new Blob([new Uint8Array(100_000)], { type: "audio/ogg" });
+    const result = await transcribeVoiceIvritAi(blob, "");
+    assertEquals(result.text, "ok");
+    // base64(100_000 zero-bytes) = ceil(100000 / 3) * 4 = 133336.
+    // 100000 / 3 = 33333.33, ceil = 33334, * 4 = 133336 chars.
+    assertEquals(observedInputsLen, 133336);
+  } finally {
+    globalThis.fetch = orig;
+    Deno.env.delete("IVRIT_AI_HF_URL");
+    Deno.env.delete("IVRIT_AI_HF_TOKEN");
+  }
+});
+
 Deno.test("transcribeVoiceIvritAi handles missing IVRIT_AI_HF_URL by failing soft", async () => {
   Deno.env.delete("IVRIT_AI_HF_URL");
   Deno.env.delete("IVRIT_AI_HF_TOKEN");

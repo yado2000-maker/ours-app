@@ -13227,6 +13227,30 @@ export async function transcribeVoiceGroq(
   }
 }
 
+// Encode an audio Blob to base64 in chunks. Naive `btoa(String.fromCharCode(...bytes))`
+// fails on call-stack overflow for the ~50-500KB voice messages Whapi delivers,
+// because spreading a Uint8Array exceeds the JS argument-count limit. Chunked
+// `String.fromCharCode.apply` keeps each call under the 32K-arg threshold.
+async function audioBlobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+  }
+  return btoa(binary);
+}
+
+// ivrit-ai Hebrew-tuned Whisper via HF Inference Endpoint (paid).
+// Uses Shape B (JSON + base64) with explicit generate_kwargs to override
+// the model's baked-in forced_decoder_ids. Without these overrides, the
+// HF inference toolkit rejects the request with "You have explicitly
+// specified forced_decoder_ids" because the model's generation_config.json
+// conflicts with newer Transformers versions.
+//
+// language="hebrew" + task="transcribe" computes the right decoder_ids
+// dynamically and bypasses the conflict.
 export async function transcribeVoiceIvritAi(
   audioBlob: Blob,
   // biasPrompt is intentionally unused: HF Transformers ASR pipeline does not
@@ -13243,19 +13267,29 @@ export async function transcribeVoiceIvritAi(
   }
 
   try {
-    // Shape A — raw audio bytes with audio/ogg content-type.
+    // Shape B — JSON body with base64 audio + explicit generate_kwargs.
     // HF Inference Endpoints serving the `automatic-speech-recognition`
     // pipeline accept this directly and return `{"text": "..."}`.
     // The endpoint runs `ivrit-ai/whisper-large-v3-turbo` on a T4 16GB GPU
     // (eu-west-1, scale-to-zero after 15min idle). First call after idle
     // takes 30-60s for cold load — hence the 90s timeout.
+    const audioB64 = await audioBlobToBase64(audioBlob);
     const res = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "audio/ogg",
+        "Content-Type": "application/json",
       },
-      body: audioBlob,
+      body: JSON.stringify({
+        inputs: audioB64,
+        parameters: {
+          return_timestamps: false,
+          generate_kwargs: {
+            language: "hebrew",
+            task: "transcribe",
+          },
+        },
+      }),
       signal: AbortSignal.timeout(90_000),
     });
 
