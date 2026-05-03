@@ -1114,7 +1114,35 @@ EXAMPLES:
 [אבא]: "מי בתור למקלחת?" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"מי בתור למקלחת?"}}
 [אמא]: "מי בתור" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מי בתור"}}
 [אבא]: "מה נשאר ברשימה" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה נשאר ברשימה"}}
-[אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן"}}
+[אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן","list_type":"event"}}
+// LIST-QUERY ENTITIES (2026-05-03 churn fix). For "question" intent, when the user is asking
+// to see a list, populate entities.list_type ∈ {task, shopping, event, reminder, all}. For
+// calendar queries, also populate entities.time_window ∈ {today, tomorrow, this_week,
+// next_week, this_month, all}. The webhook's deterministic list-renderer reads these
+// entities first; the legacy regex is a fallback for messages that didn't classify with
+// explicit entities. CRITICAL: "ביומן"/"לו'ז"/"אירועים" → list_type=event, NOT shopping —
+// even when the message also contains the word "רשימה". The single most-damaging
+// misclassification in 2026-05-03 was treating "רשימה ... ביומן" as shopping.
+[אבא]: "מה ביומן?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ביומן?","list_type":"event","time_window":"all"}}
+[אמא]: "תוציאי רשימה של כל מה שכתוב ביומן" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"תוציאי רשימה של כל מה שכתוב ביומן","list_type":"event","time_window":"all"}}
+[אבא]: "מה בלו\"ז?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה בלו\"ז?","list_type":"event","time_window":"all"}}
+[אמא]: "מה יש השבוע?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה יש השבוע?","list_type":"event","time_window":"this_week"}}
+[אבא]: "מה השבוע הבא?" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה השבוע הבא?","list_type":"event","time_window":"next_week"}}
+[אמא]: "מה החודש?" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מה החודש?","list_type":"event","time_window":"this_month"}}
+[אבא]: "מה יש לי מחר?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה יש לי מחר?","list_type":"event","time_window":"tomorrow"}}
+[אמא]: "מה היום?" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מה היום?","list_type":"event","time_window":"today"}}
+[אבא]: "איזה אירועים רשומים לך?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"איזה אירועים רשומים לך?","list_type":"event","time_window":"all"}}
+[אמא]: "מה ברשימות?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ברשימות?","list_type":"all"}}
+[אבא]: "תציגי לי את כל מה שרשמת" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"תציגי לי את כל מה שרשמת","list_type":"all"}}
+[אמא]: "כל מה שיש לי" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"כל מה שיש לי","list_type":"all"}}
+[אבא]: "מה התזכורות?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה התזכורות?","list_type":"reminder"}}
+[אמא]: "איזה תזכורות יש לי?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"איזה תזכורות יש לי?","list_type":"reminder"}}
+[אבא]: "מה ברשימת קניות?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ברשימת קניות?","list_type":"shopping"}}
+// CORRECTION: when user says "לא ביקשתי X, ביקשתי Y" — classify by the POSITIVE domain (Y),
+// not the negation (X). The renderer's correction-guard handles the actual pivot, but
+// supplying list_type from Haiku is faster + more reliable.
+[אבא]: "לא ביקשתי קניות, ביקשתי מה שרשום ביומן" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"לא ביקשתי קניות, ביקשתי מה שרשום ביומן","list_type":"event","time_window":"all"}}
+[אמא]: "לא ביומן, בקניות" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"לא ביומן, בקניות","list_type":"shopping"}}
 [אור]: "לאסוף את שושי?" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"לאסוף את שושי?"}}
 [אמא]: "להביא חלב מהמכולת?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"להביא חלב מהמכולת?"}}
 [אבא]: "לקנות מתנה לסבתא?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
@@ -7691,13 +7719,79 @@ async function isForwardEnabled(): Promise<boolean> {
 // deterministic output, no hallucination risk, guaranteed-correct counts,
 // automatic web-link fallback for long lists.
 
-type ListType = "task" | "shopping" | "event" | "expense" | "reminder";
+type ListType = "task" | "shopping" | "event" | "expense" | "reminder" | "all";
+
+// Event time-window for calendar queries ("מה השבוע", "מה החודש", "מה מחר").
+// Maps to a (gte, lte) range applied to events.scheduled_for. Default for
+// calendar queries with no explicit window is "all" (any future event).
+type EventTimeWindow = "today" | "tomorrow" | "this_week" | "next_week" | "this_month" | "all";
+
+interface ListQuerySpec {
+  type: ListType;
+  timeWindow?: EventTimeWindow;  // applies only when type === "event" or "all"
+}
 
 interface ListItem {
   title: string;
   category?: string;   // shopping only — renderer groups by category when n>=2
   dueDate?: string;
   amount?: number;
+}
+
+// Compute the [gte, lte] UTC ISO range for a given EventTimeWindow,
+// anchored at the current Asia/Jerusalem calendar day. DST-safe via
+// ilOffsetMs(). For "all" returns { gte: nowUtc } and no upper bound,
+// matching the legacy `gt('scheduled_for', now)` behavior.
+function eventWindowRange(window: EventTimeWindow): { gte: string; lte?: string } {
+  const nowUtc = new Date();
+  if (window === "all") return { gte: nowUtc.toISOString() };
+
+  // Build IL midnight (start of today) as a UTC ms.
+  const ilDateStr = nowUtc.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const [yStr, mStr, dStr] = ilDateStr.split("-");
+  const y = parseInt(yStr, 10), m = parseInt(mStr, 10), d = parseInt(dStr, 10);
+  // IL midnight = naive UTC ms - actual IL offset
+  const ilMidnightNaive = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const todayStartUtc = ilMidnightNaive - ilOffsetMs(new Date(ilMidnightNaive));
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  switch (window) {
+    case "today": {
+      // From now → end of today IL.
+      const lteUtc = todayStartUtc + dayMs;
+      return { gte: nowUtc.toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "tomorrow": {
+      const gteUtc = todayStartUtc + dayMs;
+      const lteUtc = gteUtc + dayMs;
+      return { gte: new Date(gteUtc).toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "this_week": {
+      // IL convention: week starts Sunday. JS getDay returns 0=Sun…6=Sat
+      // for the IL midnight Date object below.
+      const ilMidnight = new Date(todayStartUtc);
+      // Reconstruct day-of-week from IL Y/M/D — Date.UTC + getUTCDay is correct
+      // because we're treating ilMidnightNaive as UTC.
+      const dow = new Date(ilMidnightNaive).getUTCDay();
+      // Days remaining in week (Sun=0…Sat=6); end is next Sunday midnight.
+      const daysUntilNextSun = (7 - dow) % 7 || 7;
+      const lteUtc = todayStartUtc + daysUntilNextSun * dayMs;
+      return { gte: nowUtc.toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "next_week": {
+      const dow = new Date(ilMidnightNaive).getUTCDay();
+      const daysUntilNextSun = (7 - dow) % 7 || 7;
+      const gteUtc = todayStartUtc + daysUntilNextSun * dayMs;
+      const lteUtc = gteUtc + 7 * dayMs;
+      return { gte: new Date(gteUtc).toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "this_month": {
+      // First of next month at IL midnight.
+      const nextMonthFirstNaive = Date.UTC(y, m, 1, 0, 0, 0);
+      const lteUtc = nextMonthFirstNaive - ilOffsetMs(new Date(nextMonthFirstNaive));
+      return { gte: nowUtc.toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+  }
 }
 
 // Canonical shopping category order + emoji. MUST stay in sync with
@@ -7739,6 +7833,7 @@ const LR_LABELS: Record<ListType, LrLabel> = {
   event:    { singular: "אירוע אחד",               plural: "אירועים",                  webPath: "/events" },
   expense:  { singular: "הוצאה אחת",               plural: "הוצאות",                   webPath: "/expenses" },
   reminder: { singular: "תזכורת אחת",              plural: "תזכורות",                  webPath: "/reminders" },
+  all:      { singular: "פריט אחד",                plural: "פריטים",                   webPath: "" },
 };
 
 const LR_EMPTY_PLURAL: Record<ListType, string> = {
@@ -7747,18 +7842,46 @@ const LR_EMPTY_PLURAL: Record<ListType, string> = {
   event:    "אירועים מתוכננים",
   expense:  "הוצאות רשומות",
   reminder: "תזכורות פתוחות",
+  all:      "פריטים ברשימות",
 };
 
-function renderList(args: { type: ListType; items: ListItem[] }): string {
-  const { type, items } = args;
+// Title prefixes for event time-window queries. Stays empty for "all"
+// (default) so the regular list renderer header is unchanged.
+const LR_EVENT_WINDOW_TITLE: Record<EventTimeWindow, string> = {
+  today:      "היום",
+  tomorrow:   "מחר",
+  this_week:  "השבוע",
+  next_week:  "השבוע הבא",
+  this_month: "החודש",
+  all:        "",
+};
+
+function renderList(args: { spec: ListQuerySpec; items: ListItem[] }): string {
+  const { spec, items } = args;
+  const type = spec.type;
   const label = LR_LABELS[type];
   const n = items.length;
 
-  if (n === 0) return `אין ${LR_EMPTY_PLURAL[type]} כרגע 🧡`;
+  // Calendar time-window header. "מה השבוע?" → "השבוע יש לכם N אירועים..."
+  const windowPrefix = (type === "event" && spec.timeWindow && spec.timeWindow !== "all")
+    ? LR_EVENT_WINDOW_TITLE[spec.timeWindow] : "";
+
+  if (n === 0) {
+    if (windowPrefix) return `אין אירועים מתוכננים ${windowPrefix} 🧡`;
+    return `אין ${LR_EMPTY_PLURAL[type]} כרגע 🧡`;
+  }
 
   if (type === "expense") {
     const countLabel = n === 1 ? label.singular : `${n} ${label.plural}`;
     return `יש לכם ${countLabel}. לצפייה מלאה: sheli.ai${label.webPath}`;
+  }
+
+  if (type === "event" && windowPrefix) {
+    // Format event lines with their date when window is "all" or > 1 day.
+    if (n === 1) return `${windowPrefix} יש לכם אירוע אחד: ${items[0].title}.`;
+    const lines = items.slice(0, 10).map((i) => i.title).join("\n");
+    const more = n > 10 ? `\n\nעוד ${n - 10} אירועים. הכל ב-sheli.ai${label.webPath}` : "";
+    return `${windowPrefix} יש לכם ${n} אירועים:\n${lines}${more}`;
   }
 
   if (n === 1) return `יש לכם ${label.singular}: ${items[0].title}.`;
@@ -7766,6 +7889,51 @@ function renderList(args: { type: ListType; items: ListItem[] }): string {
   if (type === "shopping") return lrRenderShopping(items, label);
 
   return lrRenderFlat(items, n, label);
+}
+
+// Multi-section "all-lists" rendering. Invoked when detectListQuery returns
+// type==="all" — users asking "מה ברשימות?" / "תציגי לי את כל מה שרשמת" want
+// a single overview, not per-domain queries. Renders empty sections as "ריק"
+// so the user sees the full surface area at a glance.
+function renderAllLists(snap: {
+  tasks: ListItem[]; shopping: ListItem[]; events: ListItem[]; reminders: ListItem[];
+}): string {
+  const lines: string[] = [];
+
+  // Tasks
+  lines.push("📋 *מטלות*");
+  if (snap.tasks.length === 0) lines.push("(ריק)");
+  else snap.tasks.slice(0, 8).forEach((t) => lines.push(t.title));
+  if (snap.tasks.length > 8) lines.push(`...ועוד ${snap.tasks.length - 8}`);
+  lines.push("");
+
+  // Shopping
+  lines.push("🛒 *קניות*");
+  if (snap.shopping.length === 0) lines.push("(ריק)");
+  else snap.shopping.slice(0, 8).forEach((s) => lines.push(s.title));
+  if (snap.shopping.length > 8) lines.push(`...ועוד ${snap.shopping.length - 8}`);
+  lines.push("");
+
+  // Events
+  lines.push("📅 *אירועים*");
+  if (snap.events.length === 0) lines.push("(ריק)");
+  else snap.events.slice(0, 8).forEach((e) => lines.push(e.title));
+  if (snap.events.length > 8) lines.push(`...ועוד ${snap.events.length - 8}`);
+  lines.push("");
+
+  // Reminders
+  lines.push("🔔 *תזכורות*");
+  if (snap.reminders.length === 0) lines.push("(ריק)");
+  else snap.reminders.slice(0, 8).forEach((r) => lines.push(r.title));
+  if (snap.reminders.length > 8) lines.push(`...ועוד ${snap.reminders.length - 8}`);
+
+  // Web link if anything is non-trivially long.
+  const total = snap.tasks.length + snap.shopping.length + snap.events.length + snap.reminders.length;
+  if (total > 20) {
+    lines.push("");
+    lines.push("הכל ב-sheli.ai 📱");
+  }
+  return lines.join("\n");
 }
 
 function lrRenderFlat(items: ListItem[], n: number, label: LrLabel): string {
@@ -7823,35 +7991,79 @@ function lrRenderShopping(items: ListItem[], label: LrLabel): string {
   return out;
 }
 
-function detectListQuery(text: string): ListType | null {
-  // IMPORTANT: no \b around Hebrew — JS regex \b is ASCII-only by default.
-  // Bare substring is correct because Hebrew inseparable prefixes (ה/ב/ל/מ/כ/ש)
-  // fuse onto nouns ("בקניות", "הקניות", "לקניות" all match the substring).
-  if (/מטלות|דברים\s+לעשות|\bto.?do\b/i.test(text)) return "task";
-  // Shopping: original "קניות" patterns PLUS bare "רשימה" forms. "רשימה" alone
-  // is colloquially the shopping list in Hebrew WhatsApp groups — users say
-  // "רשימה" / "הרשימה" / "תציגי לי את הרשימה" / "מה ברשימה". Before this,
-  // those fell to Sonnet which flat-rendered 15+ item lists and skipped
-  // category grouping. Task/event/expense/reminder checks with their own
-  // distinctive vocabulary (מטלות / אירועים / הוצאות / תזכורות) still win
-  // when explicit — they're checked first or use unambiguous tokens.
-  if (
-    /קני(?:ות|יה)|רשימת?\s+קניות|\bshopping\b/i.test(text) ||
-    /(?:^|\s)ה?רשימה(?:\s|$|[?!.,])/i.test(text) ||
-    /תראי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה/i.test(text) ||
-    /תציגי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה/i.test(text) ||
-    /מה\s+(?:יש\s+)?ב?רשימה/i.test(text)
-  ) return "shopping";
-  if (/אירועים|פגישות|ביומן|\bevents?\b|\bcalendar\b/i.test(text)) return "event";
-  if (/הוצאות|כמה\s+(?:הוצאנו|שילמנו)|\bexpenses?\b/i.test(text)) return "expense";
-  if (/תזכורות|\breminders?\b/i.test(text)) return "reminder";
+// Domain-specific token regexes. Each matches the unambiguous vocabulary for
+// that list type. Order of evaluation matters in detectListQuery() — the
+// most-specific / least-ambiguous domains are checked first. The bare "רשימה"
+// fallback for shopping is the LAST check and only fires when no other
+// domain's tokens are present.
+//
+// Hebrew note: no \b anchors (JS \b is ASCII-only). Bare substrings are
+// correct because Hebrew inseparable prefixes (ה/ב/ל/מ/כ/ש) fuse onto nouns.
+const LQ_ALL_LISTS_RE = /מה\s+(?:יש\s+)?ברשימות|מה\s+ברשימות|כל\s+הרשימות|תציגי\s+(?:לי\s+)?(?:את\s+)?כל\s+מה\s+שרשמת|תוציאי\s+(?:לי\s+)?(?:את\s+)?ה?כל|מה\s+רשמת|מה\s+רשום|כל\s+מה\s+שיש\s+לי|הראי\s+לי\s+הכל|\beverything\b|\ball\s+lists\b|\boverview\b/i;
+const LQ_CALENDAR_RE = /ביומן|יומן|אירועים|פגישות|לו["']?ז|אג'נדה|מה\s+(?:יש\s+)?(?:לי\s+)?(?:היום|מחר|השבוע(?:\s+הבא)?|החודש|בסוף\s+שבוע|בשבוע\s+הבא)|איזה\s+אירועים|אירועים\s+רשומים|מה\s+מתוכנן|\bcalendar\b|\bevents?\b|\bschedule\b|\bagenda\b|\bthis\s+week\b|\bnext\s+week\b|\btoday\b|\btomorrow\b/i;
+const LQ_REMINDERS_RE = /תזכורות|איזה\s+תזכורות|מה\s+התזכורות|מה\s+תזכרת\s+לי|\breminders?\b/i;
+const LQ_EXPENSES_RE = /הוצאות|כמה\s+(?:הוצאנו|שילמנו|עלה\s+לנו)|סיכום\s+הוצאות|\bexpenses?\b|\bspending\b/i;
+const LQ_TASKS_RE = /מטלות|משימות|דברים\s+לעשות|מה\s+צריך\s+לעשות|\bto.?do\b|\btasks?\b|\bchores?\b/i;
+const LQ_SHOPPING_PRIMARY_RE = /קני(?:ות|יה)|רשימת?\s+קניות|מה\s+ב?קניות|\bshopping\b|\bgroceries\b/i;
+// Bare-"רשימה" shopping fallback. Only fires when NONE of the above
+// domain tokens appear in the message.
+const LQ_SHOPPING_BARE_LIST_RE = /(?:^|\s)ה?רשימה(?:\s|$|[?!.,])|תראי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה|תציגי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה|מה\s+(?:יש\s+)?ב?רשימה/i;
+
+// Detect a calendar time-window phrase. Returns the matching window or
+// undefined when no window phrase is present (caller defaults to "all").
+function detectEventTimeWindow(text: string): EventTimeWindow | undefined {
+  if (/בסוף\s+שבוע|next\s+weekend|this\s+weekend/i.test(text)) return "next_week";
+  if (/השבוע\s+הבא|next\s+week/i.test(text)) return "next_week";
+  if (/החודש|this\s+month/i.test(text)) return "this_month";
+  if (/השבוע|this\s+week/i.test(text)) return "this_week";
+  if (/מחר|tomorrow/i.test(text)) return "tomorrow";
+  if (/(?:^|\s)היום(?:\s|$|[?!.,])|today/i.test(text)) return "today";
+  return undefined;
+}
+
+function detectListQuery(text: string): ListQuerySpec | null {
+  if (!text) return null;
+
+  // Order of checks: most-specific / least-ambiguous → bare "רשימה" last.
+  // (1) All-lists / superset wins outright — "מה ברשימות" is a clear umbrella.
+  if (LQ_ALL_LISTS_RE.test(text)) return { type: "all" };
+
+  // (2) Calendar tokens beat shopping. Crucial: the user's churn message
+  // "רשימה של כל מה שכתוב ביומן" contains BOTH "רשימה" and "ביומן" — by
+  // checking calendar before shopping AND requiring shopping to be primary
+  // (not bare-"רשימה"), calendar wins. Same for "מה השבוע" / "מה מחר".
+  if (LQ_CALENDAR_RE.test(text)) {
+    const tw = detectEventTimeWindow(text);
+    return { type: "event", timeWindow: tw };
+  }
+
+  // (3) Reminders.
+  if (LQ_REMINDERS_RE.test(text)) return { type: "reminder" };
+
+  // (4) Expenses.
+  if (LQ_EXPENSES_RE.test(text)) return { type: "expense" };
+
+  // (5) Tasks.
+  if (LQ_TASKS_RE.test(text)) return { type: "task" };
+
+  // (6) Shopping — primary tokens (קניות / shopping / groceries).
+  if (LQ_SHOPPING_PRIMARY_RE.test(text)) return { type: "shopping" };
+
+  // (7) Last resort: bare "רשימה" only when no other domain matched above.
+  // Negation guard: if message contains "לא" + "קניות" (user denying a
+  // previous shopping render), DON'T match — let the call site's
+  // correction guard handle the pivot.
+  if (LQ_SHOPPING_BARE_LIST_RE.test(text) && !/לא\s+(?:ביקשתי\s+)?קניות/i.test(text)) {
+    return { type: "shopping" };
+  }
   return null;
 }
 
 // Pull live items for a given list type. Caller owns household scoping.
-// Caps at 100 rows — renderer truncates to 5 visible items for any list >10
-// and shows "see web for full list" link, so higher limits just waste query time.
-async function fetchItemsForList(householdId: string, type: ListType): Promise<ListItem[]> {
+// Caps at 100 rows per type. For type==="all", returns the concatenation
+// (caller uses fetchAllListsSnapshot for per-type sections).
+async function fetchItemsForList(householdId: string, spec: ListQuerySpec): Promise<ListItem[]> {
+  const type = spec.type;
   switch (type) {
     case "task": {
       const { data } = await supabase
@@ -7879,13 +8091,18 @@ async function fetchItemsForList(householdId: string, type: ListType): Promise<L
       });
     }
     case "event": {
-      const { data } = await supabase
+      // Apply the requested time window (default "all" = any future event).
+      const window = spec.timeWindow || "all";
+      const range = eventWindowRange(window);
+      let q = supabase
         .from("events")
         .select("title, scheduled_for")
         .eq("household_id", householdId)
-        .gt("scheduled_for", new Date().toISOString())
+        .gte("scheduled_for", range.gte)
         .order("scheduled_for", { ascending: true })
         .limit(100);
+      if (range.lte) q = q.lt("scheduled_for", range.lte);
+      const { data } = await q;
       return (data || []).map((r: any) => ({
         title: String(r.title || ""),
         dueDate: r.scheduled_for || undefined,
@@ -7918,7 +8135,103 @@ async function fetchItemsForList(householdId: string, type: ListType): Promise<L
         dueDate: r.send_at || undefined,
       }));
     }
+    case "all": {
+      // Concatenated view (rarely useful — multi-section render goes through
+      // fetchAllListsSnapshot + renderAllLists). Kept for type-completeness.
+      const snap = await fetchAllListsSnapshot(householdId);
+      return [...snap.tasks, ...snap.shopping, ...snap.events, ...snap.reminders];
+    }
   }
+}
+
+// Negation/correction guard for the deterministic list renderer.
+// If Sheli's most recent bot reply in this group/chat was a list_query_rendered
+// (or _all / _corrected) of domain X, AND the current user message contains a
+// negation ("לא") plus a clear token for a DIFFERENT domain Y, override the
+// detected spec to point at Y. Returns the corrected spec, or null if no
+// correction applies. Tags the spec with __corrected=true so the call site
+// logs `list_query_corrected` for observability.
+//
+// This is the explicit guard against the 2026-05-03 churn pattern: shopping
+// rendered when calendar was asked, then identical wrong reply repeated
+// after the user explicitly corrected Sheli.
+async function maybeCorrectListDomain(
+  message: IncomingMessage,
+  detectedSpec: ListQuerySpec,
+): Promise<(ListQuerySpec & { __corrected?: boolean }) | null> {
+  const text = message.text || "";
+  // Cheap cue: must contain a negation. "לא X" / "I didn't" / "not".
+  if (!/\bלא\b|לא\s+ביקש|דווקא\s+לא|\bnot\b|\bdidn'?t\b/i.test(text)) return null;
+
+  try {
+    const groupKey = (message.groupId || "").split("@")[0];
+    if (!groupKey) return null;
+    // Pull the bot's last 3 replies in this chat. We only care about the most
+    // recent that was list_query_rendered* — limit 3 is plenty.
+    const { data } = await supabase
+      .from("whatsapp_messages")
+      .select("classification, created_at")
+      .eq("group_id", groupKey)
+      .eq("sender_phone", Deno.env.get("BOT_PHONE_NUMBER") || "972555175553")
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const lastBotList = (data || []).find((r: any) =>
+      typeof r.classification === "string" && r.classification.startsWith("list_query_rendered")
+    );
+    if (!lastBotList) return null;
+
+    // Reverse-engineer the previous domain from classification label. We
+    // don't store the domain explicitly per row, but we can infer from
+    // re-running the same regex over the original user message stored as
+    // last_user_msg_in_chat — too involved. Simpler heuristic: if the user
+    // is now mentioning a different domain than the spec we'd already
+    // detect, AND that mention is paired with a negation, pivot.
+    //
+    // Concretely: look at the CURRENT message. If the regex detects domain
+    // X but the message ALSO contains an unambiguous token for domain Y
+    // alongside the negation, return { type: Y, __corrected: true }.
+
+    // Calendar correction: "לא ... ביומן" / "ביקשתי ביומן".
+    if (LQ_CALENDAR_RE.test(text) && detectedSpec.type !== "event") {
+      const tw = detectEventTimeWindow(text);
+      return { type: "event", timeWindow: tw, __corrected: true };
+    }
+    // Shopping correction: "לא ... קניות" / "ביקשתי קניות".
+    if (LQ_SHOPPING_PRIMARY_RE.test(text) && detectedSpec.type !== "shopping"
+        && /ביקשתי\s+קניות|דווקא\s+(?:ה?)?קניות/i.test(text)) {
+      return { type: "shopping", __corrected: true };
+    }
+    // Tasks correction.
+    if (LQ_TASKS_RE.test(text) && detectedSpec.type !== "task"
+        && /ביקשתי\s+(?:ה?)?מטלות|דווקא\s+מטלות/i.test(text)) {
+      return { type: "task", __corrected: true };
+    }
+    // Reminders correction.
+    if (LQ_REMINDERS_RE.test(text) && detectedSpec.type !== "reminder"
+        && /ביקשתי\s+(?:ה?)?תזכורות|דווקא\s+תזכורות/i.test(text)) {
+      return { type: "reminder", __corrected: true };
+    }
+    return null;
+  } catch (err) {
+    console.warn("[maybeCorrectListDomain] error:", (err as Error).message);
+    return null;
+  }
+}
+
+// Parallel fetch of the four user-facing lists (tasks / shopping / events /
+// reminders) for the multi-section "all" renderer. Expenses are intentionally
+// excluded — they're not a checklist, they're a ledger; users asking "what
+// have I written down" don't usually mean expense rows.
+async function fetchAllListsSnapshot(householdId: string): Promise<{
+  tasks: ListItem[]; shopping: ListItem[]; events: ListItem[]; reminders: ListItem[];
+}> {
+  const [tasks, shopping, events, reminders] = await Promise.all([
+    fetchItemsForList(householdId, { type: "task" }),
+    fetchItemsForList(householdId, { type: "shopping" }),
+    fetchItemsForList(householdId, { type: "event", timeWindow: "all" }),
+    fetchItemsForList(householdId, { type: "reminder" }),
+  ]);
+  return { tasks, shopping, events, reminders };
 }
 
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
@@ -11564,15 +11877,54 @@ Deno.serve(async (req: Request) => {
       // guaranteed-correct, hallucination-free answer. Non-list questions
       // (e.g. "מי בתור לכלים?") fall through to Sonnet as before.
       if (classification.intent === "question") {
-        const listType = detectListQuery(message.text);
-        if (listType) {
-          const items = await fetchItemsForList(householdId, listType);
-          const rendered = renderList({ type: listType, items });
-          await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
-            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "list_query_rendered"
-          });
-          await logMessage(message, "list_query_rendered", householdId, classification);
-          console.log(`[Webhook] List query rendered: type=${listType} items=${items.length} for ${householdId}`);
+        // Entity-first routing: when Haiku populates entities.list_type
+        // (and optionally entities.time_window), trust it over the regex.
+        // Falls back to regex detectListQuery() when entities are absent.
+        const ent = (classification.entities || {}) as Record<string, unknown>;
+        const entListType = typeof ent.list_type === "string"
+          ? (ent.list_type as ListType) : null;
+        const entTimeWindow = typeof ent.time_window === "string"
+          ? (ent.time_window as EventTimeWindow) : undefined;
+        let spec: ListQuerySpec | null = null;
+        if (entListType && (["task","shopping","event","expense","reminder","all"] as const).includes(entListType as any)) {
+          spec = { type: entListType, timeWindow: entTimeWindow };
+        } else {
+          spec = detectListQuery(message.text);
+        }
+
+        // Negation/correction guard: if Sheli's most recent reply in this
+        // group rendered domain X and the new message contains "לא" plus a
+        // token for a different domain Y, force the route to Y. This is the
+        // explicit fix for the "המשפחה שלי" churn where two consecutive
+        // identical wrong-list replies killed the family. See post-mortem
+        // 2026-05-03.
+        if (spec) {
+          const corrected = await maybeCorrectListDomain(message, spec);
+          if (corrected) spec = corrected;
+        }
+
+        if (spec) {
+          if (spec.type === "all") {
+            const snap = await fetchAllListsSnapshot(householdId);
+            const rendered = renderAllLists(snap);
+            await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId,
+              replyType: "list_query_rendered_all",
+            });
+            await logMessage(message, "list_query_rendered_all", householdId, classification);
+            const total = snap.tasks.length + snap.shopping.length + snap.events.length + snap.reminders.length;
+            console.log(`[Webhook] List-query rendered all: total=${total} for ${householdId}`);
+          } else {
+            const items = await fetchItemsForList(householdId, spec);
+            const rendered = renderList({ spec, items });
+            const replyType = (spec as any).__corrected
+              ? "list_query_corrected" : "list_query_rendered";
+            await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType,
+            });
+            await logMessage(message, replyType, householdId, classification);
+            console.log(`[Webhook] List query rendered: type=${spec.type} window=${spec.timeWindow || "-"} items=${items.length} for ${householdId}`);
+          }
           return new Response("OK", { status: 200 });
         }
       }
