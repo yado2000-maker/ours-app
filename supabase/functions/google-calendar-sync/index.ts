@@ -25,9 +25,47 @@ interface SyncRequest {
   accessToken: string;
   event: {
     title: string;
-    scheduledFor: string;  // ISO 8601, e.g. "2026-05-01T11:00:00+03:00"
+    scheduledFor: string;  // ISO 8601 — accepts both offset-bearing ("...Z" / "...+03:00") and naive ("2026-05-04T09:00:00"). Naive strings are interpreted as Asia/Jerusalem local time (DST-aware).
     durationMinutes?: number;
   };
+}
+
+const TZ_NAME = "Asia/Jerusalem";
+
+// True if the ISO string carries an explicit timezone (Z or +/-NN:NN suffix).
+function hasTimezoneSuffix(iso: string): boolean {
+  return /Z$|[+-]\d{2}:?\d{2}$/.test(iso);
+}
+
+// DST-aware Asia/Jerusalem offset (in minutes) for a given UTC moment.
+// Returns +180 in IDT (summer), +120 in IST (winter).
+function ilOffsetMinutes(utcDate: Date): number {
+  const part = new Intl.DateTimeFormat("en", {
+    timeZone: TZ_NAME,
+    timeZoneName: "shortOffset",
+  }).formatToParts(utcDate).find(p => p.type === "timeZoneName")?.value;
+  if (!part) return 180;  // safe fallback for IDT
+  const m = part.match(/([+-])(\d{1,2})(?::?(\d{2}))?/);
+  if (!m) return 0;  // GMT / UTC with no offset
+  const sign = m[1] === "+" ? 1 : -1;
+  const hours = parseInt(m[2], 10) || 0;
+  const minutes = parseInt(m[3] ?? "0", 10) || 0;
+  return sign * (hours * 60 + minutes);
+}
+
+// Parse an ISO string to UTC milliseconds. Naive strings are interpreted as
+// Asia/Jerusalem local time using the offset that applies AT that wall-clock
+// moment (handles DST correctly).
+function parseToUtcMs(iso: string): number {
+  if (hasTimezoneSuffix(iso)) {
+    return new Date(iso).getTime();
+  }
+  // Naive: tentatively parse as UTC, then subtract the IL offset that would
+  // apply at that wall-clock moment to recover the real UTC instant.
+  const tentativeMs = new Date(iso + "Z").getTime();
+  if (isNaN(tentativeMs)) return NaN;
+  const offsetMin = ilOffsetMinutes(new Date(tentativeMs));
+  return tentativeMs - offsetMin * 60_000;
 }
 
 const corsHeaders: Record<string, string> = {
@@ -64,7 +102,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: false, error: "missing fields" }, 400);
   }
 
-  const startMs = new Date(event.scheduledFor).getTime();
+  const startMs = parseToUtcMs(event.scheduledFor);
   if (isNaN(startMs)) {
     return jsonResponse({ ok: false, error: "invalid scheduledFor" }, 400);
   }
@@ -82,8 +120,8 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         summary: event.title,
-        start: { dateTime: startIso, timeZone: "Asia/Jerusalem" },
-        end: { dateTime: endIso, timeZone: "Asia/Jerusalem" },
+        start: { dateTime: startIso, timeZone: TZ_NAME },
+        end: { dateTime: endIso, timeZone: TZ_NAME },
         source: { title: "Sheli", url: "https://sheli.ai" },
       }),
     }
