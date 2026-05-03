@@ -265,7 +265,7 @@ interface ReplyResult {
 interface ClassifiedAction {
   // Patch D (Shira 2026-04-15): added complete_shopping_by_names + complete_tasks_all_open
   // for quote-reply completions where the executor resolves names/scopes to IDs via DB lookup.
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense" | "clear_list";
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense" | "clear_list" | "set_reminder_rule";
   data: Record<string, unknown>;
 }
 
@@ -408,6 +408,23 @@ class WhapiProvider implements WhatsAppProvider {
       // Keep it in both text (for downstream text-based flow) and imageCaption
       // (preserved so the OCR merger can distinguish caption from OCR output).
       const resolvedText = (resolvedType === "image" && !text && imageCaption) ? imageCaption : text;
+
+      // Image instrumentation (P3 #14, 2026-05-03 churn). On 2026-05-01 a
+      // family sent 2 test-schedule images that NEVER appeared in
+      // whatsapp_messages — Whapi delivery failure or webhook filter regression.
+      // The single best diagnostic line: every inbound image emits a
+      // [Webhook:IMAGE] log on first parse, with mime, id, caption-length,
+      // and ms-since-Whapi-send so we can detect non-delivery + reconcile
+      // against Whapi /messages/list later. Cheap (one console.log/image),
+      // catches both regression classes.
+      if (resolvedType === "image") {
+        const captionLen = (imageCaption || "").length;
+        const sentAtMs = typeof timestamp === "number" ? timestamp * 1000 : 0;
+        const ageMs = sentAtMs > 0 ? Date.now() - sentAtMs : -1;
+        console.log(
+          `[Webhook:IMAGE] id=${id} group=${groupId} from=${from.replace("@s.whatsapp.net", "")} mime=${mediaMimeType || "?"} captionLen=${captionLen} ageMs=${ageMs} forwarded=${forwardedFlag}`,
+        );
+      }
 
       return {
         messageId: id,
@@ -684,7 +701,7 @@ INTENTS:
 - ignore: Social noise (greetings, reactions, emojis, jokes, chatter, forwarded messages, status updates). ~80% of messages.
 - add_shopping: Adding item(s) to shopping list. Bare nouns, "צריך X", "נגמר X", "אין X".
 - add_task: Creating a chore/to-do. "צריך ל...", "[person] [activity] [time]", maintenance requests. Works for personal tasks ("לשלם חשבון") and shared chores. Includes cleaning (ניקיון, לנקות, לסדר), laundry (כביסה, קיפול, גיהוץ), kitchen chores (כלים, לשטוף, לפנות), trash (זבל, להוציא זבל), errands (לשלם, לשלוח, להתקשר, לתאם, להזמין), maintenance (לתקן, להחליף, לבדוק), kids/school (חוזה, טופס, שיעורי בית, להחתים). Multi-chore bursts (newline/comma list of chores) → classify first chore at conf 0.75 + needs_conversation_review: true so Sonnet can expand into all actions.
-- add_event: Scheduling a specific date/time event. Appointments (רופא, רופא שיניים, וטרינר, ועדה), classes/activities (חוג, שיעור, אימון, חזרה, לימודים, הרצאה), meals out (ארוחה, ארוחת ערב, ארוחה משפחתית, ברביקיו), meetings (פגישה, ישיבה, שיחה), social (יום הולדת, חתונה, בר מצווה, ברית, מסיבה, אירוע), trips (טיול, נופש, טיסה, ביקור). Always has an implicit or explicit date/time. Multi-event bursts → classify first event + needs_conversation_review: true.
+- add_event: Scheduling a specific date/time event. Appointments (רופא, רופא שיניים, וטרינר, ועדה), classes/activities (חוג, שיעור, אימון, חזרה, לימודים, הרצאה), meals out (ארוחה, ארוחת ערב, ארוחה משפחתית, ברביקיו), meetings (פגישה, ישיבה, שיחה), social (יום הולדת, חתונה, בר מצווה, ברית, מסיבה, אירוע), trips (טיול, נופש, טיסה, ביקור). Always has an implicit or explicit date/time. Multi-event bursts → classify first event + needs_conversation_review: true. NO-TIME RULE (Bug 5, 2026-05-03 churn): if the message has a DATE but NO time-of-day (e.g. forwarded school messages "ביום ראשון יתקיים מבחן בשפה"), set entities.time_missing=true and DO NOT guess a default like 09:00. The webhook will route to a confirmation_ask "באיזו שעה?" instead of saving with a hallucinated time. Triggers: school-message regex (יתקיים\|יערך\|יחל\|מבחן\|טקס\|אסיפה\|טיול\|פעילות\|אירוע מיוחד) + a date BUT no hour-of-day pattern (no \\d{1,2}:\\d{2}, no \"בשעה X\", no \"ב-X\", no \"בבוקר\\|בערב\\|בלילה\\|בצהריים\").
 - complete_task: Marking an existing task as done. Past tense of open task, "סיימתי", "בוצע".
 - complete_shopping: Confirming purchase of a list item. "קניתי", "יש", "לקחתי".
 - question: Asking about current state (tasks, schedule, list). "מה צריך?", "מה ברשימה?", "מה יש היום?".
@@ -695,7 +712,7 @@ INTENTS:
 - instruct_bot: Parent EXPLAINING a rule or management preference to Sheli. Teaching/explanatory tone — "ככה...", "אמרתי ש...", "את אמורה ל...", "צריך לנהל את זה ככה ש...". NOT a direct command — it's teaching how things should work. Frustration/repetition signals also indicate instruct_bot.
 - save_memory: User asks Sheli to remember something specific. "תזכרי ש...", "תרשמי לך ש...", "אל תשכחי ש...". Must be a personal/family fact, NOT a task or reminder.
 - recall_memory: User asks what Sheli remembers about someone or the family. "מה את זוכרת על...?", "מה ידוע לך על...?", "ספרי לי מה את יודעת על...".
-- delete_memory: User asks Sheli to forget something. "תשכחי את זה", "תמחקי את הזיכרון", "אל תזכרי את זה יותר".
+- delete_memory: User asks Sheli to FORGET A FACT/MEMORY (not an item from a list). Triggers contain "זיכרון" or "מה שאמרתי" or "מה שזכרת" or are pure "תשכחי את הזיכרון". CRITICAL: when the user says "תמחקי אותו" / "תמחקי את זה" / "בטלי את זה" / "מחקי" with a PRONOUN whose referent is Sheli's PREVIOUS turn (an add_event / add_reminder / add_task / add_shopping confirmation), this is correct_bot — NOT delete_memory. Pronoun-only deletes route to correct_bot so the actual recent action gets undone. Pure delete_memory only when the message names "זיכרון" / "מה שזכרת" / "מה שאמרתי לך לפני" or similar memory-vocabulary explicitly.
 - add_expense: Logging a household payment/cost that ALREADY HAPPENED. Hebrew triggers include many forms:
   PAYMENT VERBS (past tense): "שילמתי/שילמנו/שולם/שילם/שילמה" (paid), "העברתי" (transferred), "הוצאתי/הוציא" (spent), "כיסיתי" (covered), "סגרתי" (closed/settled).
   COST VERBS (past tense): "עלה/עלתה לי/לנו X" (cost me/us X — PAST), "יצא לנו X" (came out to X), "ירד לי X" (was charged X).
@@ -1114,7 +1131,47 @@ EXAMPLES:
 [אבא]: "מי בתור למקלחת?" → {"intent":"question","confidence":0.90,"entities":{"raw_text":"מי בתור למקלחת?"}}
 [אמא]: "מי בתור" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מי בתור"}}
 [אבא]: "מה נשאר ברשימה" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה נשאר ברשימה"}}
-[אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן"}}
+[אמא]: "יש משהו ליומן" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"יש משהו ליומן","list_type":"event"}}
+// LIST-QUERY ENTITIES (2026-05-03 churn fix). For "question" intent, when the user is asking
+// to see a list, populate entities.list_type ∈ {task, shopping, event, reminder, all}. For
+// calendar queries, also populate entities.time_window ∈ {today, tomorrow, this_week,
+// next_week, this_month, all}. The webhook's deterministic list-renderer reads these
+// entities first; the legacy regex is a fallback for messages that didn't classify with
+// explicit entities. CRITICAL: "ביומן"/"לו'ז"/"אירועים" → list_type=event, NOT shopping —
+// even when the message also contains the word "רשימה". The single most-damaging
+// misclassification in 2026-05-03 was treating "רשימה ... ביומן" as shopping.
+[אבא]: "מה ביומן?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ביומן?","list_type":"event","time_window":"all"}}
+[אמא]: "תוציאי רשימה של כל מה שכתוב ביומן" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"תוציאי רשימה של כל מה שכתוב ביומן","list_type":"event","time_window":"all"}}
+[אבא]: "מה בלו\"ז?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה בלו\"ז?","list_type":"event","time_window":"all"}}
+[אמא]: "מה יש השבוע?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה יש השבוע?","list_type":"event","time_window":"this_week"}}
+[אבא]: "מה השבוע הבא?" → {"intent":"question","confidence":0.90,"addressed_to_bot":true,"entities":{"raw_text":"מה השבוע הבא?","list_type":"event","time_window":"next_week"}}
+[אמא]: "מה החודש?" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מה החודש?","list_type":"event","time_window":"this_month"}}
+[אבא]: "מה יש לי מחר?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה יש לי מחר?","list_type":"event","time_window":"tomorrow"}}
+[אמא]: "מה היום?" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"מה היום?","list_type":"event","time_window":"today"}}
+[אבא]: "איזה אירועים רשומים לך?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"איזה אירועים רשומים לך?","list_type":"event","time_window":"all"}}
+[אמא]: "מה ברשימות?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ברשימות?","list_type":"all"}}
+[אבא]: "תציגי לי את כל מה שרשמת" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"תציגי לי את כל מה שרשמת","list_type":"all"}}
+[אמא]: "כל מה שיש לי" → {"intent":"question","confidence":0.88,"addressed_to_bot":true,"entities":{"raw_text":"כל מה שיש לי","list_type":"all"}}
+[אבא]: "מה התזכורות?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה התזכורות?","list_type":"reminder"}}
+[אמא]: "איזה תזכורות יש לי?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"איזה תזכורות יש לי?","list_type":"reminder"}}
+[אבא]: "מה ברשימת קניות?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ברשימת קניות?","list_type":"shopping"}}
+// LOOKBACK PATTERN (P3 #15, 2026-05-03 churn). When user says "תרשמי/תוסיפי
+// את כל ה-X ששלחנו היום" referring to images/messages from EARLIER in the
+// chat, this is NOT an actionable add_event/add_shopping/add_task — Sheli
+// has no memory of past media. Classify as 'question' with confidence at
+// most 0.85 so Sonnet can reply honestly ("איזה מבחנים? לא ראיתי תמונות.
+// תוכלו לשלוח שוב?"). The 2026-05-03 churn root cause: Sheli treated this
+// as a single add_event, claimed "נרשם ביומן ✓ אזכיר לכם שבוע לפני כל
+// מבחן" and saved nothing — pure trust failure when the family checked
+// next morning.
+[אבא]: "תרשמי את כל המבחנים ששלחנו היום ותזכירי לנו שבוע לפני" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"תרשמי את כל המבחנים ששלחנו היום ותזכירי לנו שבוע לפני","lookback_ask":true}}
+[אמא]: "תוסיפי את כל הפריטים שכתבנו לפני" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"תוסיפי את כל הפריטים שכתבנו לפני","lookback_ask":true}}
+[אבא]: "תקראי את התמונות מקודם ותרשמי הכל" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"תקראי את התמונות מקודם ותרשמי הכל","lookback_ask":true}}
+// CORRECTION: when user says "לא ביקשתי X, ביקשתי Y" — classify by the POSITIVE domain (Y),
+// not the negation (X). The renderer's correction-guard handles the actual pivot, but
+// supplying list_type from Haiku is faster + more reliable.
+[אבא]: "לא ביקשתי קניות, ביקשתי מה שרשום ביומן" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"לא ביקשתי קניות, ביקשתי מה שרשום ביומן","list_type":"event","time_window":"all"}}
+[אמא]: "לא ביומן, בקניות" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"לא ביומן, בקניות","list_type":"shopping"}}
 [אור]: "לאסוף את שושי?" → {"intent":"ignore","confidence":0.88,"entities":{"raw_text":"לאסוף את שושי?"}}
 [אמא]: "להביא חלב מהמכולת?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"להביא חלב מהמכולת?"}}
 [אבא]: "לקנות מתנה לסבתא?" → {"intent":"ignore","confidence":0.85,"entities":{"raw_text":"לקנות מתנה לסבתא?"}}
@@ -1157,6 +1214,23 @@ EXAMPLES:
 [אמא]: "שלי תזכרי שיובל אוהב פיצה עם אננס" → {"intent":"save_memory","confidence":0.95,"entities":{"memory_content":"יובל אוהב פיצה עם אננס","memory_about":"יובל","raw_text":"שלי תזכרי שיובל אוהב פיצה עם אננס"}}
 [אבא]: "שלי מה את זוכרת על נועה?" → {"intent":"recall_memory","confidence":0.90,"entities":{"memory_about":"נועה","raw_text":"שלי מה את זוכרת על נועה?"}}
 [אמא]: "שלי תשכחי את מה שאמרתי קודם" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"שלי תשכחי את מה שאמרתי קודם"}}
+// PRONOUN-DELETE → correct_bot (2026-05-03 churn fix). When user says "תמחקי
+// אותו"/"את זה"/"בטלי את זה" referring to Sheli's MOST RECENT add_event /
+// add_reminder / add_task / add_shopping, this is correct_bot — NOT
+// delete_memory. The handleCorrection flow will resolve the referent against
+// recent actions and remove the actual row. delete_memory only fires when the
+// message names a MEMORY explicitly ("הזיכרון", "מה שאמרתי", "מה שזכרת").
+// In the 2026-05-03 churn the בית-החמים family said "תמחקי אותו" right after
+// Sheli's add_event for a school test, Haiku routed to delete_memory, the
+// event survived, and the next-day reminder fired — root trust failure.
+[אבא]: "תמחקי אותו" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"תמחקי אותו","correction_text":"תמחקי אותו"}}
+[אמא]: "תמחקי את זה" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"תמחקי את זה","correction_text":"תמחקי את זה"}}
+[אבא]: "בטלי את זה" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"בטלי את זה","correction_text":"בטלי את זה"}}
+[אמא]: "מחקי אותו" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"מחקי אותו","correction_text":"מחקי אותו"}}
+[אבא]: "לא, תמחקי את זה" → {"intent":"correct_bot","confidence":0.92,"entities":{"raw_text":"לא, תמחקי את זה","correction_text":"לא, תמחקי את זה"}}
+// Counter-examples: explicit memory-vocabulary still routes to delete_memory.
+[אמא]: "שלי תמחקי את הזיכרון הזה" → {"intent":"delete_memory","confidence":0.92,"entities":{"raw_text":"שלי תמחקי את הזיכרון הזה"}}
+[אבא]: "אל תזכרי את זה יותר" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"אל תזכרי את זה יותר"}}
 [אמא]: "שילמתי 1300 חשמל" → {"intent":"add_expense","confidence":0.95,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"שילמתי 1300 חשמל"}}
 [אבא]: "אבא שילם 500 סופר" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"סופר","expense_category":"מזון","expense_attribution":"named","expense_paid_by_name":"אבא","raw_text":"אבא שילם 500 סופר"}}
 [אמא]: "שילמנו 2400 ארנונה" → {"intent":"add_expense","confidence":0.94,"entities":{"amount_text":"2400","amount_minor":240000,"expense_currency":"ILS","expense_description":"ארנונה","expense_category":"ארנונה","expense_attribution":"joint","raw_text":"שילמנו 2400 ארנונה"}}
@@ -1453,6 +1527,12 @@ NEVER claim to have erased, cleared, reset, emptied, deleted, or wiped a list un
 If the user asks to clear a list ("תמחקי את הרשימה" / "נקי הכל" / "clear the list" / "start over") and you don't see a clear_list action result in the prompt: say honestly you're not sure which list, ask which one, and WAIT. Do not fake the action. Fabricating erasure is the single most damaging thing you can do to trust — users rely on their lists being real.
 
 Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".
+
+RULE-PERSISTENCE HONESTY — ABSOLUTE RULE (P2 #12, 2026-05-03 churn).
+When a user describes a HOUSEHOLD RULE for you to remember and apply later — auto-reminder defaults, tag-based behaviors, escalation policies, "X gets a week reminder, Y gets an hour", "always remind me 30 min before doctor appointments", "every Friday clean the pool" — do NOT confirm "מעולה, סידרתי!" / "מעולה, רשמתי" / "got it!" / "נרשם" UNLESS one of these is true:
+  (a) You emitted a structured action that the executor recognizes (create_rotation, set_reminder_rule, save_memory) AND the action result is in the prompt.
+  (b) The rule is being captured into a memory the user can verify ("save_memory" with the rule text).
+If NEITHER is true, BE HONEST about the limit. Template: "הבנתי את הכלל — אבל כרגע אני יכולה לזכור את זה רק כתזכורת לעצמי, לא להפעיל אותו אוטומטית. רוצים שארשום ותוכלו להזכיר לי בכל פעם, או שאשאל אתכם בכל אירוע?". The 2026-05-03 churn root cause #4: a user spent 5 turns explaining a tag-based reminder rule, Sheli said "מעולה, סידרתי! ✓" — and stored NOTHING. Next day Sheli wasn't applying the rule because no rule existed. Fabricating rule-persistence is a slow trust killer — users discover days later, not seconds later, so the damage compounds.
 
 RENAME HONESTY — ABSOLUTE RULE (חביב 2026-04-28):
 NEVER claim "תיקנתי את השם" / "שיניתי את התג" / "renamed" / "fixed the name" / "השם תוקן" without emitting a real rename_tag action AND seeing its result in the prompt. The 2026-04-28 incident: voice transcription created "אלקטרוסלנואיד" instead of "אלקטרוסליל"; user corrected; Sheli replied "אה סליחה! תיקנתי את השם לאלקטרוסליל 🔧" — but the DB still had three different spellings on three rows. Pure fabrication. The correct flow when the user says "the name is X not Y" / "השם הוא X לא Y" / "תקני את התג מ-Y ל-X":
@@ -2158,17 +2238,34 @@ If a family member later replies "כן" / "נשמע טוב" / "תזכירי" / "
       break;
     case "instruct_bot":
       actionSummary = `The user is explaining a household rule or management preference: "${e.raw_text}".
-Parse what they want into a structured action. Common patterns:
+Parse what they want into a structured action. Supported patterns:
 - Rotation setup: extract title, type (order/duty), members, frequency → action_type "create_rotation"
 - Rotation override: extract title, person → action_type "override_rotation"
+- Reminder rule (P2 #10, 2026-05-03 churn fix): the user wants Sheli to AUTO-REMIND a fixed time before events that match a tag/title pattern.
+  Triggers: "תזכירי X לפני [event-pattern]", "מבחן שבוע לפני, אחרת שעה לפני", "הכל חצי שעה לפני", "doctor appointments → 30min before".
+  When the rule names a tag/word (e.g. "מבחן" → 1 week, "רופא" → 30 min) → action_type "set_reminder_rule" with rule_type="tag_reminder", tag_pattern="<the word>", lead_time_minutes=<minutes>.
+  When the rule is a default for ALL events (e.g. "הכל חצי שעה לפני") → action_type "set_reminder_rule" with rule_type="reminder_default", lead_time_minutes=<minutes>.
+  IMPORTANT: when the user describes BOTH a tag rule AND a default ("מבחן שבוע לפני, אחרת שעה לפני"), emit TWO separate confirm-then-act turns — DO NOT bundle two action_data blocks. First ask "תג מבחן → שבוע לפני, נכון?" with PENDING_ACTION for the tag rule. After 👍, the user repeats for the default. The current PENDING_ACTION executor only handles one rule per confirmation.
 
 Reply in Hebrew with a SPECIFIC confirmation question showing exactly what you understood.
-Example: "הבנתי! תורות מקלחת: גילעד ← אביב, מתחלפים כל יום. היום תור של גילעד. נכון?"
+Example (rotation): "הבנתי! תורות מקלחת: גילעד ← אביב, מתחלפים כל יום. היום תור של גילעד. נכון?"
+Example (tag reminder): "הבנתי! כל אירוע עם 'מבחן' בשם — אזכיר שבוע לפני. נכון? 📚"
+Example (default reminder): "הבנתי! כל אירוע אחר — אזכיר שעה לפני. נכון? ⏰"
 
-IMPORTANT: Include a hidden block at the END of your reply:
-<!--PENDING_ACTION:{"action_type":"create_rotation","action_data":{"title":"מקלחת","rotation_type":"order","members":["גילעד","אביב"]}}-->
+IMPORTANT: Include a hidden block at the END of your reply matching the action shape:
+- Rotation: <!--PENDING_ACTION:{"action_type":"create_rotation","action_data":{"title":"מקלחת","rotation_type":"order","members":["גילעד","אביב"]}}-->
+- Tag reminder rule: <!--PENDING_ACTION:{"action_type":"set_reminder_rule","action_data":{"rule_type":"tag_reminder","tag_pattern":"מבחן","lead_time_minutes":10080}}-->
+- Default reminder rule: <!--PENDING_ACTION:{"action_type":"set_reminder_rule","action_data":{"rule_type":"reminder_default","lead_time_minutes":60}}-->
 
-If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear.`;
+Lead-time conversion table (use these EXACT values, never compute on your own):
+  30 min   → lead_time_minutes=30
+  1 hour   → lead_time_minutes=60
+  2 hours  → lead_time_minutes=120
+  1 day    → lead_time_minutes=1440
+  3 days   → lead_time_minutes=4320
+  1 week   → lead_time_minutes=10080
+
+If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear. Per RULE-PERSISTENCE HONESTY in SHARED_GROUNDING_RULES: never confirm "סידרתי" without an emitted PENDING_ACTION + executor result.`;
       break;
     case "save_memory":
       actionSummary = `${sender} wants Sheli to remember: "${e.memory_content || e.raw_text}". About: ${e.memory_about || "general"}. Save this as a family memory and confirm warmly.`;
@@ -2177,7 +2274,15 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
       actionSummary = `${sender} is asking what Sheli remembers about ${e.memory_about || "the family"}. Share what you know from the FAMILY MEMORIES section below — warmly, like telling a story. If no memories match, say you're still getting to know them.`;
       break;
     case "delete_memory":
-      actionSummary = `${sender} wants Sheli to forget something. Confirm you'll forget it, keep it light.`;
+      // P1 (2026-05-03 churn fix): when the handler couldn't find a memory to
+      // match, do NOT silently confirm "מחקתי" — that's exactly the lie the
+      // 2026-05-03 churn experienced ("אוקיי, מחקתי 🗑️" while the event
+      // survived). Ask honestly what to forget.
+      if ((classification as any).__deleteMemoryNoMatch) {
+        actionSummary = `${sender} asked Sheli to forget something, but Sheli couldn't find a matching memory. DO NOT say "מחקתי" or pretend anything was deleted. Reply honestly: ask "מה תרצי שאשכח?" / "איזה זיכרון בדיוק?" — keep it warm, one short sentence. NEVER claim to have deleted anything that wasn't actually deleted.`;
+      } else {
+        actionSummary = `${sender} wants Sheli to forget something. A matching memory was found and soft-deleted. Confirm warmly, keep it light.`;
+      }
       break;
     case "add_expense":
       if (!e.amount_text && !e.amount_minor) {
@@ -4057,6 +4162,173 @@ function isSameEvent(existingTitle: string, newTitle: string, existingDate: stri
   return isSameTask(existingTitle, newTitle);
 }
 
+// P2 #11 (2026-05-03 churn fix): apply household_rules to a newly-inserted
+// event. Looks for the most-specific matching rule (tag_reminder whose
+// tag_pattern is a substring of the event title — case-insensitive — beats
+// reminder_default), computes send_at = scheduled_for - lead_time_minutes,
+// and inserts a reminder_queue row tagged with metadata.auto_from_rule. Skips
+// silently when no rules exist or the lead time would put send_at in the
+// past. Returns a one-line summary string for the action's summary array, or
+// null when nothing was scheduled.
+//
+// Tag matching: case-insensitive substring on the title only. Event tags
+// could also be considered later, but title is the user's typed words and
+// matches the prompt examples ("מבחן בשפה" matches tag_pattern "מבחן").
+async function applyEventReminderRule(
+  householdId: string,
+  title: string,
+  scheduledFor: string,
+  _eventTags: string[],
+): Promise<string | null> {
+  const { data: rules } = await supabase
+    .from("household_rules")
+    .select("rule_type, tag_pattern, lead_time_minutes")
+    .eq("household_id", householdId)
+    .eq("active", true);
+  if (!rules || rules.length === 0) return null;
+
+  const titleLower = (title || "").toLowerCase();
+  // Prefer the most-specific matching tag_reminder. Then reminder_default.
+  let chosen: { rule_type: string; tag_pattern: string | null; lead_time_minutes: number } | null = null;
+  for (const r of rules) {
+    if (r.rule_type === "tag_reminder" && r.tag_pattern) {
+      const tagLower = String(r.tag_pattern).toLowerCase();
+      if (titleLower.includes(tagLower)) {
+        // Pick the longest-tag match if multiple match.
+        if (!chosen || (chosen.tag_pattern && r.tag_pattern.length > chosen.tag_pattern.length)) {
+          chosen = { rule_type: r.rule_type, tag_pattern: r.tag_pattern, lead_time_minutes: r.lead_time_minutes };
+        }
+      }
+    }
+  }
+  if (!chosen) {
+    const def = rules.find((r: any) => r.rule_type === "reminder_default");
+    if (def) chosen = { rule_type: def.rule_type, tag_pattern: null, lead_time_minutes: def.lead_time_minutes };
+  }
+  if (!chosen) return null;
+
+  const eventMs = Date.parse(scheduledFor);
+  if (!isFinite(eventMs)) return null;
+  const sendAtMs = eventMs - chosen.lead_time_minutes * 60_000;
+  if (sendAtMs <= Date.now() + 60_000) {
+    // Lead time would put us at-or-past now (within 1 min). Skip silently;
+    // the event itself will still appear in lists.
+    console.log(`[ApplyRule] Skipping auto-reminder — lead_time would fire in the past: event=${scheduledFor}, lead=${chosen.lead_time_minutes}m`);
+    return null;
+  }
+  const sendAtIso = new Date(sendAtMs).toISOString();
+
+  // Pick a target group_id for the reminder. household_rules don't pin a
+  // group; use the household's primary whatsapp_config group_id when known,
+  // otherwise drop to a synthetic phone-jid the materialiser will resolve.
+  const { data: cfg } = await supabase
+    .from("whatsapp_config")
+    .select("group_id")
+    .eq("household_id", householdId)
+    .limit(1)
+    .single();
+  const groupId = cfg?.group_id || null;
+  if (!groupId) {
+    console.log(`[ApplyRule] No group_id for household ${householdId} — skipping auto-reminder (rule will apply once a group is paired)`);
+    return null;
+  }
+
+  const reminderText = `${title} (תזכורת אוטומטית)`;
+  const { error } = await supabase.from("reminder_queue").insert({
+    household_id: householdId,
+    group_id: groupId,
+    message_text: reminderText,
+    send_at: sendAtIso,
+    sent: false,
+    delivery_mode: "group",
+    reminder_type: "user",
+    metadata: {
+      auto_from_rule: true,
+      rule_type: chosen.rule_type,
+      tag_pattern: chosen.tag_pattern,
+      lead_time_minutes: chosen.lead_time_minutes,
+      event_scheduled_for: scheduledFor,
+    },
+  });
+  if (error) {
+    console.warn("[ApplyRule] Failed to insert auto-reminder:", error.message);
+    return null;
+  }
+  const ruleLabel = chosen.tag_pattern ? `tag="${chosen.tag_pattern}"` : "default";
+  return `Auto-reminder: ${ruleLabel} -${chosen.lead_time_minutes}m → ${sendAtIso}`;
+}
+
+// Multi-event date-broadcasting detector (Bug 6, 2026-05-03).
+// On 2026-04-30 a household sent a single message listing 5 distinct נונה
+// events with 5 distinct dates (1.5, 12.5, 13.5, 17.5, 20.5). Sonnet emitted
+// 5 EVENT actions but stamped them all with `scheduled_for=2026-05-01` —
+// the first parsed date got broadcast onto the rest. Sheli replied "שמרתי
+// את כל 5 האירועים" — technically true (rows existed) but factually wrong
+// (4 of the 5 dates were silently corrupted). The user only noticed days
+// later when those events vanished from "מה ביומן" (all past).
+//
+// This helper detects the pattern: 2+ add_event actions sharing the same
+// scheduled_for date AND a source message containing 2+ distinct date tokens.
+// When detected, the caller should reject the batch and ask the user to
+// confirm — better one extra tap than five corrupt rows.
+//
+// Returns null when not a broadcast pattern, or a description object the
+// caller can use to format a confirmation reply.
+function detectEventBroadcastBug(
+  actions: Array<{ type: string; data?: any }>,
+  sourceMessageText: string | undefined,
+): { dates: string[]; titles: string[]; broadcastDate: string } | null {
+  if (!sourceMessageText) return null;
+
+  // Collect add_event actions with scheduled_for.
+  const eventActions = actions
+    .filter((a) => a.type === "add_event" && typeof a.data?.scheduled_for === "string")
+    .map((a) => ({ title: String(a.data.title || ""), scheduled_for: String(a.data.scheduled_for) }));
+  if (eventActions.length < 2) return null;
+
+  // Group by date prefix (YYYY-MM-DD).
+  const byDate = new Map<string, string[]>();
+  for (const ev of eventActions) {
+    const datePrefix = ev.scheduled_for.slice(0, 10);
+    if (!byDate.has(datePrefix)) byDate.set(datePrefix, []);
+    byDate.get(datePrefix)!.push(ev.title);
+  }
+  // Find a date that has 2+ events stacked on it.
+  let broadcastDate: string | null = null;
+  let broadcastTitles: string[] = [];
+  for (const [date, titles] of byDate) {
+    if (titles.length >= 2) { broadcastDate = date; broadcastTitles = titles; break; }
+  }
+  if (!broadcastDate) return null;
+
+  // Now count DISTINCT date tokens in the source message. We accept several
+  // Hebrew/numeric forms a parent might use:
+  //   - "1.5", "12.5", "13/5", "5/12"
+  //   - "1 במאי", "12 בינואר"
+  //   - "יום ו' 1", "יום ג' 12" (with day-name prefix + day-of-month)
+  const distinctDateTokens = new Set<string>();
+  const monthNames = "ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר";
+  // Numeric "D.M" / "D/M" / "DD.MM" — Israeli short-date convention. Anchored
+  // on word-boundaries via lookbehind/lookahead so "1.5" inside "ב-1.5" matches
+  // but "1.5kg" does not (we don't anchor on \b because Hebrew breaks it; the
+  // [^\d.]/end check is enough for the common cases).
+  for (const m of sourceMessageText.matchAll(/(?<![\d.])(\d{1,2})[./](\d{1,2})(?![\d.])/g)) {
+    distinctDateTokens.add(`${m[1]}.${m[2]}`);
+  }
+  // Hebrew "X במאי" / "X בינואר" etc.
+  const hebMonthRe = new RegExp(`(\\d{1,2})\\s+ב(${monthNames})`, "g");
+  for (const m of sourceMessageText.matchAll(hebMonthRe)) {
+    distinctDateTokens.add(`${m[1]} ב${m[2]}`);
+  }
+  if (distinctDateTokens.size < 2) return null;
+
+  return {
+    dates: Array.from(distinctDateTokens),
+    titles: broadcastTitles,
+    broadcastDate,
+  };
+}
+
 // Reminder dedup — same group_id, fuzzy-matching text, send_at within window.
 // Used to prevent the 2026-04-24 triple-fire pattern (rescue + action both
 // insert on same Sonnet reply, or user re-asks "וגם את אלה תזכירי?" 49 min later).
@@ -4750,6 +5022,17 @@ async function executeActions(
               `Event: "${title}" @ ${normalizedScheduledFor}` +
                 (normalizedTags.length ? ` [${normalizedTags.join(",")}]` : ""),
             );
+            // P2 #11 (2026-05-03 churn fix): apply household_rules to schedule
+            // an auto-reminder for this new event. Best-effort — failures here
+            // never throw (don't undo the event insert).
+            try {
+              const reminderInfo = await applyEventReminderRule(
+                householdId, title, normalizedScheduledFor, normalizedTags,
+              );
+              if (reminderInfo) summary.push(reminderInfo);
+            } catch (ruleErr) {
+              console.warn("[Webhook] applyEventReminderRule failed (non-fatal):", (ruleErr as Error).message);
+            }
           }
           break;
         }
@@ -5069,6 +5352,69 @@ async function executeActions(
             }
           } else {
             summary.push(`Rotation-not-found: "${title}"`);
+          }
+          break;
+        }
+
+        case "set_reminder_rule": {
+          // P2 #10 (2026-05-03 churn fix). Inserts an active row in
+          // household_rules. Used when the user describes an auto-reminder
+          // policy (e.g. "מבחן שבוע לפני, אחרת שעה לפני"). Triggered via the
+          // instruct_bot → PENDING_ACTION → 👍 confirmation flow.
+          //
+          // Idempotency: if a rule with the same household+rule_type+
+          // tag_pattern already exists, UPDATE its lead_time_minutes and
+          // re-activate. Otherwise INSERT. This preserves the user's intent
+          // when they re-describe the rule with a new lead time.
+          const { rule_type, tag_pattern, lead_time_minutes, default_time } = action.data as {
+            rule_type: "tag_reminder" | "reminder_default";
+            tag_pattern?: string;
+            lead_time_minutes: number;
+            default_time?: string;
+          };
+          if (!rule_type || typeof lead_time_minutes !== "number" || lead_time_minutes < 0) {
+            summary.push(`Rule-skip: invalid set_reminder_rule shape ${JSON.stringify(action.data)}`);
+            break;
+          }
+          if (rule_type === "tag_reminder" && (!tag_pattern || tag_pattern.trim().length === 0)) {
+            summary.push("Rule-skip: tag_reminder requires non-empty tag_pattern");
+            break;
+          }
+          const normalizedTag = rule_type === "tag_reminder" ? tag_pattern!.trim() : null;
+          // Check existing active row.
+          let existingId: string | null = null;
+          {
+            let q = supabase.from("household_rules")
+              .select("id")
+              .eq("household_id", householdId)
+              .eq("rule_type", rule_type)
+              .eq("active", true)
+              .limit(1);
+            q = normalizedTag ? q.eq("tag_pattern", normalizedTag) : q.is("tag_pattern", null);
+            const { data: existing } = await q;
+            if (existing && existing.length > 0) existingId = existing[0].id;
+          }
+          if (existingId) {
+            const { error } = await supabase.from("household_rules")
+              .update({
+                lead_time_minutes,
+                default_time: default_time || null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existingId);
+            if (error) throw error;
+            summary.push(`Rule-updated: ${rule_type}${normalizedTag ? ` "${normalizedTag}"` : ""} → ${lead_time_minutes}m`);
+          } else {
+            const { error } = await supabase.from("household_rules").insert({
+              household_id: householdId,
+              rule_type,
+              tag_pattern: normalizedTag,
+              lead_time_minutes,
+              default_time: default_time || null,
+              active: true,
+            });
+            if (error) throw error;
+            summary.push(`Rule: ${rule_type}${normalizedTag ? ` "${normalizedTag}"` : ""} → ${lead_time_minutes}m`);
           }
           break;
         }
@@ -5783,6 +6129,32 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
 15. EVENTS MUST HAVE A DATE. If user mentions an event but no date/time → DO NOT store as event. Either:
     (a) Ask: "מתי המסיבה? אני אשמור ביומן 📅" and wait.
     (b) If they hint at a vague time ("בקרוב", "בעתיד") → store as TASK instead of event ({"type":"task","text":"לתכנן את המסיבה"}).
+15a. MULTI-EVENT DATE INDEPENDENCE (Bug 6, 2026-05-03 churn — ABSOLUTE RULE).
+    When the user lists multiple events with different dates in ONE message
+    (e.g. "יום ו' 1 במאי קונצרט, יום ג' 12 במאי חזרה, יום ד' 13 במאי הופעה"),
+    each event MUST be emitted as its OWN {"type":"event"} action with its
+    OWN \`date\` field parsed from its OWN line. NEVER reuse a date across
+    multiple event actions. The 2026-05-03 churn root: a household sent 5
+    events with 5 distinct dates → Sonnet emitted 5 actions all stamped
+    with the FIRST date → Sheli claimed "שמרתי 5 אירועים" but 4 of 5 were
+    silently broken. The server now REJECTS the batch when it detects 2+
+    events on the same date with 2+ distinct date tokens in the source —
+    you'll be forced to retry. Better to read each line carefully the first
+    time. If a line has NO explicit date, do NOT silently inherit from a
+    previous line — either omit that event from ACTIONS or ASK ("ולגבי X,
+    באיזה תאריך?"). Example correct emission:
+      input: "יום ו' 1.5 קונצרט לגנים, יום ג' 12.5 חזרה, יום ד' 13.5 הופעה"
+      ACTIONS: [
+        {"type":"event","title":"קונצרט לגנים","date":"2026-05-01","time":"19:00"},
+        {"type":"event","title":"חזרה","date":"2026-05-12","time":"19:00"},
+        {"type":"event","title":"הופעה","date":"2026-05-13","time":"19:00"}
+      ]
+    NEVER:
+      ACTIONS: [
+        {"type":"event","title":"קונצרט לגנים","date":"2026-05-01"},
+        {"type":"event","title":"חזרה","date":"2026-05-01"},  ← BUG: broadcast
+        {"type":"event","title":"הופעה","date":"2026-05-01"}   ← BUG: broadcast
+      ]
     A bare "מסיבה" or "פגישה" with no date is NEVER a valid event.
 16. REMINDERS MUST HAVE BOTH content AND time. If either is missing → ask for the missing piece, do NOT store partial.
     - "תזכירי לי לקחת ויטמינים" → MISSING TIME → ask "באיזו שעה?" and wait.
@@ -7495,6 +7867,20 @@ async function execute1on1Actions(params: {
           return { actions, visibleReply: "", triedCaps, confirmationStaged: true };
         }
       }
+      // Multi-event date-broadcasting guard (Bug 6, 2026-05-03 churn). Mirror
+      // of the group path. When 2+ add_event actions stack on the same date
+      // AND the source message has 2+ distinct date tokens, suppress execute
+      // + replace visible reply with a confirmation ask.
+      const sourceText = params.message?.text || text || raw || "";
+      const broadcast = detectEventBroadcastBug(mappedActions, sourceText);
+      if (broadcast) {
+        console.warn(
+          `${logPrefix} Multi-event broadcast detected: ${broadcast.titles.length} events on ${broadcast.broadcastDate}, source had ${broadcast.dates.length} distinct dates: [${broadcast.dates.join(", ")}]`,
+        );
+        const eventList = broadcast.titles.slice(0, 5).map((t) => `• ${t}`).join("\n");
+        const askMsg = `רגע, ראיתי כמה תאריכים בהודעה אבל אני קצת מתבלבלת ✋\n\nאתם מתכוונים שכל ${broadcast.titles.length} האירועים האלה הם באותו יום (${broadcast.broadcastDate})?\n${eventList}\n\nאם לא — תוכלו לשלוח שוב כשכל אירוע בשורה משלו עם התאריך שלו? ככה אסדר נכון 🙏`;
+        return { actions, visibleReply: askMsg, triedCaps, confirmationStaged: true };
+      }
       try {
         const { summary } = await executeActions(householdId, mappedActions, userName, phone);
         console.log(`${logPrefix} Executed ${summary.length} actions for ${phone}:`, summary);
@@ -7691,13 +8077,79 @@ async function isForwardEnabled(): Promise<boolean> {
 // deterministic output, no hallucination risk, guaranteed-correct counts,
 // automatic web-link fallback for long lists.
 
-type ListType = "task" | "shopping" | "event" | "expense" | "reminder";
+type ListType = "task" | "shopping" | "event" | "expense" | "reminder" | "all";
+
+// Event time-window for calendar queries ("מה השבוע", "מה החודש", "מה מחר").
+// Maps to a (gte, lte) range applied to events.scheduled_for. Default for
+// calendar queries with no explicit window is "all" (any future event).
+type EventTimeWindow = "today" | "tomorrow" | "this_week" | "next_week" | "this_month" | "all";
+
+interface ListQuerySpec {
+  type: ListType;
+  timeWindow?: EventTimeWindow;  // applies only when type === "event" or "all"
+}
 
 interface ListItem {
   title: string;
   category?: string;   // shopping only — renderer groups by category when n>=2
   dueDate?: string;
   amount?: number;
+}
+
+// Compute the [gte, lte] UTC ISO range for a given EventTimeWindow,
+// anchored at the current Asia/Jerusalem calendar day. DST-safe via
+// ilOffsetMs(). For "all" returns { gte: nowUtc } and no upper bound,
+// matching the legacy `gt('scheduled_for', now)` behavior.
+function eventWindowRange(window: EventTimeWindow): { gte: string; lte?: string } {
+  const nowUtc = new Date();
+  if (window === "all") return { gte: nowUtc.toISOString() };
+
+  // Build IL midnight (start of today) as a UTC ms.
+  const ilDateStr = nowUtc.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const [yStr, mStr, dStr] = ilDateStr.split("-");
+  const y = parseInt(yStr, 10), m = parseInt(mStr, 10), d = parseInt(dStr, 10);
+  // IL midnight = naive UTC ms - actual IL offset
+  const ilMidnightNaive = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const todayStartUtc = ilMidnightNaive - ilOffsetMs(new Date(ilMidnightNaive));
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  switch (window) {
+    case "today": {
+      // From now → end of today IL.
+      const lteUtc = todayStartUtc + dayMs;
+      return { gte: nowUtc.toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "tomorrow": {
+      const gteUtc = todayStartUtc + dayMs;
+      const lteUtc = gteUtc + dayMs;
+      return { gte: new Date(gteUtc).toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "this_week": {
+      // IL convention: week starts Sunday. JS getDay returns 0=Sun…6=Sat
+      // for the IL midnight Date object below.
+      const ilMidnight = new Date(todayStartUtc);
+      // Reconstruct day-of-week from IL Y/M/D — Date.UTC + getUTCDay is correct
+      // because we're treating ilMidnightNaive as UTC.
+      const dow = new Date(ilMidnightNaive).getUTCDay();
+      // Days remaining in week (Sun=0…Sat=6); end is next Sunday midnight.
+      const daysUntilNextSun = (7 - dow) % 7 || 7;
+      const lteUtc = todayStartUtc + daysUntilNextSun * dayMs;
+      return { gte: nowUtc.toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "next_week": {
+      const dow = new Date(ilMidnightNaive).getUTCDay();
+      const daysUntilNextSun = (7 - dow) % 7 || 7;
+      const gteUtc = todayStartUtc + daysUntilNextSun * dayMs;
+      const lteUtc = gteUtc + 7 * dayMs;
+      return { gte: new Date(gteUtc).toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+    case "this_month": {
+      // First of next month at IL midnight.
+      const nextMonthFirstNaive = Date.UTC(y, m, 1, 0, 0, 0);
+      const lteUtc = nextMonthFirstNaive - ilOffsetMs(new Date(nextMonthFirstNaive));
+      return { gte: nowUtc.toISOString(), lte: new Date(lteUtc).toISOString() };
+    }
+  }
 }
 
 // Canonical shopping category order + emoji. MUST stay in sync with
@@ -7739,6 +8191,7 @@ const LR_LABELS: Record<ListType, LrLabel> = {
   event:    { singular: "אירוע אחד",               plural: "אירועים",                  webPath: "/events" },
   expense:  { singular: "הוצאה אחת",               plural: "הוצאות",                   webPath: "/expenses" },
   reminder: { singular: "תזכורת אחת",              plural: "תזכורות",                  webPath: "/reminders" },
+  all:      { singular: "פריט אחד",                plural: "פריטים",                   webPath: "" },
 };
 
 const LR_EMPTY_PLURAL: Record<ListType, string> = {
@@ -7747,18 +8200,46 @@ const LR_EMPTY_PLURAL: Record<ListType, string> = {
   event:    "אירועים מתוכננים",
   expense:  "הוצאות רשומות",
   reminder: "תזכורות פתוחות",
+  all:      "פריטים ברשימות",
 };
 
-function renderList(args: { type: ListType; items: ListItem[] }): string {
-  const { type, items } = args;
+// Title prefixes for event time-window queries. Stays empty for "all"
+// (default) so the regular list renderer header is unchanged.
+const LR_EVENT_WINDOW_TITLE: Record<EventTimeWindow, string> = {
+  today:      "היום",
+  tomorrow:   "מחר",
+  this_week:  "השבוע",
+  next_week:  "השבוע הבא",
+  this_month: "החודש",
+  all:        "",
+};
+
+function renderList(args: { spec: ListQuerySpec; items: ListItem[] }): string {
+  const { spec, items } = args;
+  const type = spec.type;
   const label = LR_LABELS[type];
   const n = items.length;
 
-  if (n === 0) return `אין ${LR_EMPTY_PLURAL[type]} כרגע 🧡`;
+  // Calendar time-window header. "מה השבוע?" → "השבוע יש לכם N אירועים..."
+  const windowPrefix = (type === "event" && spec.timeWindow && spec.timeWindow !== "all")
+    ? LR_EVENT_WINDOW_TITLE[spec.timeWindow] : "";
+
+  if (n === 0) {
+    if (windowPrefix) return `אין אירועים מתוכננים ${windowPrefix} 🧡`;
+    return `אין ${LR_EMPTY_PLURAL[type]} כרגע 🧡`;
+  }
 
   if (type === "expense") {
     const countLabel = n === 1 ? label.singular : `${n} ${label.plural}`;
     return `יש לכם ${countLabel}. לצפייה מלאה: sheli.ai${label.webPath}`;
+  }
+
+  if (type === "event" && windowPrefix) {
+    // Format event lines with their date when window is "all" or > 1 day.
+    if (n === 1) return `${windowPrefix} יש לכם אירוע אחד: ${items[0].title}.`;
+    const lines = items.slice(0, 10).map((i) => i.title).join("\n");
+    const more = n > 10 ? `\n\nעוד ${n - 10} אירועים. הכל ב-sheli.ai${label.webPath}` : "";
+    return `${windowPrefix} יש לכם ${n} אירועים:\n${lines}${more}`;
   }
 
   if (n === 1) return `יש לכם ${label.singular}: ${items[0].title}.`;
@@ -7766,6 +8247,51 @@ function renderList(args: { type: ListType; items: ListItem[] }): string {
   if (type === "shopping") return lrRenderShopping(items, label);
 
   return lrRenderFlat(items, n, label);
+}
+
+// Multi-section "all-lists" rendering. Invoked when detectListQuery returns
+// type==="all" — users asking "מה ברשימות?" / "תציגי לי את כל מה שרשמת" want
+// a single overview, not per-domain queries. Renders empty sections as "ריק"
+// so the user sees the full surface area at a glance.
+function renderAllLists(snap: {
+  tasks: ListItem[]; shopping: ListItem[]; events: ListItem[]; reminders: ListItem[];
+}): string {
+  const lines: string[] = [];
+
+  // Tasks
+  lines.push("📋 *מטלות*");
+  if (snap.tasks.length === 0) lines.push("(ריק)");
+  else snap.tasks.slice(0, 8).forEach((t) => lines.push(t.title));
+  if (snap.tasks.length > 8) lines.push(`...ועוד ${snap.tasks.length - 8}`);
+  lines.push("");
+
+  // Shopping
+  lines.push("🛒 *קניות*");
+  if (snap.shopping.length === 0) lines.push("(ריק)");
+  else snap.shopping.slice(0, 8).forEach((s) => lines.push(s.title));
+  if (snap.shopping.length > 8) lines.push(`...ועוד ${snap.shopping.length - 8}`);
+  lines.push("");
+
+  // Events
+  lines.push("📅 *אירועים*");
+  if (snap.events.length === 0) lines.push("(ריק)");
+  else snap.events.slice(0, 8).forEach((e) => lines.push(e.title));
+  if (snap.events.length > 8) lines.push(`...ועוד ${snap.events.length - 8}`);
+  lines.push("");
+
+  // Reminders
+  lines.push("🔔 *תזכורות*");
+  if (snap.reminders.length === 0) lines.push("(ריק)");
+  else snap.reminders.slice(0, 8).forEach((r) => lines.push(r.title));
+  if (snap.reminders.length > 8) lines.push(`...ועוד ${snap.reminders.length - 8}`);
+
+  // Web link if anything is non-trivially long.
+  const total = snap.tasks.length + snap.shopping.length + snap.events.length + snap.reminders.length;
+  if (total > 20) {
+    lines.push("");
+    lines.push("הכל ב-sheli.ai 📱");
+  }
+  return lines.join("\n");
 }
 
 function lrRenderFlat(items: ListItem[], n: number, label: LrLabel): string {
@@ -7823,35 +8349,79 @@ function lrRenderShopping(items: ListItem[], label: LrLabel): string {
   return out;
 }
 
-function detectListQuery(text: string): ListType | null {
-  // IMPORTANT: no \b around Hebrew — JS regex \b is ASCII-only by default.
-  // Bare substring is correct because Hebrew inseparable prefixes (ה/ב/ל/מ/כ/ש)
-  // fuse onto nouns ("בקניות", "הקניות", "לקניות" all match the substring).
-  if (/מטלות|דברים\s+לעשות|\bto.?do\b/i.test(text)) return "task";
-  // Shopping: original "קניות" patterns PLUS bare "רשימה" forms. "רשימה" alone
-  // is colloquially the shopping list in Hebrew WhatsApp groups — users say
-  // "רשימה" / "הרשימה" / "תציגי לי את הרשימה" / "מה ברשימה". Before this,
-  // those fell to Sonnet which flat-rendered 15+ item lists and skipped
-  // category grouping. Task/event/expense/reminder checks with their own
-  // distinctive vocabulary (מטלות / אירועים / הוצאות / תזכורות) still win
-  // when explicit — they're checked first or use unambiguous tokens.
-  if (
-    /קני(?:ות|יה)|רשימת?\s+קניות|\bshopping\b/i.test(text) ||
-    /(?:^|\s)ה?רשימה(?:\s|$|[?!.,])/i.test(text) ||
-    /תראי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה/i.test(text) ||
-    /תציגי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה/i.test(text) ||
-    /מה\s+(?:יש\s+)?ב?רשימה/i.test(text)
-  ) return "shopping";
-  if (/אירועים|פגישות|ביומן|\bevents?\b|\bcalendar\b/i.test(text)) return "event";
-  if (/הוצאות|כמה\s+(?:הוצאנו|שילמנו)|\bexpenses?\b/i.test(text)) return "expense";
-  if (/תזכורות|\breminders?\b/i.test(text)) return "reminder";
+// Domain-specific token regexes. Each matches the unambiguous vocabulary for
+// that list type. Order of evaluation matters in detectListQuery() — the
+// most-specific / least-ambiguous domains are checked first. The bare "רשימה"
+// fallback for shopping is the LAST check and only fires when no other
+// domain's tokens are present.
+//
+// Hebrew note: no \b anchors (JS \b is ASCII-only). Bare substrings are
+// correct because Hebrew inseparable prefixes (ה/ב/ל/מ/כ/ש) fuse onto nouns.
+const LQ_ALL_LISTS_RE = /מה\s+(?:יש\s+)?ברשימות|מה\s+ברשימות|כל\s+הרשימות|תציגי\s+(?:לי\s+)?(?:את\s+)?כל\s+מה\s+שרשמת|תוציאי\s+(?:לי\s+)?(?:את\s+)?ה?כל|מה\s+רשמת|מה\s+רשום|כל\s+מה\s+שיש\s+לי|הראי\s+לי\s+הכל|\beverything\b|\ball\s+lists\b|\boverview\b/i;
+const LQ_CALENDAR_RE = /ביומן|יומן|אירועים|פגישות|לו["']?ז|אג'נדה|מה\s+(?:יש\s+)?(?:לי\s+)?(?:היום|מחר|השבוע(?:\s+הבא)?|החודש|בסוף\s+שבוע|בשבוע\s+הבא)|איזה\s+אירועים|אירועים\s+רשומים|מה\s+מתוכנן|\bcalendar\b|\bevents?\b|\bschedule\b|\bagenda\b|\bthis\s+week\b|\bnext\s+week\b|\btoday\b|\btomorrow\b/i;
+const LQ_REMINDERS_RE = /תזכורות|איזה\s+תזכורות|מה\s+התזכורות|מה\s+תזכרת\s+לי|\breminders?\b/i;
+const LQ_EXPENSES_RE = /הוצאות|כמה\s+(?:הוצאנו|שילמנו|עלה\s+לנו)|סיכום\s+הוצאות|\bexpenses?\b|\bspending\b/i;
+const LQ_TASKS_RE = /מטלות|משימות|דברים\s+לעשות|מה\s+צריך\s+לעשות|\bto.?do\b|\btasks?\b|\bchores?\b/i;
+const LQ_SHOPPING_PRIMARY_RE = /קני(?:ות|יה)|רשימת?\s+קניות|מה\s+ב?קניות|\bshopping\b|\bgroceries\b/i;
+// Bare-"רשימה" shopping fallback. Only fires when NONE of the above
+// domain tokens appear in the message.
+const LQ_SHOPPING_BARE_LIST_RE = /(?:^|\s)ה?רשימה(?:\s|$|[?!.,])|תראי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה|תציגי\s+(?:לי\s+)?(?:את\s+)?ה?רשימה|מה\s+(?:יש\s+)?ב?רשימה/i;
+
+// Detect a calendar time-window phrase. Returns the matching window or
+// undefined when no window phrase is present (caller defaults to "all").
+function detectEventTimeWindow(text: string): EventTimeWindow | undefined {
+  if (/בסוף\s+שבוע|next\s+weekend|this\s+weekend/i.test(text)) return "next_week";
+  if (/השבוע\s+הבא|next\s+week/i.test(text)) return "next_week";
+  if (/החודש|this\s+month/i.test(text)) return "this_month";
+  if (/השבוע|this\s+week/i.test(text)) return "this_week";
+  if (/מחר|tomorrow/i.test(text)) return "tomorrow";
+  if (/(?:^|\s)היום(?:\s|$|[?!.,])|today/i.test(text)) return "today";
+  return undefined;
+}
+
+function detectListQuery(text: string): ListQuerySpec | null {
+  if (!text) return null;
+
+  // Order of checks: most-specific / least-ambiguous → bare "רשימה" last.
+  // (1) All-lists / superset wins outright — "מה ברשימות" is a clear umbrella.
+  if (LQ_ALL_LISTS_RE.test(text)) return { type: "all" };
+
+  // (2) Calendar tokens beat shopping. Crucial: the user's churn message
+  // "רשימה של כל מה שכתוב ביומן" contains BOTH "רשימה" and "ביומן" — by
+  // checking calendar before shopping AND requiring shopping to be primary
+  // (not bare-"רשימה"), calendar wins. Same for "מה השבוע" / "מה מחר".
+  if (LQ_CALENDAR_RE.test(text)) {
+    const tw = detectEventTimeWindow(text);
+    return { type: "event", timeWindow: tw };
+  }
+
+  // (3) Reminders.
+  if (LQ_REMINDERS_RE.test(text)) return { type: "reminder" };
+
+  // (4) Expenses.
+  if (LQ_EXPENSES_RE.test(text)) return { type: "expense" };
+
+  // (5) Tasks.
+  if (LQ_TASKS_RE.test(text)) return { type: "task" };
+
+  // (6) Shopping — primary tokens (קניות / shopping / groceries).
+  if (LQ_SHOPPING_PRIMARY_RE.test(text)) return { type: "shopping" };
+
+  // (7) Last resort: bare "רשימה" only when no other domain matched above.
+  // Negation guard: if message contains "לא" + "קניות" (user denying a
+  // previous shopping render), DON'T match — let the call site's
+  // correction guard handle the pivot.
+  if (LQ_SHOPPING_BARE_LIST_RE.test(text) && !/לא\s+(?:ביקשתי\s+)?קניות/i.test(text)) {
+    return { type: "shopping" };
+  }
   return null;
 }
 
 // Pull live items for a given list type. Caller owns household scoping.
-// Caps at 100 rows — renderer truncates to 5 visible items for any list >10
-// and shows "see web for full list" link, so higher limits just waste query time.
-async function fetchItemsForList(householdId: string, type: ListType): Promise<ListItem[]> {
+// Caps at 100 rows per type. For type==="all", returns the concatenation
+// (caller uses fetchAllListsSnapshot for per-type sections).
+async function fetchItemsForList(householdId: string, spec: ListQuerySpec): Promise<ListItem[]> {
+  const type = spec.type;
   switch (type) {
     case "task": {
       const { data } = await supabase
@@ -7879,13 +8449,18 @@ async function fetchItemsForList(householdId: string, type: ListType): Promise<L
       });
     }
     case "event": {
-      const { data } = await supabase
+      // Apply the requested time window (default "all" = any future event).
+      const window = spec.timeWindow || "all";
+      const range = eventWindowRange(window);
+      let q = supabase
         .from("events")
         .select("title, scheduled_for")
         .eq("household_id", householdId)
-        .gt("scheduled_for", new Date().toISOString())
+        .gte("scheduled_for", range.gte)
         .order("scheduled_for", { ascending: true })
         .limit(100);
+      if (range.lte) q = q.lt("scheduled_for", range.lte);
+      const { data } = await q;
       return (data || []).map((r: any) => ({
         title: String(r.title || ""),
         dueDate: r.scheduled_for || undefined,
@@ -7918,7 +8493,103 @@ async function fetchItemsForList(householdId: string, type: ListType): Promise<L
         dueDate: r.send_at || undefined,
       }));
     }
+    case "all": {
+      // Concatenated view (rarely useful — multi-section render goes through
+      // fetchAllListsSnapshot + renderAllLists). Kept for type-completeness.
+      const snap = await fetchAllListsSnapshot(householdId);
+      return [...snap.tasks, ...snap.shopping, ...snap.events, ...snap.reminders];
+    }
   }
+}
+
+// Negation/correction guard for the deterministic list renderer.
+// If Sheli's most recent bot reply in this group/chat was a list_query_rendered
+// (or _all / _corrected) of domain X, AND the current user message contains a
+// negation ("לא") plus a clear token for a DIFFERENT domain Y, override the
+// detected spec to point at Y. Returns the corrected spec, or null if no
+// correction applies. Tags the spec with __corrected=true so the call site
+// logs `list_query_corrected` for observability.
+//
+// This is the explicit guard against the 2026-05-03 churn pattern: shopping
+// rendered when calendar was asked, then identical wrong reply repeated
+// after the user explicitly corrected Sheli.
+async function maybeCorrectListDomain(
+  message: IncomingMessage,
+  detectedSpec: ListQuerySpec,
+): Promise<(ListQuerySpec & { __corrected?: boolean }) | null> {
+  const text = message.text || "";
+  // Cheap cue: must contain a negation. "לא X" / "I didn't" / "not".
+  if (!/\bלא\b|לא\s+ביקש|דווקא\s+לא|\bnot\b|\bdidn'?t\b/i.test(text)) return null;
+
+  try {
+    const groupKey = (message.groupId || "").split("@")[0];
+    if (!groupKey) return null;
+    // Pull the bot's last 3 replies in this chat. We only care about the most
+    // recent that was list_query_rendered* — limit 3 is plenty.
+    const { data } = await supabase
+      .from("whatsapp_messages")
+      .select("classification, created_at")
+      .eq("group_id", groupKey)
+      .eq("sender_phone", Deno.env.get("BOT_PHONE_NUMBER") || "972555175553")
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const lastBotList = (data || []).find((r: any) =>
+      typeof r.classification === "string" && r.classification.startsWith("list_query_rendered")
+    );
+    if (!lastBotList) return null;
+
+    // Reverse-engineer the previous domain from classification label. We
+    // don't store the domain explicitly per row, but we can infer from
+    // re-running the same regex over the original user message stored as
+    // last_user_msg_in_chat — too involved. Simpler heuristic: if the user
+    // is now mentioning a different domain than the spec we'd already
+    // detect, AND that mention is paired with a negation, pivot.
+    //
+    // Concretely: look at the CURRENT message. If the regex detects domain
+    // X but the message ALSO contains an unambiguous token for domain Y
+    // alongside the negation, return { type: Y, __corrected: true }.
+
+    // Calendar correction: "לא ... ביומן" / "ביקשתי ביומן".
+    if (LQ_CALENDAR_RE.test(text) && detectedSpec.type !== "event") {
+      const tw = detectEventTimeWindow(text);
+      return { type: "event", timeWindow: tw, __corrected: true };
+    }
+    // Shopping correction: "לא ... קניות" / "ביקשתי קניות".
+    if (LQ_SHOPPING_PRIMARY_RE.test(text) && detectedSpec.type !== "shopping"
+        && /ביקשתי\s+קניות|דווקא\s+(?:ה?)?קניות/i.test(text)) {
+      return { type: "shopping", __corrected: true };
+    }
+    // Tasks correction.
+    if (LQ_TASKS_RE.test(text) && detectedSpec.type !== "task"
+        && /ביקשתי\s+(?:ה?)?מטלות|דווקא\s+מטלות/i.test(text)) {
+      return { type: "task", __corrected: true };
+    }
+    // Reminders correction.
+    if (LQ_REMINDERS_RE.test(text) && detectedSpec.type !== "reminder"
+        && /ביקשתי\s+(?:ה?)?תזכורות|דווקא\s+תזכורות/i.test(text)) {
+      return { type: "reminder", __corrected: true };
+    }
+    return null;
+  } catch (err) {
+    console.warn("[maybeCorrectListDomain] error:", (err as Error).message);
+    return null;
+  }
+}
+
+// Parallel fetch of the four user-facing lists (tasks / shopping / events /
+// reminders) for the multi-section "all" renderer. Expenses are intentionally
+// excluded — they're not a checklist, they're a ledger; users asking "what
+// have I written down" don't usually mean expense rows.
+async function fetchAllListsSnapshot(householdId: string): Promise<{
+  tasks: ListItem[]; shopping: ListItem[]; events: ListItem[]; reminders: ListItem[];
+}> {
+  const [tasks, shopping, events, reminders] = await Promise.all([
+    fetchItemsForList(householdId, { type: "task" }),
+    fetchItemsForList(householdId, { type: "shopping" }),
+    fetchItemsForList(householdId, { type: "event", timeWindow: "all" }),
+    fetchItemsForList(householdId, { type: "reminder" }),
+  ]);
+  return { tasks, shopping, events, reminders };
 }
 
 async function handleDirectMessage(message: IncomingMessage, prov: WhatsAppProvider) {
@@ -11564,15 +12235,54 @@ Deno.serve(async (req: Request) => {
       // guaranteed-correct, hallucination-free answer. Non-list questions
       // (e.g. "מי בתור לכלים?") fall through to Sonnet as before.
       if (classification.intent === "question") {
-        const listType = detectListQuery(message.text);
-        if (listType) {
-          const items = await fetchItemsForList(householdId, listType);
-          const rendered = renderList({ type: listType, items });
-          await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
-            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "list_query_rendered"
-          });
-          await logMessage(message, "list_query_rendered", householdId, classification);
-          console.log(`[Webhook] List query rendered: type=${listType} items=${items.length} for ${householdId}`);
+        // Entity-first routing: when Haiku populates entities.list_type
+        // (and optionally entities.time_window), trust it over the regex.
+        // Falls back to regex detectListQuery() when entities are absent.
+        const ent = (classification.entities || {}) as Record<string, unknown>;
+        const entListType = typeof ent.list_type === "string"
+          ? (ent.list_type as ListType) : null;
+        const entTimeWindow = typeof ent.time_window === "string"
+          ? (ent.time_window as EventTimeWindow) : undefined;
+        let spec: ListQuerySpec | null = null;
+        if (entListType && (["task","shopping","event","expense","reminder","all"] as const).includes(entListType as any)) {
+          spec = { type: entListType, timeWindow: entTimeWindow };
+        } else {
+          spec = detectListQuery(message.text);
+        }
+
+        // Negation/correction guard: if Sheli's most recent reply in this
+        // group rendered domain X and the new message contains "לא" plus a
+        // token for a different domain Y, force the route to Y. This is the
+        // explicit fix for the "המשפחה שלי" churn where two consecutive
+        // identical wrong-list replies killed the family. See post-mortem
+        // 2026-05-03.
+        if (spec) {
+          const corrected = await maybeCorrectListDomain(message, spec);
+          if (corrected) spec = corrected;
+        }
+
+        if (spec) {
+          if (spec.type === "all") {
+            const snap = await fetchAllListsSnapshot(householdId);
+            const rendered = renderAllLists(snap);
+            await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId,
+              replyType: "list_query_rendered_all",
+            });
+            await logMessage(message, "list_query_rendered_all", householdId, classification);
+            const total = snap.tasks.length + snap.shopping.length + snap.events.length + snap.reminders.length;
+            console.log(`[Webhook] List-query rendered all: total=${total} for ${householdId}`);
+          } else {
+            const items = await fetchItemsForList(householdId, spec);
+            const rendered = renderList({ spec, items });
+            const replyType = (spec as any).__corrected
+              ? "list_query_corrected" : "list_query_rendered";
+            await sendAndLog(provider, { groupId: message.groupId, text: rendered }, {
+              householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType,
+            });
+            await logMessage(message, replyType, householdId, classification);
+            console.log(`[Webhook] List query rendered: type=${spec.type} window=${spec.timeWindow || "-"} items=${items.length} for ${householdId}`);
+          }
           return new Response("OK", { status: 200 });
         }
       }
@@ -11662,6 +12372,48 @@ Deno.serve(async (req: Request) => {
     // failure mode seen in the Yaron 2026-04-23 handwriting test.
     if (await maybeAskImageOcrConfirmation(message, householdId, actions, provider)) {
       return new Response("OK", { status: 200 });
+    }
+
+    // Multi-event date-broadcasting guard (Bug 6, 2026-05-03 churn). On
+    // 2026-04-30 a household sent 5 events with 5 distinct dates and Sonnet
+    // stamped them all with the first parsed date. Reject pre-execute and
+    // ask the user to re-list per-line so each gets parsed independently.
+    {
+      const broadcast = detectEventBroadcastBug(actions, message.text);
+      if (broadcast) {
+        console.warn(
+          `[Webhook] Multi-event broadcast detected: ${broadcast.titles.length} events stacked on ${broadcast.broadcastDate}, source had ${broadcast.dates.length} distinct dates: [${broadcast.dates.join(", ")}]`,
+        );
+        const eventList = broadcast.titles.slice(0, 5).map((t) => `• ${t}`).join("\n");
+        const askMsg = `רגע, ראיתי כמה תאריכים בהודעה אבל אני קצת מתבלבלת ✋\n\nאתם מתכוונים שכל ${broadcast.titles.length} האירועים האלה הם באותו יום (${broadcast.broadcastDate})?\n${eventList}\n\nאם לא — תוכלו לשלוח שוב כשכל אירוע בשורה משלו עם התאריך שלו? ככה אסדר נכון 🙏`;
+        await sendAndLog(provider, { groupId: message.groupId, text: askMsg }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId,
+          replyType: "event_broadcast_guard",
+        });
+        await logMessage(message, "event_broadcast_guard", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+    }
+
+    // No-time-on-event guard (P2 #13, Bug 5 from 2026-05-03 churn). When the
+    // user forwards a school message ("ביום ראשון יתקיים מבחן בשפה") that has
+    // a date but no time, haikuEntitiesToActions tags the add_event action
+    // with __needsTimeConfirmation. Ask honestly instead of saving with the
+    // 09:00 / 18:00 hallucinated default that produced "זה לא ב9" → trust loss.
+    {
+      const needsTime = (actions || []).find(
+        (a: any) => a.type === "add_event" && a.data?.__needsTimeConfirmation === true,
+      );
+      if (needsTime) {
+        const title = String((needsTime.data as any).title || "").slice(0, 60) || "האירוע";
+        const askMsg = `ראיתי תאריך ל-"${title}" אבל לא ראיתי שעה. באיזו שעה? ⏰\n\nאם זה אירוע של כל היום — כתבו "כל היום" ואני אסמן ככה.`;
+        await sendAndLog(provider, { groupId: message.groupId, text: askMsg }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId,
+          replyType: "event_needs_time",
+        });
+        await logMessage(message, "event_needs_time", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
     }
 
     const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
@@ -12157,7 +12909,15 @@ Deno.serve(async (req: Request) => {
     }
 
     if (classification.intent === "delete_memory") {
-      // Soft-delete by content match (fuzzy), fallback to most recent
+      // P1 (2026-05-03 churn fix): soft-delete only on content match. Removed
+      // the "fall back to most recent" behavior — that was the silent bug
+      // surface that let "תמחקי אותו" delete an unrelated memory while the
+      // ACTUAL referent (a recent add_event) survived. With pronoun-deletes
+      // now routing to correct_bot via the Haiku prompt rule + examples,
+      // delete_memory should only fire when the message has explicit
+      // memory-vocabulary. If we still can't find a content match, do NOT
+      // delete anything — Sonnet's reply will ask "מה תרצי שאשכח?" via the
+      // delete_memory action summary in the reply prompt.
       const { data: allMemories } = await supabase.from("family_memories")
         .select("id, content, member_phone")
         .eq("household_id", householdId)
@@ -12166,14 +12926,24 @@ Deno.serve(async (req: Request) => {
 
       if (allMemories && allMemories.length > 0) {
         const rawText = (entities?.raw_text || message.text || "").toLowerCase();
-        // Try content-match: find a memory whose content appears in the user's request (or vice versa)
+        // Content-match: find a memory whose content appears in the user's
+        // request (or vice versa, after stripping common delete-vocabulary).
         const match = allMemories.find((m: any) => {
           const mc = (m.content || "").toLowerCase();
           return rawText.includes(mc) || mc.includes(rawText.replace(/תשכחי|תמחקי|שלי|את |ש/g, "").trim());
         });
-        const target = match || allMemories[0]; // fallback to most recent if no content match
-        await supabase.from("family_memories").update({ active: false }).eq("id", target.id);
-        console.log(`[Memory] Deleted memory ${target.id} (${match ? "content-matched" : "most-recent fallback"})`);
+        if (match) {
+          await supabase.from("family_memories").update({ active: false }).eq("id", match.id);
+          console.log(`[Memory] Deleted memory ${match.id} (content-matched)`);
+        } else {
+          console.log("[Memory] delete_memory with no content match — NO-OP. Sonnet will ask 'מה תרצי שאשכח?'");
+          // Hint the reply generator that we couldn't find a match. Tagged on
+          // the classification object so generateReply can branch its action
+          // summary accordingly.
+          (classification as any).__deleteMemoryNoMatch = true;
+        }
+      } else {
+        (classification as any).__deleteMemoryNoMatch = true;
       }
     }
 
@@ -13932,14 +14702,37 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       // disagrees, override. DAY ANCHOR is authoritative for these unambiguous
       // tokens.
       scheduledFor = reanchorEventDate(String(e.raw_text || ""), scheduledFor);
+      // P2 #13 (Bug 5, 2026-05-03 churn): forwarded school messages have a
+      // date but no time → Sheli used to silently default to 09:00, the
+      // hallucinated time the family then corrected. Two trigger conditions
+      // must BOTH hold: (a) Haiku flagged time_missing OR the raw_text
+      // matches a school-message regex with no hour pattern, AND (b) the
+      // emitted time_iso came from the M13 default (we can detect this by
+      // checking if it's exactly 18:00 with no time_raw). When detected,
+      // tag the action so the call site routes to a confirmation_ask rather
+      // than executing.
+      const hourPattern = /\d{1,2}:\d{2}|בשעה\s+\d|ב-?\d{1,2}|בבוקר|בערב|בלילה|בצהריים|בצוהריים|אחה"?צ|אחר[\s-]?הצהריים|בבוקר/;
+      const schoolMsgPattern = /יתקיים|יערך|יחל\s|מבחן|טקס|אסיפה|טיול\s|פעילות\s|אירוע\s+מיוחד/;
+      const rawTxt = String(e.raw_text || "");
+      // entities.time_missing isn't in the strict entities type — cast through any.
+      const timeMissingFromHaiku = (e as any).time_missing === true;
+      const inferredTimeMissing = !e.time_raw
+        && schoolMsgPattern.test(rawTxt)
+        && !hourPattern.test(rawTxt);
+      const needsTimeConfirmation = timeMissingFromHaiku || inferredTimeMissing;
+      const eventData: Record<string, unknown> = {
+        title: e.title || e.raw_text,
+        assigned_to: e.person || null,
+        scheduled_for: scheduledFor,
+        tags: Array.isArray(e.tags) ? e.tags : [],
+      };
+      if (needsTimeConfirmation) {
+        eventData.__needsTimeConfirmation = true;
+        console.log(`[Webhook] P2#13: time_missing detected for add_event "${e.title || rawTxt.slice(0, 40)}" — caller should ask for time`);
+      }
       actions.push({
         type: "add_event",
-        data: {
-          title: e.title || e.raw_text,
-          assigned_to: e.person || null,
-          scheduled_for: scheduledFor,
-          tags: Array.isArray(e.tags) ? e.tags : [],
-        },
+        data: eventData,
       });
       break;
     }
@@ -14223,21 +15016,28 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
 // All three return arrays the Sonnet prompt will interpolate.
 
 async function gatherCorrectionCandidates(householdId: string): Promise<CandidateRow[]> {
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // P1 (2026-05-03 churn fix): drop the 24h created_at window — it excluded
+  // events that were created days/weeks ago but are still in the future.
+  // School events (added by parents from forwarded messages) are the canonical
+  // case: created Friday for Sunday's test, user corrects Saturday → 24h
+  // window misses, hardcoded "לא מצאתי שורה" template fires twice. Now:
+  //   - Events: any FUTURE event is a correction candidate (no created_at cap).
+  //     Order by scheduled_for ascending so the next-up events are first.
+  //   - Reminders (one-shot): any unsent reminder, ordered by send_at asc.
+  //   - Reminders (recurring parents): unchanged — already had no time filter.
   // Globerman 2026-04-26: also fetch active recurring PARENTS (sent=true,
   // recurrence not null). Without these, "תבטלי את תזכורת הכדורסל" only sees
   // the next pending child — Sonnet picks it, executor cancels just that one
   // child, and the next materialize cycle creates a fresh child for the next
   // weekday. Including parents as candidates lets Sonnet target the series.
-  // No created_at filter on parents — recurring series can be days/weeks old.
+  const nowIso = new Date().toISOString();
   const [evRes, remRes, parentRes] = await Promise.all([
     supabase.from("events").select("id, title, scheduled_for")
-      .eq("household_id", householdId).gte("created_at", dayAgo)
-      .order("created_at", { ascending: false }).limit(5),
+      .eq("household_id", householdId).gt("scheduled_for", nowIso)
+      .order("scheduled_for", { ascending: true }).limit(8),
     supabase.from("reminder_queue").select("id, message_text, send_at")
       .eq("household_id", householdId).eq("sent", false)
-      .gte("created_at", dayAgo)
-      .order("created_at", { ascending: false }).limit(5),
+      .order("send_at", { ascending: true }).limit(6),
     supabase.from("reminder_queue").select("id, message_text, send_at, recurrence")
       .eq("household_id", householdId).not("recurrence", "is", null).is("recurrence_parent_id", null)
       .order("created_at", { ascending: false }).limit(5),
@@ -14375,8 +15175,17 @@ async function handleCorrection(
     gatherRecentSheliActions(groupId),
   ]);
 
+  // P1 (2026-05-03 churn fix): with the wider candidate window (any future
+  // event + any unsent reminder + recurring parents), an empty list now
+  // genuinely means "no future events or pending reminders exist" — not "I
+  // dropped them due to a 24h cap". Reply honestly instead of the
+  // generic-and-confusing "לא מצאתי שורה" that fired twice in the 2026-05-03
+  // churn. Adapt copy slightly so users know which surfaces Sheli scanned.
   if (candidates.length === 0) {
-    await sendAndLog(provider, { groupId, text: "סליחה, לא מצאתי שורה קרובה לתקן. תוכלי להגיד שוב?" }, {
+    await sendAndLog(provider, {
+      groupId,
+      text: "אין לי כרגע אירועים פתוחים או תזכורות בהמתנה. למה את מתכוונת? אם זה משהו ישן, תגידו לי שוב את הפרטים ואני אסדר 🙏",
+    }, {
       householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
     });
     await logMessage(message, "correction_error", householdId, classification);
