@@ -11,15 +11,30 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { buildVoicePromptBias } from "../index.inlined.ts";
 
-function stubFetch(memberRows: Array<{ member_name: string }>, itemRows: Array<{ name: string }>) {
+type StubData = {
+  members?: Array<{ member_name: string }>;
+  items?: Array<{ name: string }>;
+  tasks?: Array<{ title: string }>;
+  events?: Array<{ title: string }>;
+};
+
+function stubFetch(data: StubData) {
   const orig = globalThis.fetch;
   globalThis.fetch = async (input: RequestInfo | URL): Promise<Response> => {
     const url = String(input);
+    // Order matters: check the more-specific table names first so e.g.
+    // `shopping_items` doesn't get matched by a future `items`-substring rule.
     if (url.includes("whatsapp_member_mapping")) {
-      return new Response(JSON.stringify(memberRows), { status: 200 });
+      return new Response(JSON.stringify(data.members ?? []), { status: 200 });
     }
     if (url.includes("shopping_items")) {
-      return new Response(JSON.stringify(itemRows), { status: 200 });
+      return new Response(JSON.stringify(data.items ?? []), { status: 200 });
+    }
+    if (url.includes("/rest/v1/tasks")) {
+      return new Response(JSON.stringify(data.tasks ?? []), { status: 200 });
+    }
+    if (url.includes("/rest/v1/events")) {
+      return new Response(JSON.stringify(data.events ?? []), { status: 200 });
     }
     return new Response("[]", { status: 200 });
   };
@@ -27,10 +42,10 @@ function stubFetch(memberRows: Array<{ member_name: string }>, itemRows: Array<{
 }
 
 Deno.test("buildVoicePromptBias returns Hebrew-comma-joined names + items", async () => {
-  const restore = stubFetch(
-    [{ member_name: "אביטל" }, { member_name: "ירון" }, { member_name: "נעם" }],
-    [{ name: "חלב" }, { name: "פיתות" }],
-  );
+  const restore = stubFetch({
+    members: [{ member_name: "אביטל" }, { member_name: "ירון" }, { member_name: "נעם" }],
+    items: [{ name: "חלב" }, { name: "פיתות" }],
+  });
   try {
     const bias = await buildVoicePromptBias("hh_test");
     assertEquals(bias.includes("אביטל"), true);
@@ -45,7 +60,7 @@ Deno.test("buildVoicePromptBias returns Hebrew-comma-joined names + items", asyn
 });
 
 Deno.test("buildVoicePromptBias returns empty string when household has no members", async () => {
-  const restore = stubFetch([], []);
+  const restore = stubFetch({ members: [], items: [] });
   try {
     const bias = await buildVoicePromptBias("hh_empty");
     assertEquals(bias, "");
@@ -56,7 +71,7 @@ Deno.test("buildVoicePromptBias returns empty string when household has no membe
 
 Deno.test("buildVoicePromptBias caps at 600 chars (Whisper 224-token limit)", async () => {
   const manyMembers = Array.from({ length: 50 }, (_, i) => ({ member_name: `שם${i}` }));
-  const restore = stubFetch(manyMembers, []);
+  const restore = stubFetch({ members: manyMembers, items: [] });
   try {
     const bias = await buildVoicePromptBias("hh_big");
     assertEquals(bias.length <= 600, true);
@@ -70,4 +85,55 @@ Deno.test("buildVoicePromptBias returns empty string for null/undefined househol
   const bias2 = await buildVoicePromptBias(undefined);
   assertEquals(bias1, "");
   assertEquals(bias2, "");
+});
+
+Deno.test("buildVoicePromptBias includes recent task titles", async () => {
+  const restore = stubFetch({
+    members: [{ member_name: "Yaron" }],
+    items: [],
+    tasks: [{ title: "להתקשר לאביטל האדריכלית" }],
+    events: [],
+  });
+  try {
+    const bias = await buildVoicePromptBias("hh_test");
+    assertEquals(bias.includes("אביטל"), true);
+    assertEquals(bias.includes("האדריכלית"), true);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("buildVoicePromptBias includes recent event titles", async () => {
+  const restore = stubFetch({
+    members: [{ member_name: "Yaron" }],
+    items: [],
+    tasks: [],
+    events: [{ title: "פגישה עם גיורא" }],
+  });
+  try {
+    const bias = await buildVoicePromptBias("hh_test");
+    assertEquals(bias.includes("גיורא"), true);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("buildVoicePromptBias prioritizes members > tasks > events > items under cap", async () => {
+  // 50 of each — cap should keep names first, items last.
+  const make = (prefix: string) => Array.from({ length: 50 }, (_, i) => `${prefix}${i}`);
+  const restore = stubFetch({
+    members: make("M").map((m) => ({ member_name: m })),
+    items: make("I").map((n) => ({ name: n })),
+    tasks: make("T").map((t) => ({ title: t })),
+    events: make("E").map((t) => ({ title: t })),
+  });
+  try {
+    const bias = await buildVoicePromptBias("hh_big");
+    assertEquals(bias.length <= 600, true);
+    // First member must appear; last shopping item likely won't.
+    assertEquals(bias.includes("M0"), true);
+    assertEquals(bias.includes("I49"), false);
+  } finally {
+    restore();
+  }
 });

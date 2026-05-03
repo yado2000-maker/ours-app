@@ -13000,9 +13000,18 @@ Deno.serve(async (req: Request) => {
 
 // ─── Voice prompt biasing ───
 // Whisper accepts a free-text `prompt` (initial_prompt for faster-whisper) up
-// to ~224 tokens. Tokens it sees here get strong decoder bias. We feed it the
-// household's known names + recent shopping vocabulary so proper nouns like
-// "אביטל" or "פיתות" don't get mangled into "הביטל" or "פיתאות".
+// to ~224 tokens. Tokens it sees here get strong decoder bias. We feed it
+// vocabulary the household has already mentioned in text — names, recent task
+// titles, recent event titles, and recent shopping items — so proper nouns
+// like "אביטל" / "גיורא" / "אדריכלית" / "סטייליסט" don't get mangled into
+// "הביטל" / "ג'ארסטייל" by Whisper's cold-start prior.
+//
+// Priority order (greedy-fill): members → tasks → events → shopping items.
+// Live testing 2026-04-30 showed shopping items (e.g. "בגדים לגור") rarely
+// help with conversational vocabulary; tasks/events carry most of the
+// external-contact vocabulary that matters. Reminder_queue is intentionally
+// skipped: schema lacks a direct household_id column and most reminder
+// vocabulary already appears in tasks/events.
 //
 // Cap at 600 chars conservatively (Hebrew is ~2-3 tokens per word).
 const VOICE_BIAS_CHAR_CAP = 600;
@@ -13015,16 +13024,31 @@ export async function buildVoicePromptBias(householdId: string | null | undefine
       Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""}`,
     };
     const base = Deno.env.get("SUPABASE_URL") ?? "";
+    const hh = encodeURIComponent(householdId);
 
     const memRes = await fetch(
-      `${base}/rest/v1/whatsapp_member_mapping?household_id=eq.${encodeURIComponent(householdId)}&select=member_name`,
+      `${base}/rest/v1/whatsapp_member_mapping?household_id=eq.${hh}&select=member_name`,
       { headers },
     );
     const members: Array<{ member_name: string }> = memRes.ok ? await memRes.json() : [];
     const names = members.map((m) => (m.member_name || "").trim()).filter(Boolean);
 
+    const taskRes = await fetch(
+      `${base}/rest/v1/tasks?household_id=eq.${hh}&select=title&order=created_at.desc&limit=30`,
+      { headers },
+    );
+    const tasks: Array<{ title: string }> = taskRes.ok ? await taskRes.json() : [];
+    const taskTitles = tasks.map((t) => (t.title || "").trim()).filter(Boolean);
+
+    const eventRes = await fetch(
+      `${base}/rest/v1/events?household_id=eq.${hh}&select=title&order=created_at.desc&limit=30`,
+      { headers },
+    );
+    const events: Array<{ title: string }> = eventRes.ok ? await eventRes.json() : [];
+    const eventTitles = events.map((e) => (e.title || "").trim()).filter(Boolean);
+
     const itemRes = await fetch(
-      `${base}/rest/v1/shopping_items?household_id=eq.${encodeURIComponent(householdId)}&select=name&order=created_at.desc&limit=30`,
+      `${base}/rest/v1/shopping_items?household_id=eq.${hh}&select=name&order=created_at.desc&limit=30`,
       { headers },
     );
     const items: Array<{ name: string }> = itemRes.ok ? await itemRes.json() : [];
@@ -13032,7 +13056,7 @@ export async function buildVoicePromptBias(householdId: string | null | undefine
 
     const seen = new Set<string>();
     const tokens: string[] = [];
-    for (const t of [...names, ...itemNames]) {
+    for (const t of [...names, ...taskTitles, ...eventTitles, ...itemNames]) {
       if (!seen.has(t)) {
         seen.add(t);
         tokens.push(t);
