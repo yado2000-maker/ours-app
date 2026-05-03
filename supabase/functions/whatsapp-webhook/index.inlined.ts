@@ -695,7 +695,7 @@ INTENTS:
 - instruct_bot: Parent EXPLAINING a rule or management preference to Sheli. Teaching/explanatory tone — "ככה...", "אמרתי ש...", "את אמורה ל...", "צריך לנהל את זה ככה ש...". NOT a direct command — it's teaching how things should work. Frustration/repetition signals also indicate instruct_bot.
 - save_memory: User asks Sheli to remember something specific. "תזכרי ש...", "תרשמי לך ש...", "אל תשכחי ש...". Must be a personal/family fact, NOT a task or reminder.
 - recall_memory: User asks what Sheli remembers about someone or the family. "מה את זוכרת על...?", "מה ידוע לך על...?", "ספרי לי מה את יודעת על...".
-- delete_memory: User asks Sheli to forget something. "תשכחי את זה", "תמחקי את הזיכרון", "אל תזכרי את זה יותר".
+- delete_memory: User asks Sheli to FORGET A FACT/MEMORY (not an item from a list). Triggers contain "זיכרון" or "מה שאמרתי" or "מה שזכרת" or are pure "תשכחי את הזיכרון". CRITICAL: when the user says "תמחקי אותו" / "תמחקי את זה" / "בטלי את זה" / "מחקי" with a PRONOUN whose referent is Sheli's PREVIOUS turn (an add_event / add_reminder / add_task / add_shopping confirmation), this is correct_bot — NOT delete_memory. Pronoun-only deletes route to correct_bot so the actual recent action gets undone. Pure delete_memory only when the message names "זיכרון" / "מה שזכרת" / "מה שאמרתי לך לפני" or similar memory-vocabulary explicitly.
 - add_expense: Logging a household payment/cost that ALREADY HAPPENED. Hebrew triggers include many forms:
   PAYMENT VERBS (past tense): "שילמתי/שילמנו/שולם/שילם/שילמה" (paid), "העברתי" (transferred), "הוצאתי/הוציא" (spent), "כיסיתי" (covered), "סגרתי" (closed/settled).
   COST VERBS (past tense): "עלה/עלתה לי/לנו X" (cost me/us X — PAST), "יצא לנו X" (came out to X), "ירד לי X" (was charged X).
@@ -1185,6 +1185,23 @@ EXAMPLES:
 [אמא]: "שלי תזכרי שיובל אוהב פיצה עם אננס" → {"intent":"save_memory","confidence":0.95,"entities":{"memory_content":"יובל אוהב פיצה עם אננס","memory_about":"יובל","raw_text":"שלי תזכרי שיובל אוהב פיצה עם אננס"}}
 [אבא]: "שלי מה את זוכרת על נועה?" → {"intent":"recall_memory","confidence":0.90,"entities":{"memory_about":"נועה","raw_text":"שלי מה את זוכרת על נועה?"}}
 [אמא]: "שלי תשכחי את מה שאמרתי קודם" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"שלי תשכחי את מה שאמרתי קודם"}}
+// PRONOUN-DELETE → correct_bot (2026-05-03 churn fix). When user says "תמחקי
+// אותו"/"את זה"/"בטלי את זה" referring to Sheli's MOST RECENT add_event /
+// add_reminder / add_task / add_shopping, this is correct_bot — NOT
+// delete_memory. The handleCorrection flow will resolve the referent against
+// recent actions and remove the actual row. delete_memory only fires when the
+// message names a MEMORY explicitly ("הזיכרון", "מה שאמרתי", "מה שזכרת").
+// In the 2026-05-03 churn the בית-החמים family said "תמחקי אותו" right after
+// Sheli's add_event for a school test, Haiku routed to delete_memory, the
+// event survived, and the next-day reminder fired — root trust failure.
+[אבא]: "תמחקי אותו" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"תמחקי אותו","correction_text":"תמחקי אותו"}}
+[אמא]: "תמחקי את זה" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"תמחקי את זה","correction_text":"תמחקי את זה"}}
+[אבא]: "בטלי את זה" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"בטלי את זה","correction_text":"בטלי את זה"}}
+[אמא]: "מחקי אותו" → {"intent":"correct_bot","confidence":0.85,"entities":{"raw_text":"מחקי אותו","correction_text":"מחקי אותו"}}
+[אבא]: "לא, תמחקי את זה" → {"intent":"correct_bot","confidence":0.92,"entities":{"raw_text":"לא, תמחקי את זה","correction_text":"לא, תמחקי את זה"}}
+// Counter-examples: explicit memory-vocabulary still routes to delete_memory.
+[אמא]: "שלי תמחקי את הזיכרון הזה" → {"intent":"delete_memory","confidence":0.92,"entities":{"raw_text":"שלי תמחקי את הזיכרון הזה"}}
+[אבא]: "אל תזכרי את זה יותר" → {"intent":"delete_memory","confidence":0.85,"entities":{"raw_text":"אל תזכרי את זה יותר"}}
 [אמא]: "שילמתי 1300 חשמל" → {"intent":"add_expense","confidence":0.95,"entities":{"amount_text":"1300","amount_minor":130000,"expense_currency":"ILS","expense_description":"חשמל","expense_category":"חשמל","expense_attribution":"speaker","raw_text":"שילמתי 1300 חשמל"}}
 [אבא]: "אבא שילם 500 סופר" → {"intent":"add_expense","confidence":0.93,"entities":{"amount_text":"500","amount_minor":50000,"expense_currency":"ILS","expense_description":"סופר","expense_category":"מזון","expense_attribution":"named","expense_paid_by_name":"אבא","raw_text":"אבא שילם 500 סופר"}}
 [אמא]: "שילמנו 2400 ארנונה" → {"intent":"add_expense","confidence":0.94,"entities":{"amount_text":"2400","amount_minor":240000,"expense_currency":"ILS","expense_description":"ארנונה","expense_category":"ארנונה","expense_attribution":"joint","raw_text":"שילמנו 2400 ארנונה"}}
@@ -2205,7 +2222,15 @@ If you cannot parse a clear action from the instruction, just acknowledge warmly
       actionSummary = `${sender} is asking what Sheli remembers about ${e.memory_about || "the family"}. Share what you know from the FAMILY MEMORIES section below — warmly, like telling a story. If no memories match, say you're still getting to know them.`;
       break;
     case "delete_memory":
-      actionSummary = `${sender} wants Sheli to forget something. Confirm you'll forget it, keep it light.`;
+      // P1 (2026-05-03 churn fix): when the handler couldn't find a memory to
+      // match, do NOT silently confirm "מחקתי" — that's exactly the lie the
+      // 2026-05-03 churn experienced ("אוקיי, מחקתי 🗑️" while the event
+      // survived). Ask honestly what to forget.
+      if ((classification as any).__deleteMemoryNoMatch) {
+        actionSummary = `${sender} asked Sheli to forget something, but Sheli couldn't find a matching memory. DO NOT say "מחקתי" or pretend anything was deleted. Reply honestly: ask "מה תרצי שאשכח?" / "איזה זיכרון בדיוק?" — keep it warm, one short sentence. NEVER claim to have deleted anything that wasn't actually deleted.`;
+      } else {
+        actionSummary = `${sender} wants Sheli to forget something. A matching memory was found and soft-deleted. Confirm warmly, keep it light.`;
+      }
       break;
     case "add_expense":
       if (!e.amount_text && !e.amount_minor) {
@@ -4085,6 +4110,77 @@ function isSameEvent(existingTitle: string, newTitle: string, existingDate: stri
   return isSameTask(existingTitle, newTitle);
 }
 
+// Multi-event date-broadcasting detector (Bug 6, 2026-05-03).
+// On 2026-04-30 a household sent a single message listing 5 distinct נונה
+// events with 5 distinct dates (1.5, 12.5, 13.5, 17.5, 20.5). Sonnet emitted
+// 5 EVENT actions but stamped them all with `scheduled_for=2026-05-01` —
+// the first parsed date got broadcast onto the rest. Sheli replied "שמרתי
+// את כל 5 האירועים" — technically true (rows existed) but factually wrong
+// (4 of the 5 dates were silently corrupted). The user only noticed days
+// later when those events vanished from "מה ביומן" (all past).
+//
+// This helper detects the pattern: 2+ add_event actions sharing the same
+// scheduled_for date AND a source message containing 2+ distinct date tokens.
+// When detected, the caller should reject the batch and ask the user to
+// confirm — better one extra tap than five corrupt rows.
+//
+// Returns null when not a broadcast pattern, or a description object the
+// caller can use to format a confirmation reply.
+function detectEventBroadcastBug(
+  actions: Array<{ type: string; data?: any }>,
+  sourceMessageText: string | undefined,
+): { dates: string[]; titles: string[]; broadcastDate: string } | null {
+  if (!sourceMessageText) return null;
+
+  // Collect add_event actions with scheduled_for.
+  const eventActions = actions
+    .filter((a) => a.type === "add_event" && typeof a.data?.scheduled_for === "string")
+    .map((a) => ({ title: String(a.data.title || ""), scheduled_for: String(a.data.scheduled_for) }));
+  if (eventActions.length < 2) return null;
+
+  // Group by date prefix (YYYY-MM-DD).
+  const byDate = new Map<string, string[]>();
+  for (const ev of eventActions) {
+    const datePrefix = ev.scheduled_for.slice(0, 10);
+    if (!byDate.has(datePrefix)) byDate.set(datePrefix, []);
+    byDate.get(datePrefix)!.push(ev.title);
+  }
+  // Find a date that has 2+ events stacked on it.
+  let broadcastDate: string | null = null;
+  let broadcastTitles: string[] = [];
+  for (const [date, titles] of byDate) {
+    if (titles.length >= 2) { broadcastDate = date; broadcastTitles = titles; break; }
+  }
+  if (!broadcastDate) return null;
+
+  // Now count DISTINCT date tokens in the source message. We accept several
+  // Hebrew/numeric forms a parent might use:
+  //   - "1.5", "12.5", "13/5", "5/12"
+  //   - "1 במאי", "12 בינואר"
+  //   - "יום ו' 1", "יום ג' 12" (with day-name prefix + day-of-month)
+  const distinctDateTokens = new Set<string>();
+  const monthNames = "ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר";
+  // Numeric "D.M" / "D/M" / "DD.MM" — Israeli short-date convention. Anchored
+  // on word-boundaries via lookbehind/lookahead so "1.5" inside "ב-1.5" matches
+  // but "1.5kg" does not (we don't anchor on \b because Hebrew breaks it; the
+  // [^\d.]/end check is enough for the common cases).
+  for (const m of sourceMessageText.matchAll(/(?<![\d.])(\d{1,2})[./](\d{1,2})(?![\d.])/g)) {
+    distinctDateTokens.add(`${m[1]}.${m[2]}`);
+  }
+  // Hebrew "X במאי" / "X בינואר" etc.
+  const hebMonthRe = new RegExp(`(\\d{1,2})\\s+ב(${monthNames})`, "g");
+  for (const m of sourceMessageText.matchAll(hebMonthRe)) {
+    distinctDateTokens.add(`${m[1]} ב${m[2]}`);
+  }
+  if (distinctDateTokens.size < 2) return null;
+
+  return {
+    dates: Array.from(distinctDateTokens),
+    titles: broadcastTitles,
+    broadcastDate,
+  };
+}
+
 // Reminder dedup — same group_id, fuzzy-matching text, send_at within window.
 // Used to prevent the 2026-04-24 triple-fire pattern (rescue + action both
 // insert on same Sonnet reply, or user re-asks "וגם את אלה תזכירי?" 49 min later).
@@ -5811,6 +5907,32 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
 15. EVENTS MUST HAVE A DATE. If user mentions an event but no date/time → DO NOT store as event. Either:
     (a) Ask: "מתי המסיבה? אני אשמור ביומן 📅" and wait.
     (b) If they hint at a vague time ("בקרוב", "בעתיד") → store as TASK instead of event ({"type":"task","text":"לתכנן את המסיבה"}).
+15a. MULTI-EVENT DATE INDEPENDENCE (Bug 6, 2026-05-03 churn — ABSOLUTE RULE).
+    When the user lists multiple events with different dates in ONE message
+    (e.g. "יום ו' 1 במאי קונצרט, יום ג' 12 במאי חזרה, יום ד' 13 במאי הופעה"),
+    each event MUST be emitted as its OWN {"type":"event"} action with its
+    OWN \`date\` field parsed from its OWN line. NEVER reuse a date across
+    multiple event actions. The 2026-05-03 churn root: a household sent 5
+    events with 5 distinct dates → Sonnet emitted 5 actions all stamped
+    with the FIRST date → Sheli claimed "שמרתי 5 אירועים" but 4 of 5 were
+    silently broken. The server now REJECTS the batch when it detects 2+
+    events on the same date with 2+ distinct date tokens in the source —
+    you'll be forced to retry. Better to read each line carefully the first
+    time. If a line has NO explicit date, do NOT silently inherit from a
+    previous line — either omit that event from ACTIONS or ASK ("ולגבי X,
+    באיזה תאריך?"). Example correct emission:
+      input: "יום ו' 1.5 קונצרט לגנים, יום ג' 12.5 חזרה, יום ד' 13.5 הופעה"
+      ACTIONS: [
+        {"type":"event","title":"קונצרט לגנים","date":"2026-05-01","time":"19:00"},
+        {"type":"event","title":"חזרה","date":"2026-05-12","time":"19:00"},
+        {"type":"event","title":"הופעה","date":"2026-05-13","time":"19:00"}
+      ]
+    NEVER:
+      ACTIONS: [
+        {"type":"event","title":"קונצרט לגנים","date":"2026-05-01"},
+        {"type":"event","title":"חזרה","date":"2026-05-01"},  ← BUG: broadcast
+        {"type":"event","title":"הופעה","date":"2026-05-01"}   ← BUG: broadcast
+      ]
     A bare "מסיבה" or "פגישה" with no date is NEVER a valid event.
 16. REMINDERS MUST HAVE BOTH content AND time. If either is missing → ask for the missing piece, do NOT store partial.
     - "תזכירי לי לקחת ויטמינים" → MISSING TIME → ask "באיזו שעה?" and wait.
@@ -7522,6 +7644,20 @@ async function execute1on1Actions(params: {
           console.log(`${logPrefix} Image OCR confirmation staged (mappedActions) — skipping execute + Sonnet reply`);
           return { actions, visibleReply: "", triedCaps, confirmationStaged: true };
         }
+      }
+      // Multi-event date-broadcasting guard (Bug 6, 2026-05-03 churn). Mirror
+      // of the group path. When 2+ add_event actions stack on the same date
+      // AND the source message has 2+ distinct date tokens, suppress execute
+      // + replace visible reply with a confirmation ask.
+      const sourceText = params.message?.text || text || raw || "";
+      const broadcast = detectEventBroadcastBug(mappedActions, sourceText);
+      if (broadcast) {
+        console.warn(
+          `${logPrefix} Multi-event broadcast detected: ${broadcast.titles.length} events on ${broadcast.broadcastDate}, source had ${broadcast.dates.length} distinct dates: [${broadcast.dates.join(", ")}]`,
+        );
+        const eventList = broadcast.titles.slice(0, 5).map((t) => `• ${t}`).join("\n");
+        const askMsg = `רגע, ראיתי כמה תאריכים בהודעה אבל אני קצת מתבלבלת ✋\n\nאתם מתכוונים שכל ${broadcast.titles.length} האירועים האלה הם באותו יום (${broadcast.broadcastDate})?\n${eventList}\n\nאם לא — תוכלו לשלוח שוב כשכל אירוע בשורה משלו עם התאריך שלו? ככה אסדר נכון 🙏`;
+        return { actions, visibleReply: askMsg, triedCaps, confirmationStaged: true };
       }
       try {
         const { summary } = await executeActions(householdId, mappedActions, userName, phone);
@@ -12016,6 +12152,27 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
+    // Multi-event date-broadcasting guard (Bug 6, 2026-05-03 churn). On
+    // 2026-04-30 a household sent 5 events with 5 distinct dates and Sonnet
+    // stamped them all with the first parsed date. Reject pre-execute and
+    // ask the user to re-list per-line so each gets parsed independently.
+    {
+      const broadcast = detectEventBroadcastBug(actions, message.text);
+      if (broadcast) {
+        console.warn(
+          `[Webhook] Multi-event broadcast detected: ${broadcast.titles.length} events stacked on ${broadcast.broadcastDate}, source had ${broadcast.dates.length} distinct dates: [${broadcast.dates.join(", ")}]`,
+        );
+        const eventList = broadcast.titles.slice(0, 5).map((t) => `• ${t}`).join("\n");
+        const askMsg = `רגע, ראיתי כמה תאריכים בהודעה אבל אני קצת מתבלבלת ✋\n\nאתם מתכוונים שכל ${broadcast.titles.length} האירועים האלה הם באותו יום (${broadcast.broadcastDate})?\n${eventList}\n\nאם לא — תוכלו לשלוח שוב כשכל אירוע בשורה משלו עם התאריך שלו? ככה אסדר נכון 🙏`;
+        await sendAndLog(provider, { groupId: message.groupId, text: askMsg }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId,
+          replyType: "event_broadcast_guard",
+        });
+        await logMessage(message, "event_broadcast_guard", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+    }
+
     const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
     console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
 
@@ -12509,7 +12666,15 @@ Deno.serve(async (req: Request) => {
     }
 
     if (classification.intent === "delete_memory") {
-      // Soft-delete by content match (fuzzy), fallback to most recent
+      // P1 (2026-05-03 churn fix): soft-delete only on content match. Removed
+      // the "fall back to most recent" behavior — that was the silent bug
+      // surface that let "תמחקי אותו" delete an unrelated memory while the
+      // ACTUAL referent (a recent add_event) survived. With pronoun-deletes
+      // now routing to correct_bot via the Haiku prompt rule + examples,
+      // delete_memory should only fire when the message has explicit
+      // memory-vocabulary. If we still can't find a content match, do NOT
+      // delete anything — Sonnet's reply will ask "מה תרצי שאשכח?" via the
+      // delete_memory action summary in the reply prompt.
       const { data: allMemories } = await supabase.from("family_memories")
         .select("id, content, member_phone")
         .eq("household_id", householdId)
@@ -12518,14 +12683,24 @@ Deno.serve(async (req: Request) => {
 
       if (allMemories && allMemories.length > 0) {
         const rawText = (entities?.raw_text || message.text || "").toLowerCase();
-        // Try content-match: find a memory whose content appears in the user's request (or vice versa)
+        // Content-match: find a memory whose content appears in the user's
+        // request (or vice versa, after stripping common delete-vocabulary).
         const match = allMemories.find((m: any) => {
           const mc = (m.content || "").toLowerCase();
           return rawText.includes(mc) || mc.includes(rawText.replace(/תשכחי|תמחקי|שלי|את |ש/g, "").trim());
         });
-        const target = match || allMemories[0]; // fallback to most recent if no content match
-        await supabase.from("family_memories").update({ active: false }).eq("id", target.id);
-        console.log(`[Memory] Deleted memory ${target.id} (${match ? "content-matched" : "most-recent fallback"})`);
+        if (match) {
+          await supabase.from("family_memories").update({ active: false }).eq("id", match.id);
+          console.log(`[Memory] Deleted memory ${match.id} (content-matched)`);
+        } else {
+          console.log("[Memory] delete_memory with no content match — NO-OP. Sonnet will ask 'מה תרצי שאשכח?'");
+          // Hint the reply generator that we couldn't find a match. Tagged on
+          // the classification object so generateReply can branch its action
+          // summary accordingly.
+          (classification as any).__deleteMemoryNoMatch = true;
+        }
+      } else {
+        (classification as any).__deleteMemoryNoMatch = true;
       }
     }
 
@@ -14575,21 +14750,28 @@ async function undoLastAction(householdId: string, lastAction: ClassificationOut
 // All three return arrays the Sonnet prompt will interpolate.
 
 async function gatherCorrectionCandidates(householdId: string): Promise<CandidateRow[]> {
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // P1 (2026-05-03 churn fix): drop the 24h created_at window — it excluded
+  // events that were created days/weeks ago but are still in the future.
+  // School events (added by parents from forwarded messages) are the canonical
+  // case: created Friday for Sunday's test, user corrects Saturday → 24h
+  // window misses, hardcoded "לא מצאתי שורה" template fires twice. Now:
+  //   - Events: any FUTURE event is a correction candidate (no created_at cap).
+  //     Order by scheduled_for ascending so the next-up events are first.
+  //   - Reminders (one-shot): any unsent reminder, ordered by send_at asc.
+  //   - Reminders (recurring parents): unchanged — already had no time filter.
   // Globerman 2026-04-26: also fetch active recurring PARENTS (sent=true,
   // recurrence not null). Without these, "תבטלי את תזכורת הכדורסל" only sees
   // the next pending child — Sonnet picks it, executor cancels just that one
   // child, and the next materialize cycle creates a fresh child for the next
   // weekday. Including parents as candidates lets Sonnet target the series.
-  // No created_at filter on parents — recurring series can be days/weeks old.
+  const nowIso = new Date().toISOString();
   const [evRes, remRes, parentRes] = await Promise.all([
     supabase.from("events").select("id, title, scheduled_for")
-      .eq("household_id", householdId).gte("created_at", dayAgo)
-      .order("created_at", { ascending: false }).limit(5),
+      .eq("household_id", householdId).gt("scheduled_for", nowIso)
+      .order("scheduled_for", { ascending: true }).limit(8),
     supabase.from("reminder_queue").select("id, message_text, send_at")
       .eq("household_id", householdId).eq("sent", false)
-      .gte("created_at", dayAgo)
-      .order("created_at", { ascending: false }).limit(5),
+      .order("send_at", { ascending: true }).limit(6),
     supabase.from("reminder_queue").select("id, message_text, send_at, recurrence")
       .eq("household_id", householdId).not("recurrence", "is", null).is("recurrence_parent_id", null)
       .order("created_at", { ascending: false }).limit(5),
@@ -14727,8 +14909,17 @@ async function handleCorrection(
     gatherRecentSheliActions(groupId),
   ]);
 
+  // P1 (2026-05-03 churn fix): with the wider candidate window (any future
+  // event + any unsent reminder + recurring parents), an empty list now
+  // genuinely means "no future events or pending reminders exist" — not "I
+  // dropped them due to a 24h cap". Reply honestly instead of the
+  // generic-and-confusing "לא מצאתי שורה" that fired twice in the 2026-05-03
+  // churn. Adapt copy slightly so users know which surfaces Sheli scanned.
   if (candidates.length === 0) {
-    await sendAndLog(provider, { groupId, text: "סליחה, לא מצאתי שורה קרובה לתקן. תוכלי להגיד שוב?" }, {
+    await sendAndLog(provider, {
+      groupId,
+      text: "אין לי כרגע אירועים פתוחים או תזכורות בהמתנה. למה את מתכוונת? אם זה משהו ישן, תגידו לי שוב את הפרטים ואני אסדר 🙏",
+    }, {
       householdId, groupId, inReplyTo: message.messageId, replyType: "clarification",
     });
     await logMessage(message, "correction_error", householdId, classification);
