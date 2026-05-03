@@ -1040,7 +1040,7 @@ function SheliApp() {
           )}
 
           {tab === "week" && (
-            <WeekView tasks={tasks} events={events} rotations={rotations} t={t} lang={lang} onDeleteEvent={deleteEventHandler} />
+            <WeekView tasks={tasks} events={events} rotations={rotations} t={t} lang={lang} onDeleteEvent={deleteEventHandler} googleAccessToken={googleAccessToken} />
           )}
 
           {tab === "expenses" && (
