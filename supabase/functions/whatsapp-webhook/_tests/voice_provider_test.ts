@@ -10,7 +10,9 @@
 // on the VOICE_PROVIDER env var. Default = groq for instant rollback.
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  parseCompareWhitelist,
   transcribeVoice,
+  transcribeVoiceCompare,
   transcribeVoiceGroq,
   transcribeVoiceIvritAi,
 } from "../index.inlined.ts";
@@ -222,4 +224,82 @@ Deno.test("transcribeVoiceGroq still works as a standalone helper (regression)",
   } finally {
     restore();
   }
+});
+
+// ─── Voice compare (ad-hoc QA) tests ─────────────────────────────────────
+
+Deno.test("transcribeVoiceCompare returns both providers' results in parallel", async () => {
+  Deno.env.set("IVRIT_AI_HF_URL", "https://stub.example/ivrit");
+  Deno.env.set("IVRIT_AI_HF_TOKEN", "hf_stub");
+  Deno.env.set("GROQ_API_KEY", "groq_stub");
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("groq.com")) {
+      return new Response(JSON.stringify({ text: "ויטל הדריכלית", language: "he", segments: [] }), { status: 200 });
+    }
+    if (url.includes("stub.example/ivrit")) {
+      return new Response(JSON.stringify({ text: "אביטל האדריכלית" }), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  };
+  try {
+    const blob = new Blob([new Uint8Array([0, 1, 2])], { type: "audio/ogg" });
+    const result = await transcribeVoiceCompare(blob, "");
+    assertEquals(result.groq.text, "ויטל הדריכלית");
+    assertEquals(result.ivrit.text, "אביטל האדריכלית");
+    assertEquals(result.groq.quality, "ok");
+    assertEquals(result.ivrit.quality, "ok");
+  } finally {
+    globalThis.fetch = orig;
+    Deno.env.delete("IVRIT_AI_HF_URL");
+    Deno.env.delete("IVRIT_AI_HF_TOKEN");
+    Deno.env.delete("GROQ_API_KEY");
+  }
+});
+
+Deno.test("transcribeVoiceCompare survives one provider failing", async () => {
+  Deno.env.set("IVRIT_AI_HF_URL", "https://stub.example/ivrit");
+  Deno.env.set("IVRIT_AI_HF_TOKEN", "hf_stub");
+  Deno.env.set("GROQ_API_KEY", "groq_stub");
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("groq.com")) {
+      return new Response(JSON.stringify({ text: "fine", language: "he", segments: [] }), { status: 200 });
+    }
+    if (url.includes("stub.example/ivrit")) {
+      return new Response("server exploded", { status: 500 });
+    }
+    return new Response("[]", { status: 200 });
+  };
+  try {
+    const blob = new Blob([new Uint8Array([0, 1, 2])], { type: "audio/ogg" });
+    const result = await transcribeVoiceCompare(blob, "");
+    assertEquals(result.groq.text, "fine");
+    assertEquals(result.ivrit.text, null);
+    assertEquals(result.ivrit.quality, "failed");
+  } finally {
+    globalThis.fetch = orig;
+    Deno.env.delete("IVRIT_AI_HF_URL");
+    Deno.env.delete("IVRIT_AI_HF_TOKEN");
+    Deno.env.delete("GROQ_API_KEY");
+  }
+});
+
+Deno.test("parseCompareWhitelist parses CSV with + prefix and whitespace", () => {
+  Deno.env.set("VOICE_COMPARE_PHONES", " +972525937316 , 972559881835 ,  ");
+  try {
+    const set = parseCompareWhitelist();
+    assertEquals(set.has("972525937316"), true);
+    assertEquals(set.has("972559881835"), true);
+    assertEquals(set.size, 2);
+  } finally {
+    Deno.env.delete("VOICE_COMPARE_PHONES");
+  }
+});
+
+Deno.test("parseCompareWhitelist returns empty set when env var unset", () => {
+  Deno.env.delete("VOICE_COMPARE_PHONES");
+  assertEquals(parseCompareWhitelist().size, 0);
 });

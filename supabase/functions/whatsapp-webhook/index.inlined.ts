@@ -10670,6 +10670,25 @@ Deno.serve(async (req: Request) => {
 
       const voiceResult = await transcribeVoice(message.mediaUrl, message.mediaId, voiceHouseholdId);
 
+      // Voice-compare debug (ad-hoc QA). When sender's phone is in
+      // VOICE_COMPARE_PHONES, fire BOTH providers in parallel on the same
+      // audio bytes and reply with a side-by-side debug message. Main pipeline
+      // continues unchanged with its own voiceResult — the comparison is
+      // fire-and-forget. Stays dormant when env var is unset (zero production
+      // exposure).
+      try {
+        const compareSet = parseCompareWhitelist();
+        if (compareSet.size > 0 && compareSet.has(normalizeComparePhone(message.senderPhone))) {
+          console.log(`[VoiceCompare] sender ${message.senderPhone} on whitelist — firing comparison`);
+          // fire-and-forget — must not block main pipeline
+          void runVoiceCompareDebug(message, voiceHouseholdId).catch((err) => {
+            console.error("[VoiceCompare] Debug send failed:", err);
+          });
+        }
+      } catch (err) {
+        console.error("[VoiceCompare] whitelist check failed (non-fatal):", err);
+      }
+
       // Low-quality voice gate (2026-04-21). Rather than letting Sonnet invent
       // an interpretation of a garbled Hebrew-mistranscription (Habib incident:
       // blurred voice → Sonnet replied "break from shopping" out of nowhere),
@@ -13311,6 +13330,137 @@ export async function transcribeVoice(
     return transcribeVoiceIvritAi(audioBlob, biasPrompt);
   }
   return transcribeVoiceGroq(audioBlob, biasPrompt);
+}
+
+// ─── Voice compare (ad-hoc QA) ───
+//
+// Side-by-side comparison helper for ad-hoc voice QA. Calls BOTH providers in
+// parallel on the same audio bytes. Used by the voice-compare debug path when
+// sender is in VOICE_COMPARE_PHONES. Each provider call is independent — one
+// failing returns its own "failed" quality without blocking the other.
+//
+// Used to verify ivrit-ai quality on real WhatsApp audio before flipping
+// VOICE_PROVIDER=ivrit_ai_hf permanently. Stays dormant when env var unset.
+export async function transcribeVoiceCompare(
+  audioBlob: Blob,
+  biasPrompt: string,
+): Promise<{ groq: VoiceTranscription; ivrit: VoiceTranscription }> {
+  const [groq, ivrit] = await Promise.all([
+    transcribeVoiceGroq(audioBlob, biasPrompt).catch((err): VoiceTranscription => {
+      console.error("[VoiceCompare] Groq error:", err);
+      return { text: null, quality: "failed" };
+    }),
+    transcribeVoiceIvritAi(audioBlob, biasPrompt).catch((err): VoiceTranscription => {
+      console.error("[VoiceCompare] ivrit-ai error:", err);
+      return { text: null, quality: "failed" };
+    }),
+  ]);
+  return { groq, ivrit };
+}
+
+// Parse VOICE_COMPARE_PHONES (CSV of phone numbers) into a normalized Set.
+// Strips leading "+" and whitespace. Empty / unset env var → empty Set
+// (zero production exposure when feature unused).
+export function parseCompareWhitelist(): Set<string> {
+  const raw = Deno.env.get("VOICE_COMPARE_PHONES") || "";
+  const set = new Set<string>();
+  for (const p of raw.split(",")) {
+    const trimmed = p.trim().replace(/^\+/, "");
+    if (trimmed) set.add(trimmed);
+  }
+  return set;
+}
+
+function normalizeComparePhone(phone: string | undefined | null): string {
+  return (phone || "").trim().replace(/^\+/, "");
+}
+
+// Fire-and-forget debug helper. Re-downloads the audio (idempotent at Whapi),
+// rebuilds the same bias prompt the main pipeline used, runs both providers
+// in parallel, then sends a debug message back to the same chat with both
+// transcripts side by side. Safe to call from anywhere — all errors are
+// caught and logged, never thrown to the caller.
+async function runVoiceCompareDebug(
+  message: IncomingMessage,
+  householdId: string | null,
+): Promise<void> {
+  // 1. Re-download audio. Slight duplication with transcribeVoice but isolated
+  //    from the main pipeline — keeps the comparison side-effect-free for the
+  //    user's experience even if download fails.
+  let audioBlob: Blob;
+  try {
+    if (message.mediaUrl) {
+      const r = await fetch(message.mediaUrl);
+      if (!r.ok) {
+        console.error("[VoiceCompare] audio download failed:", r.status);
+        return;
+      }
+      audioBlob = await r.blob();
+    } else if (message.mediaId) {
+      const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
+      const token = Deno.env.get("WHAPI_TOKEN") || "";
+      const r = await fetch(`${apiUrl}/media/${message.mediaId}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "audio/ogg" },
+      });
+      if (!r.ok) {
+        console.error("[VoiceCompare] Whapi media download failed:", r.status);
+        return;
+      }
+      audioBlob = await r.blob();
+    } else {
+      console.error("[VoiceCompare] no mediaUrl or mediaId on message");
+      return;
+    }
+  } catch (err) {
+    console.error("[VoiceCompare] audio download error:", err);
+    return;
+  }
+
+  // 2. Build the same bias prompt the main pipeline used — keeps the
+  //    comparison apples-to-apples. Empty string when no household.
+  let biasPrompt = "";
+  try {
+    biasPrompt = await buildVoicePromptBias(householdId);
+  } catch (err) {
+    console.error("[VoiceCompare] buildVoicePromptBias failed (non-fatal):", err);
+  }
+
+  // 3. Run both providers in parallel.
+  const { groq, ivrit } = await transcribeVoiceCompare(audioBlob, biasPrompt);
+
+  // 4. Build debug body. Format mirrors spec — fixed separators, both
+  //    transcripts visible, quality + bias-length annotation footer.
+  const lines = [
+    "🔬 voice compare",
+    "━━━━━━━━━━━━━━━━━━",
+    "[Groq]",
+    groq.text || "(failed)",
+    "",
+    "[ivrit-ai]",
+    ivrit.text || "(failed)",
+    "━━━━━━━━━━━━━━━━━━",
+    `quality: groq=${groq.quality} ivrit=${ivrit.quality} | bias=${biasPrompt.length} chars`,
+  ];
+  const debugBody = lines.join("\n");
+
+  // 5. Send via the existing sendAndLog wrapper so the row lands in
+  //    whatsapp_messages with replyType="voice_compare_debug" — queryable
+  //    after the fact for QA review.
+  const chatTarget = message.groupId;
+  if (!chatTarget) {
+    console.error("[VoiceCompare] no chatTarget on message — cannot send debug");
+    return;
+  }
+  try {
+    await sendAndLog(provider, { groupId: chatTarget, text: debugBody }, {
+      householdId: householdId || "unknown",
+      groupId: chatTarget,
+      inReplyTo: message.messageId,
+      replyType: "voice_compare_debug",
+    });
+  } catch (err) {
+    console.error("[VoiceCompare] sendAndLog failed:", err);
+  }
 }
 
 // ─── Voice — First-in-chat detection ───
