@@ -179,7 +179,14 @@ export default function AuthScreen({ onBack, lang = "en" }) {
     analytics.signupStarted("google");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: redirectUrl },
+      options: {
+        redirectTo: redirectUrl,
+        scopes: "https://www.googleapis.com/auth/calendar.events",
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
+      },
     });
     // M17 fix: show error if OAuth fails (e.g. popup blocked)
     if (error) setError(isHe ? "ההתחברות עם Google נכשלה. נסו שוב" : "Google sign-in failed. Please try again");

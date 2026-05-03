@@ -121,5 +121,9 @@ const en = {
   expensesAddViaWA: "Add via WhatsApp",
   expensesEditHint: "To edit, message Sheli on WhatsApp",
   expensesCount: "expenses",
+  syncToGcal: "Sync to Google Calendar",
+  gcalSynced: "Synced to Google Calendar",
+  gcalSyncFailed: "Sync failed",
+  gcalNotConnected: "Sign in with Google to sync to Calendar",
 };
 export default en;

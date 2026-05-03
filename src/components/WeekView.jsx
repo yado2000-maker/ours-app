@@ -1,8 +1,30 @@
 import { useState } from "react";
 import { EmptyCalendarIcon, ChevronLeftIcon, ChevronRightIcon, DeleteIcon } from "./Icons.jsx";
+import { syncEventToGoogleCalendar } from "../lib/google-calendar.js";
 
-export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEvent }) {
+export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEvent, googleAccessToken }) {
   const [weekOffset, setWeekOffset] = useState(0);
+  const [syncingId, setSyncingId] = useState(null);
+  const [syncedIds, setSyncedIds] = useState({});
+
+  async function handleSync(item) {
+    if (!googleAccessToken) {
+      alert(t.gcalNotConnected);
+      return;
+    }
+    setSyncingId(item.id);
+    try {
+      const res = await syncEventToGoogleCalendar({
+        accessToken: googleAccessToken,
+        event: { title: item.title, scheduledFor: item.scheduledFor, durationMinutes: 60 },
+      });
+      setSyncedIds(prev => ({ ...prev, [item.id]: res.htmlLink }));
+    } catch (e) {
+      alert(`${t.gcalSyncFailed}: ${e.message}`);
+    } finally {
+      setSyncingId(null);
+    }
+  }
   const today = new Date();
 
   const startOfWeek = new Date(today);
@@ -150,12 +172,20 @@ export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEv
                   <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:3}}>
                     <div className="week-task-name">{item.title}</div>
                     {item._type === "event" && (
-                      <button onClick={() => onDeleteEvent(item.id)}
-                        style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:12,lineHeight:1,padding:0,flexShrink:0,opacity:0.6,marginTop:1}}
-                        onMouseOver={e=>e.currentTarget.style.opacity=1}
-                        onMouseOut={e=>e.currentTarget.style.opacity=0.6}>
-                        <DeleteIcon size={12} />
-                      </button>
+                      <div style={{display:"flex",alignItems:"flex-start",gap:6,flexShrink:0}}>
+                        <button onClick={() => handleSync(item)}
+                          disabled={syncingId === item.id || !!syncedIds[item.id]}
+                          title={syncedIds[item.id] ? t.gcalSynced : t.syncToGcal}
+                          style={{background:"none",border:"none",cursor:syncedIds[item.id]?"default":"pointer",color:syncedIds[item.id]?"var(--accent)":"var(--muted)",fontSize:12,lineHeight:1,padding:0,opacity:syncingId===item.id?0.4:0.8,marginTop:1}}>
+                          {syncedIds[item.id] ? "✓📅" : syncingId === item.id ? "…" : "📅"}
+                        </button>
+                        <button onClick={() => onDeleteEvent(item.id)}
+                          style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:12,lineHeight:1,padding:0,opacity:0.6,marginTop:1}}
+                          onMouseOver={e=>e.currentTarget.style.opacity=1}
+                          onMouseOut={e=>e.currentTarget.style.opacity=0.6}>
+                          <DeleteIcon size={12} />
+                        </button>
+                      </div>
                     )}
                   </div>
                   {item._type === "rotation" ? (
