@@ -69,12 +69,49 @@ Deno.test("buildVoicePromptBias returns empty string when household has no membe
   }
 });
 
-Deno.test("buildVoicePromptBias caps at 600 chars (Whisper 224-token limit)", async () => {
+Deno.test("buildVoicePromptBias caps at 800 UTF-8 bytes (Groq's 896-byte Whisper prompt limit)", async () => {
   const manyMembers = Array.from({ length: 50 }, (_, i) => ({ member_name: `שם${i}` }));
   const restore = stubFetch({ members: manyMembers, items: [] });
   try {
     const bias = await buildVoicePromptBias("hh_big");
-    assertEquals(bias.length <= 600, true);
+    const byteLen = new TextEncoder().encode(bias).length;
+    assertEquals(byteLen <= 800, true);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("buildVoicePromptBias respects 800-byte UTF-8 cap (Hebrew is 2 bytes per char)", async () => {
+  // 50 Hebrew names averaging 10 chars (20 bytes) each = 1000 bytes total raw,
+  // way over Groq's 896-byte limit. Helper must trim to ≤800 bytes.
+  const restore = stubFetch({
+    members: Array.from({ length: 50 }, (_, i) => ({ member_name: `שםארוךמאד${i}` })),
+    items: [],
+    tasks: [],
+    events: [],
+  });
+  try {
+    const bias = await buildVoicePromptBias("hh_test_bytes");
+    const byteLen = new TextEncoder().encode(bias).length;
+    console.log(`[test] byte cap test produced bias of ${byteLen} bytes (${bias.length} chars)`);
+    assertEquals(byteLen <= 800, true, `bias byte length ${byteLen} exceeds 800-byte cap`);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("buildVoicePromptBias still includes content when within byte cap", async () => {
+  const restore = stubFetch({
+    members: [{ member_name: "אביטל" }, { member_name: "גיורא" }],
+    items: [{ name: "חלב" }],
+    tasks: [{ title: "להתקשר" }],
+    events: [],
+  });
+  try {
+    const bias = await buildVoicePromptBias("hh_small");
+    assertEquals(bias.includes("אביטל"), true);
+    assertEquals(bias.includes("גיורא"), true);
+    assertEquals(bias.includes("חלב"), true);
   } finally {
     restore();
   }
@@ -129,7 +166,7 @@ Deno.test("buildVoicePromptBias prioritizes members > tasks > events > items und
   });
   try {
     const bias = await buildVoicePromptBias("hh_big");
-    assertEquals(bias.length <= 600, true);
+    assertEquals(new TextEncoder().encode(bias).length <= 800, true);
     // First member must appear; last shopping item likely won't.
     assertEquals(bias.includes("M0"), true);
     assertEquals(bias.includes("I49"), false);

@@ -13032,8 +13032,16 @@ Deno.serve(async (req: Request) => {
 // skipped: schema lacks a direct household_id column and most reminder
 // vocabulary already appears in tasks/events.
 //
-// Cap at 600 chars conservatively (Hebrew is ~2-3 tokens per word).
-const VOICE_BIAS_CHAR_CAP = 600;
+// Groq's Whisper `prompt` parameter has an 896-byte limit (Whisper's 224-token
+// limit; ~4 bytes/token). Hebrew characters are 2 UTF-8 bytes each, so a
+// 600-JS-character cap was blowing past the limit when most of the bias was
+// Hebrew names + tasks + events. We measure in UTF-8 bytes instead and target
+// 800 bytes for safety margin (~50 chars headroom).
+const VOICE_BIAS_BYTE_CAP = 800;
+
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
 
 export async function buildVoicePromptBias(householdId: string | null | undefined): Promise<string> {
   if (!householdId) return "";
@@ -13083,13 +13091,13 @@ export async function buildVoicePromptBias(householdId: string | null | undefine
     }
 
     const out: string[] = [];
-    let len = 0;
+    let bytes = 0;
     for (const t of tokens) {
       const sep = out.length === 0 ? "" : ", ";
-      const addLen = sep.length + t.length;
-      if (len + addLen > VOICE_BIAS_CHAR_CAP) break;
+      const addBytes = utf8ByteLength(sep + t);
+      if (bytes + addBytes > VOICE_BIAS_BYTE_CAP) break;
       out.push(t);
-      len += addLen;
+      bytes += addBytes;
     }
     return out.join(", ");
   } catch (err) {
@@ -13439,7 +13447,7 @@ async function runVoiceCompareDebug(
     "[ivrit-ai]",
     ivrit.text || "(failed)",
     "━━━━━━━━━━━━━━━━━━",
-    `quality: groq=${groq.quality} ivrit=${ivrit.quality} | bias=${biasPrompt.length} chars`,
+    `quality: groq=${groq.quality} ivrit=${ivrit.quality} | bias=${new TextEncoder().encode(biasPrompt).length}B (${biasPrompt.length} chars)`,
   ];
   const debugBody = lines.join("\n");
 
