@@ -265,7 +265,7 @@ interface ReplyResult {
 interface ClassifiedAction {
   // Patch D (Shira 2026-04-15): added complete_shopping_by_names + complete_tasks_all_open
   // for quote-reply completions where the executor resolves names/scopes to IDs via DB lookup.
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense" | "clear_list";
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense" | "clear_list" | "set_reminder_rule";
   data: Record<string, unknown>;
 }
 
@@ -408,6 +408,23 @@ class WhapiProvider implements WhatsAppProvider {
       // Keep it in both text (for downstream text-based flow) and imageCaption
       // (preserved so the OCR merger can distinguish caption from OCR output).
       const resolvedText = (resolvedType === "image" && !text && imageCaption) ? imageCaption : text;
+
+      // Image instrumentation (P3 #14, 2026-05-03 churn). On 2026-05-01 a
+      // family sent 2 test-schedule images that NEVER appeared in
+      // whatsapp_messages — Whapi delivery failure or webhook filter regression.
+      // The single best diagnostic line: every inbound image emits a
+      // [Webhook:IMAGE] log on first parse, with mime, id, caption-length,
+      // and ms-since-Whapi-send so we can detect non-delivery + reconcile
+      // against Whapi /messages/list later. Cheap (one console.log/image),
+      // catches both regression classes.
+      if (resolvedType === "image") {
+        const captionLen = (imageCaption || "").length;
+        const sentAtMs = typeof timestamp === "number" ? timestamp * 1000 : 0;
+        const ageMs = sentAtMs > 0 ? Date.now() - sentAtMs : -1;
+        console.log(
+          `[Webhook:IMAGE] id=${id} group=${groupId} from=${from.replace("@s.whatsapp.net", "")} mime=${mediaMimeType || "?"} captionLen=${captionLen} ageMs=${ageMs} forwarded=${forwardedFlag}`,
+        );
+      }
 
       return {
         messageId: id,
@@ -684,7 +701,7 @@ INTENTS:
 - ignore: Social noise (greetings, reactions, emojis, jokes, chatter, forwarded messages, status updates). ~80% of messages.
 - add_shopping: Adding item(s) to shopping list. Bare nouns, "צריך X", "נגמר X", "אין X".
 - add_task: Creating a chore/to-do. "צריך ל...", "[person] [activity] [time]", maintenance requests. Works for personal tasks ("לשלם חשבון") and shared chores. Includes cleaning (ניקיון, לנקות, לסדר), laundry (כביסה, קיפול, גיהוץ), kitchen chores (כלים, לשטוף, לפנות), trash (זבל, להוציא זבל), errands (לשלם, לשלוח, להתקשר, לתאם, להזמין), maintenance (לתקן, להחליף, לבדוק), kids/school (חוזה, טופס, שיעורי בית, להחתים). Multi-chore bursts (newline/comma list of chores) → classify first chore at conf 0.75 + needs_conversation_review: true so Sonnet can expand into all actions.
-- add_event: Scheduling a specific date/time event. Appointments (רופא, רופא שיניים, וטרינר, ועדה), classes/activities (חוג, שיעור, אימון, חזרה, לימודים, הרצאה), meals out (ארוחה, ארוחת ערב, ארוחה משפחתית, ברביקיו), meetings (פגישה, ישיבה, שיחה), social (יום הולדת, חתונה, בר מצווה, ברית, מסיבה, אירוע), trips (טיול, נופש, טיסה, ביקור). Always has an implicit or explicit date/time. Multi-event bursts → classify first event + needs_conversation_review: true.
+- add_event: Scheduling a specific date/time event. Appointments (רופא, רופא שיניים, וטרינר, ועדה), classes/activities (חוג, שיעור, אימון, חזרה, לימודים, הרצאה), meals out (ארוחה, ארוחת ערב, ארוחה משפחתית, ברביקיו), meetings (פגישה, ישיבה, שיחה), social (יום הולדת, חתונה, בר מצווה, ברית, מסיבה, אירוע), trips (טיול, נופש, טיסה, ביקור). Always has an implicit or explicit date/time. Multi-event bursts → classify first event + needs_conversation_review: true. NO-TIME RULE (Bug 5, 2026-05-03 churn): if the message has a DATE but NO time-of-day (e.g. forwarded school messages "ביום ראשון יתקיים מבחן בשפה"), set entities.time_missing=true and DO NOT guess a default like 09:00. The webhook will route to a confirmation_ask "באיזו שעה?" instead of saving with a hallucinated time. Triggers: school-message regex (יתקיים\|יערך\|יחל\|מבחן\|טקס\|אסיפה\|טיול\|פעילות\|אירוע מיוחד) + a date BUT no hour-of-day pattern (no \\d{1,2}:\\d{2}, no \"בשעה X\", no \"ב-X\", no \"בבוקר\\|בערב\\|בלילה\\|בצהריים\").
 - complete_task: Marking an existing task as done. Past tense of open task, "סיימתי", "בוצע".
 - complete_shopping: Confirming purchase of a list item. "קניתי", "יש", "לקחתי".
 - question: Asking about current state (tasks, schedule, list). "מה צריך?", "מה ברשימה?", "מה יש היום?".
@@ -1138,6 +1155,18 @@ EXAMPLES:
 [אבא]: "מה התזכורות?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"מה התזכורות?","list_type":"reminder"}}
 [אמא]: "איזה תזכורות יש לי?" → {"intent":"question","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"איזה תזכורות יש לי?","list_type":"reminder"}}
 [אבא]: "מה ברשימת קניות?" → {"intent":"question","confidence":0.95,"addressed_to_bot":true,"entities":{"raw_text":"מה ברשימת קניות?","list_type":"shopping"}}
+// LOOKBACK PATTERN (P3 #15, 2026-05-03 churn). When user says "תרשמי/תוסיפי
+// את כל ה-X ששלחנו היום" referring to images/messages from EARLIER in the
+// chat, this is NOT an actionable add_event/add_shopping/add_task — Sheli
+// has no memory of past media. Classify as 'question' with confidence at
+// most 0.85 so Sonnet can reply honestly ("איזה מבחנים? לא ראיתי תמונות.
+// תוכלו לשלוח שוב?"). The 2026-05-03 churn root cause: Sheli treated this
+// as a single add_event, claimed "נרשם ביומן ✓ אזכיר לכם שבוע לפני כל
+// מבחן" and saved nothing — pure trust failure when the family checked
+// next morning.
+[אבא]: "תרשמי את כל המבחנים ששלחנו היום ותזכירי לנו שבוע לפני" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"תרשמי את כל המבחנים ששלחנו היום ותזכירי לנו שבוע לפני","lookback_ask":true}}
+[אמא]: "תוסיפי את כל הפריטים שכתבנו לפני" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"תוסיפי את כל הפריטים שכתבנו לפני","lookback_ask":true}}
+[אבא]: "תקראי את התמונות מקודם ותרשמי הכל" → {"intent":"question","confidence":0.85,"addressed_to_bot":true,"entities":{"raw_text":"תקראי את התמונות מקודם ותרשמי הכל","lookback_ask":true}}
 // CORRECTION: when user says "לא ביקשתי X, ביקשתי Y" — classify by the POSITIVE domain (Y),
 // not the negation (X). The renderer's correction-guard handles the actual pivot, but
 // supplying list_type from Haiku is faster + more reliable.
@@ -1498,6 +1527,12 @@ NEVER claim to have erased, cleared, reset, emptied, deleted, or wiped a list un
 If the user asks to clear a list ("תמחקי את הרשימה" / "נקי הכל" / "clear the list" / "start over") and you don't see a clear_list action result in the prompt: say honestly you're not sure which list, ask which one, and WAIT. Do not fake the action. Fabricating erasure is the single most damaging thing you can do to trust — users rely on their lists being real.
 
 Same discipline for add/complete actions: if no action result confirms the row was saved, do not claim "הוספתי" / "סימנתי שבוצע" / "added" / "marked done".
+
+RULE-PERSISTENCE HONESTY — ABSOLUTE RULE (P2 #12, 2026-05-03 churn).
+When a user describes a HOUSEHOLD RULE for you to remember and apply later — auto-reminder defaults, tag-based behaviors, escalation policies, "X gets a week reminder, Y gets an hour", "always remind me 30 min before doctor appointments", "every Friday clean the pool" — do NOT confirm "מעולה, סידרתי!" / "מעולה, רשמתי" / "got it!" / "נרשם" UNLESS one of these is true:
+  (a) You emitted a structured action that the executor recognizes (create_rotation, set_reminder_rule, save_memory) AND the action result is in the prompt.
+  (b) The rule is being captured into a memory the user can verify ("save_memory" with the rule text).
+If NEITHER is true, BE HONEST about the limit. Template: "הבנתי את הכלל — אבל כרגע אני יכולה לזכור את זה רק כתזכורת לעצמי, לא להפעיל אותו אוטומטית. רוצים שארשום ותוכלו להזכיר לי בכל פעם, או שאשאל אתכם בכל אירוע?". The 2026-05-03 churn root cause #4: a user spent 5 turns explaining a tag-based reminder rule, Sheli said "מעולה, סידרתי! ✓" — and stored NOTHING. Next day Sheli wasn't applying the rule because no rule existed. Fabricating rule-persistence is a slow trust killer — users discover days later, not seconds later, so the damage compounds.
 
 RENAME HONESTY — ABSOLUTE RULE (חביב 2026-04-28):
 NEVER claim "תיקנתי את השם" / "שיניתי את התג" / "renamed" / "fixed the name" / "השם תוקן" without emitting a real rename_tag action AND seeing its result in the prompt. The 2026-04-28 incident: voice transcription created "אלקטרוסלנואיד" instead of "אלקטרוסליל"; user corrected; Sheli replied "אה סליחה! תיקנתי את השם לאלקטרוסליל 🔧" — but the DB still had three different spellings on three rows. Pure fabrication. The correct flow when the user says "the name is X not Y" / "השם הוא X לא Y" / "תקני את התג מ-Y ל-X":
@@ -2203,17 +2238,34 @@ If a family member later replies "כן" / "נשמע טוב" / "תזכירי" / "
       break;
     case "instruct_bot":
       actionSummary = `The user is explaining a household rule or management preference: "${e.raw_text}".
-Parse what they want into a structured action. Common patterns:
+Parse what they want into a structured action. Supported patterns:
 - Rotation setup: extract title, type (order/duty), members, frequency → action_type "create_rotation"
 - Rotation override: extract title, person → action_type "override_rotation"
+- Reminder rule (P2 #10, 2026-05-03 churn fix): the user wants Sheli to AUTO-REMIND a fixed time before events that match a tag/title pattern.
+  Triggers: "תזכירי X לפני [event-pattern]", "מבחן שבוע לפני, אחרת שעה לפני", "הכל חצי שעה לפני", "doctor appointments → 30min before".
+  When the rule names a tag/word (e.g. "מבחן" → 1 week, "רופא" → 30 min) → action_type "set_reminder_rule" with rule_type="tag_reminder", tag_pattern="<the word>", lead_time_minutes=<minutes>.
+  When the rule is a default for ALL events (e.g. "הכל חצי שעה לפני") → action_type "set_reminder_rule" with rule_type="reminder_default", lead_time_minutes=<minutes>.
+  IMPORTANT: when the user describes BOTH a tag rule AND a default ("מבחן שבוע לפני, אחרת שעה לפני"), emit TWO separate confirm-then-act turns — DO NOT bundle two action_data blocks. First ask "תג מבחן → שבוע לפני, נכון?" with PENDING_ACTION for the tag rule. After 👍, the user repeats for the default. The current PENDING_ACTION executor only handles one rule per confirmation.
 
 Reply in Hebrew with a SPECIFIC confirmation question showing exactly what you understood.
-Example: "הבנתי! תורות מקלחת: גילעד ← אביב, מתחלפים כל יום. היום תור של גילעד. נכון?"
+Example (rotation): "הבנתי! תורות מקלחת: גילעד ← אביב, מתחלפים כל יום. היום תור של גילעד. נכון?"
+Example (tag reminder): "הבנתי! כל אירוע עם 'מבחן' בשם — אזכיר שבוע לפני. נכון? 📚"
+Example (default reminder): "הבנתי! כל אירוע אחר — אזכיר שעה לפני. נכון? ⏰"
 
-IMPORTANT: Include a hidden block at the END of your reply:
-<!--PENDING_ACTION:{"action_type":"create_rotation","action_data":{"title":"מקלחת","rotation_type":"order","members":["גילעד","אביב"]}}-->
+IMPORTANT: Include a hidden block at the END of your reply matching the action shape:
+- Rotation: <!--PENDING_ACTION:{"action_type":"create_rotation","action_data":{"title":"מקלחת","rotation_type":"order","members":["גילעד","אביב"]}}-->
+- Tag reminder rule: <!--PENDING_ACTION:{"action_type":"set_reminder_rule","action_data":{"rule_type":"tag_reminder","tag_pattern":"מבחן","lead_time_minutes":10080}}-->
+- Default reminder rule: <!--PENDING_ACTION:{"action_type":"set_reminder_rule","action_data":{"rule_type":"reminder_default","lead_time_minutes":60}}-->
 
-If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear.`;
+Lead-time conversion table (use these EXACT values, never compute on your own):
+  30 min   → lead_time_minutes=30
+  1 hour   → lead_time_minutes=60
+  2 hours  → lead_time_minutes=120
+  1 day    → lead_time_minutes=1440
+  3 days   → lead_time_minutes=4320
+  1 week   → lead_time_minutes=10080
+
+If you cannot parse a clear action from the instruction, just acknowledge warmly and ask for clarification. Do NOT include PENDING_ACTION if unclear. Per RULE-PERSISTENCE HONESTY in SHARED_GROUNDING_RULES: never confirm "סידרתי" without an emitted PENDING_ACTION + executor result.`;
       break;
     case "save_memory":
       actionSummary = `${sender} wants Sheli to remember: "${e.memory_content || e.raw_text}". About: ${e.memory_about || "general"}. Save this as a family memory and confirm warmly.`;
@@ -4110,6 +4162,102 @@ function isSameEvent(existingTitle: string, newTitle: string, existingDate: stri
   return isSameTask(existingTitle, newTitle);
 }
 
+// P2 #11 (2026-05-03 churn fix): apply household_rules to a newly-inserted
+// event. Looks for the most-specific matching rule (tag_reminder whose
+// tag_pattern is a substring of the event title — case-insensitive — beats
+// reminder_default), computes send_at = scheduled_for - lead_time_minutes,
+// and inserts a reminder_queue row tagged with metadata.auto_from_rule. Skips
+// silently when no rules exist or the lead time would put send_at in the
+// past. Returns a one-line summary string for the action's summary array, or
+// null when nothing was scheduled.
+//
+// Tag matching: case-insensitive substring on the title only. Event tags
+// could also be considered later, but title is the user's typed words and
+// matches the prompt examples ("מבחן בשפה" matches tag_pattern "מבחן").
+async function applyEventReminderRule(
+  householdId: string,
+  title: string,
+  scheduledFor: string,
+  _eventTags: string[],
+): Promise<string | null> {
+  const { data: rules } = await supabase
+    .from("household_rules")
+    .select("rule_type, tag_pattern, lead_time_minutes")
+    .eq("household_id", householdId)
+    .eq("active", true);
+  if (!rules || rules.length === 0) return null;
+
+  const titleLower = (title || "").toLowerCase();
+  // Prefer the most-specific matching tag_reminder. Then reminder_default.
+  let chosen: { rule_type: string; tag_pattern: string | null; lead_time_minutes: number } | null = null;
+  for (const r of rules) {
+    if (r.rule_type === "tag_reminder" && r.tag_pattern) {
+      const tagLower = String(r.tag_pattern).toLowerCase();
+      if (titleLower.includes(tagLower)) {
+        // Pick the longest-tag match if multiple match.
+        if (!chosen || (chosen.tag_pattern && r.tag_pattern.length > chosen.tag_pattern.length)) {
+          chosen = { rule_type: r.rule_type, tag_pattern: r.tag_pattern, lead_time_minutes: r.lead_time_minutes };
+        }
+      }
+    }
+  }
+  if (!chosen) {
+    const def = rules.find((r: any) => r.rule_type === "reminder_default");
+    if (def) chosen = { rule_type: def.rule_type, tag_pattern: null, lead_time_minutes: def.lead_time_minutes };
+  }
+  if (!chosen) return null;
+
+  const eventMs = Date.parse(scheduledFor);
+  if (!isFinite(eventMs)) return null;
+  const sendAtMs = eventMs - chosen.lead_time_minutes * 60_000;
+  if (sendAtMs <= Date.now() + 60_000) {
+    // Lead time would put us at-or-past now (within 1 min). Skip silently;
+    // the event itself will still appear in lists.
+    console.log(`[ApplyRule] Skipping auto-reminder — lead_time would fire in the past: event=${scheduledFor}, lead=${chosen.lead_time_minutes}m`);
+    return null;
+  }
+  const sendAtIso = new Date(sendAtMs).toISOString();
+
+  // Pick a target group_id for the reminder. household_rules don't pin a
+  // group; use the household's primary whatsapp_config group_id when known,
+  // otherwise drop to a synthetic phone-jid the materialiser will resolve.
+  const { data: cfg } = await supabase
+    .from("whatsapp_config")
+    .select("group_id")
+    .eq("household_id", householdId)
+    .limit(1)
+    .single();
+  const groupId = cfg?.group_id || null;
+  if (!groupId) {
+    console.log(`[ApplyRule] No group_id for household ${householdId} — skipping auto-reminder (rule will apply once a group is paired)`);
+    return null;
+  }
+
+  const reminderText = `${title} (תזכורת אוטומטית)`;
+  const { error } = await supabase.from("reminder_queue").insert({
+    household_id: householdId,
+    group_id: groupId,
+    message_text: reminderText,
+    send_at: sendAtIso,
+    sent: false,
+    delivery_mode: "group",
+    reminder_type: "user",
+    metadata: {
+      auto_from_rule: true,
+      rule_type: chosen.rule_type,
+      tag_pattern: chosen.tag_pattern,
+      lead_time_minutes: chosen.lead_time_minutes,
+      event_scheduled_for: scheduledFor,
+    },
+  });
+  if (error) {
+    console.warn("[ApplyRule] Failed to insert auto-reminder:", error.message);
+    return null;
+  }
+  const ruleLabel = chosen.tag_pattern ? `tag="${chosen.tag_pattern}"` : "default";
+  return `Auto-reminder: ${ruleLabel} -${chosen.lead_time_minutes}m → ${sendAtIso}`;
+}
+
 // Multi-event date-broadcasting detector (Bug 6, 2026-05-03).
 // On 2026-04-30 a household sent a single message listing 5 distinct נונה
 // events with 5 distinct dates (1.5, 12.5, 13.5, 17.5, 20.5). Sonnet emitted
@@ -4874,6 +5022,17 @@ async function executeActions(
               `Event: "${title}" @ ${normalizedScheduledFor}` +
                 (normalizedTags.length ? ` [${normalizedTags.join(",")}]` : ""),
             );
+            // P2 #11 (2026-05-03 churn fix): apply household_rules to schedule
+            // an auto-reminder for this new event. Best-effort — failures here
+            // never throw (don't undo the event insert).
+            try {
+              const reminderInfo = await applyEventReminderRule(
+                householdId, title, normalizedScheduledFor, normalizedTags,
+              );
+              if (reminderInfo) summary.push(reminderInfo);
+            } catch (ruleErr) {
+              console.warn("[Webhook] applyEventReminderRule failed (non-fatal):", (ruleErr as Error).message);
+            }
           }
           break;
         }
@@ -5193,6 +5352,69 @@ async function executeActions(
             }
           } else {
             summary.push(`Rotation-not-found: "${title}"`);
+          }
+          break;
+        }
+
+        case "set_reminder_rule": {
+          // P2 #10 (2026-05-03 churn fix). Inserts an active row in
+          // household_rules. Used when the user describes an auto-reminder
+          // policy (e.g. "מבחן שבוע לפני, אחרת שעה לפני"). Triggered via the
+          // instruct_bot → PENDING_ACTION → 👍 confirmation flow.
+          //
+          // Idempotency: if a rule with the same household+rule_type+
+          // tag_pattern already exists, UPDATE its lead_time_minutes and
+          // re-activate. Otherwise INSERT. This preserves the user's intent
+          // when they re-describe the rule with a new lead time.
+          const { rule_type, tag_pattern, lead_time_minutes, default_time } = action.data as {
+            rule_type: "tag_reminder" | "reminder_default";
+            tag_pattern?: string;
+            lead_time_minutes: number;
+            default_time?: string;
+          };
+          if (!rule_type || typeof lead_time_minutes !== "number" || lead_time_minutes < 0) {
+            summary.push(`Rule-skip: invalid set_reminder_rule shape ${JSON.stringify(action.data)}`);
+            break;
+          }
+          if (rule_type === "tag_reminder" && (!tag_pattern || tag_pattern.trim().length === 0)) {
+            summary.push("Rule-skip: tag_reminder requires non-empty tag_pattern");
+            break;
+          }
+          const normalizedTag = rule_type === "tag_reminder" ? tag_pattern!.trim() : null;
+          // Check existing active row.
+          let existingId: string | null = null;
+          {
+            let q = supabase.from("household_rules")
+              .select("id")
+              .eq("household_id", householdId)
+              .eq("rule_type", rule_type)
+              .eq("active", true)
+              .limit(1);
+            q = normalizedTag ? q.eq("tag_pattern", normalizedTag) : q.is("tag_pattern", null);
+            const { data: existing } = await q;
+            if (existing && existing.length > 0) existingId = existing[0].id;
+          }
+          if (existingId) {
+            const { error } = await supabase.from("household_rules")
+              .update({
+                lead_time_minutes,
+                default_time: default_time || null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existingId);
+            if (error) throw error;
+            summary.push(`Rule-updated: ${rule_type}${normalizedTag ? ` "${normalizedTag}"` : ""} → ${lead_time_minutes}m`);
+          } else {
+            const { error } = await supabase.from("household_rules").insert({
+              household_id: householdId,
+              rule_type,
+              tag_pattern: normalizedTag,
+              lead_time_minutes,
+              default_time: default_time || null,
+              active: true,
+            });
+            if (error) throw error;
+            summary.push(`Rule: ${rule_type}${normalizedTag ? ` "${normalizedTag}"` : ""} → ${lead_time_minutes}m`);
           }
           break;
         }
@@ -12173,6 +12395,27 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // No-time-on-event guard (P2 #13, Bug 5 from 2026-05-03 churn). When the
+    // user forwards a school message ("ביום ראשון יתקיים מבחן בשפה") that has
+    // a date but no time, haikuEntitiesToActions tags the add_event action
+    // with __needsTimeConfirmation. Ask honestly instead of saving with the
+    // 09:00 / 18:00 hallucinated default that produced "זה לא ב9" → trust loss.
+    {
+      const needsTime = (actions || []).find(
+        (a: any) => a.type === "add_event" && a.data?.__needsTimeConfirmation === true,
+      );
+      if (needsTime) {
+        const title = String((needsTime.data as any).title || "").slice(0, 60) || "האירוע";
+        const askMsg = `ראיתי תאריך ל-"${title}" אבל לא ראיתי שעה. באיזו שעה? ⏰\n\nאם זה אירוע של כל היום — כתבו "כל היום" ואני אסמן ככה.`;
+        await sendAndLog(provider, { groupId: message.groupId, text: askMsg }, {
+          householdId, groupId: message.groupId, inReplyTo: message.messageId,
+          replyType: "event_needs_time",
+        });
+        await logMessage(message, "event_needs_time", householdId, classification);
+        return new Response("OK", { status: 200 });
+      }
+    }
+
     const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
     console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
 
@@ -14459,14 +14702,37 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       // disagrees, override. DAY ANCHOR is authoritative for these unambiguous
       // tokens.
       scheduledFor = reanchorEventDate(String(e.raw_text || ""), scheduledFor);
+      // P2 #13 (Bug 5, 2026-05-03 churn): forwarded school messages have a
+      // date but no time → Sheli used to silently default to 09:00, the
+      // hallucinated time the family then corrected. Two trigger conditions
+      // must BOTH hold: (a) Haiku flagged time_missing OR the raw_text
+      // matches a school-message regex with no hour pattern, AND (b) the
+      // emitted time_iso came from the M13 default (we can detect this by
+      // checking if it's exactly 18:00 with no time_raw). When detected,
+      // tag the action so the call site routes to a confirmation_ask rather
+      // than executing.
+      const hourPattern = /\d{1,2}:\d{2}|בשעה\s+\d|ב-?\d{1,2}|בבוקר|בערב|בלילה|בצהריים|בצוהריים|אחה"?צ|אחר[\s-]?הצהריים|בבוקר/;
+      const schoolMsgPattern = /יתקיים|יערך|יחל\s|מבחן|טקס|אסיפה|טיול\s|פעילות\s|אירוע\s+מיוחד/;
+      const rawTxt = String(e.raw_text || "");
+      // entities.time_missing isn't in the strict entities type — cast through any.
+      const timeMissingFromHaiku = (e as any).time_missing === true;
+      const inferredTimeMissing = !e.time_raw
+        && schoolMsgPattern.test(rawTxt)
+        && !hourPattern.test(rawTxt);
+      const needsTimeConfirmation = timeMissingFromHaiku || inferredTimeMissing;
+      const eventData: Record<string, unknown> = {
+        title: e.title || e.raw_text,
+        assigned_to: e.person || null,
+        scheduled_for: scheduledFor,
+        tags: Array.isArray(e.tags) ? e.tags : [],
+      };
+      if (needsTimeConfirmation) {
+        eventData.__needsTimeConfirmation = true;
+        console.log(`[Webhook] P2#13: time_missing detected for add_event "${e.title || rawTxt.slice(0, 40)}" — caller should ask for time`);
+      }
       actions.push({
         type: "add_event",
-        data: {
-          title: e.title || e.raw_text,
-          assigned_to: e.person || null,
-          scheduled_for: scheduledFor,
-          tags: Array.isArray(e.tags) ? e.tags : [],
-        },
+        data: eventData,
       });
       break;
     }
