@@ -6278,6 +6278,7 @@ ADD:
 - topic: {"type":"topic","text":"בית מרקחת"} — creates a new topic/sub-list. NO item added. Reply: "סבבה, יצרתי לך את הרשימה בית מרקחת ✓ מה להוסיף?". Use ONLY when user explicitly names a topic with no item content.
 - reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
   IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00).
+  DELIVERY ROUTING IN 1:1 (Yaron 2026-05-04): you are talking to one person in their PRIVATE chat with you. By DEFAULT, "תזכירי לי..." / "remind me..." reminders fire IN THIS 1:1 chat — that's where the user expects to see them. Your visible confirmation should say "אזכיר לך" (singular), NEVER "אזכיר בקבוצה" / "אזכיר במשפחתי". Only set delivery_mode='group' when the user EXPLICITLY says "תזכירי לכולם" / "תזכירי במשפחתי" / "תזכירי בקבוצה" / "remind everyone" / "in the family group". Reminders that target a third-party family member ("תזכירי לאריק...") also route to the family group automatically — server-side enforces this.
   DEFAULT-DAY RULE (critical — users noticed this):
   - Time only, no day qualifier ("ב-5", "ב-8 בערב", "בצהריים") → TODAY at that time if it is still at least 10 minutes in the future in Israel time. Only use tomorrow if the time has already passed today.
   - "בעוד X דקות/שעות" → now + X.
@@ -7677,22 +7678,48 @@ async function execute1on1Actions(params: {
             // minutes or hours later → Haiku re-classifies as fresh add_reminder
             // with identical entities. Skip if an equivalent pending row exists.
             //
-            // Bug fix (2026-04-26 Netzer): target the family group when paired
-            // so 1:1-authored reminders fire where the family sees them.
-            // Explicit delivery_mode='dm' (private DM reminder feature) wins.
-            const reminderTargetGroupId = action.delivery_mode === "dm"
-              ? `${phone}@s.whatsapp.net`
-              : await resolve1on1ReminderGroupId(householdId, phone);
-            const reminderDeliveryMode = action.delivery_mode === "dm"
-              ? "dm"
-              : (reminderTargetGroupId.endsWith("@g.us") ? "group" : "dm");
-            // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
-            // recipient_phones MUST be populated or fire_due_reminders_inner
-            // marks the row as no_recipients and silently skips it. Solo
-            // households (no paired group) hit this path — the resolved JID is
-            // phone@s.whatsapp.net, so the recipient is the speaker themselves.
-            const reminderRecipientPhones: string[] | null =
-              reminderDeliveryMode === "dm" ? [phone] : null;
+            // Routing (2026-05-04, Yaron 1:1 group-leak fix):
+            //   1. delivery_mode='dm' explicit → 1:1 self (private DM feature)
+            //   2. delivery_mode='group'|'both' OR recipient_names names a
+            //      person OTHER than the speaker → family group (this is the
+            //      Einat→Ofri case the 2026-04-26 fix targeted).
+            //   3. Otherwise (1:1 self-reminder by default) → 1:1 chat.
+            // Previous default routed EVERY 1:1-authored reminder to the
+            // family group when paired, leaking Yaron's 6 personal "remind
+            // me" requests into his "טסט של שלי" group on 2026-05-03/04.
+            const otherRecipients = Array.isArray(action.recipient_names)
+              ? (action.recipient_names as unknown[]).filter((n) => {
+                  const t = (typeof n === "string" ? n : "").trim().toLowerCase();
+                  if (!t) return false;
+                  if (["self", "me", "myself", "אני", "לי", "עצמי"].includes(t)) return false;
+                  const userLower = (userName || "").toLowerCase();
+                  return userLower.length === 0 || !t.includes(userLower);
+                })
+              : [];
+            const explicitDmMode = action.delivery_mode === "dm";
+            const explicitGroupMode = action.delivery_mode === "group" || action.delivery_mode === "both";
+            let reminderTargetGroupId: string;
+            let reminderDeliveryMode: string;
+            let reminderRecipientPhones: string[] | null;
+            if (explicitDmMode) {
+              reminderTargetGroupId = `${phone}@s.whatsapp.net`;
+              reminderDeliveryMode = "dm";
+              reminderRecipientPhones = [phone];
+            } else if (explicitGroupMode || otherRecipients.length > 0) {
+              reminderTargetGroupId = await resolve1on1ReminderGroupId(householdId, phone);
+              reminderDeliveryMode = reminderTargetGroupId.endsWith("@g.us")
+                ? (action.delivery_mode === "both" ? "both" : "group")
+                : "dm";
+              // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
+              // recipient_phones MUST be populated or fire_due_reminders_inner
+              // marks the row as no_recipients and silently skips it.
+              reminderRecipientPhones = reminderDeliveryMode === "dm" ? [phone] : null;
+            } else {
+              // 1:1 default: self-reminder fires in 1:1 chat.
+              reminderTargetGroupId = `${phone}@s.whatsapp.net`;
+              reminderDeliveryMode = "dm";
+              reminderRecipientPhones = [phone];
+            }
             const dup = await findDuplicateReminder(
               reminderTargetGroupId,
               action.text || "",
@@ -7752,22 +7779,42 @@ async function execute1on1Actions(params: {
             recurrenceJson = { days: action.days, time: action.time };
             cadenceDesc = `days=${JSON.stringify(action.days)}`;
           }
-          // Bug fix (2026-04-26 Netzer): default reminder target to the
-          // household's family group when paired, not the speaker's 1:1 JID.
-          // Respect explicit delivery_mode='dm' from the action (private DM
-          // reminder feature, 2026-04-22).
-          const recurringTargetGroupId = action.delivery_mode === "dm"
-            ? `${phone}@s.whatsapp.net`
-            : await resolve1on1ReminderGroupId(householdId, phone);
-          const recurringDeliveryMode = action.delivery_mode === "dm"
-            ? "dm"
-            : (recurringTargetGroupId.endsWith("@g.us") ? "group" : "dm");
-          // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
-          // recipient_phones MUST be populated. Children inherit recipient_phones
-          // from this parent at materialize time, so getting it right here also
-          // fixes future child rows.
-          const recurringRecipientPhones: string[] | null =
-            recurringDeliveryMode === "dm" ? [phone] : null;
+          // Routing — same rule as the one-shot reminder case (Yaron 2026-05-04):
+          //   1. delivery_mode='dm' → 1:1 self
+          //   2. delivery_mode='group'|'both' OR recipient_names names someone
+          //      other than the speaker → family group
+          //   3. otherwise → 1:1 self (default for personal recurring reminders)
+          // Children inherit recipient_phones from the parent at materialize
+          // time, so getting it right here also fixes future child rows.
+          const recurringOtherRecipients = Array.isArray(action.recipient_names)
+            ? (action.recipient_names as unknown[]).filter((n) => {
+                const t = (typeof n === "string" ? n : "").trim().toLowerCase();
+                if (!t) return false;
+                if (["self", "me", "myself", "אני", "לי", "עצמי"].includes(t)) return false;
+                const userLower = (userName || "").toLowerCase();
+                return userLower.length === 0 || !t.includes(userLower);
+              })
+            : [];
+          const recurringExplicitDm = action.delivery_mode === "dm";
+          const recurringExplicitGroup = action.delivery_mode === "group" || action.delivery_mode === "both";
+          let recurringTargetGroupId: string;
+          let recurringDeliveryMode: string;
+          let recurringRecipientPhones: string[] | null;
+          if (recurringExplicitDm) {
+            recurringTargetGroupId = `${phone}@s.whatsapp.net`;
+            recurringDeliveryMode = "dm";
+            recurringRecipientPhones = [phone];
+          } else if (recurringExplicitGroup || recurringOtherRecipients.length > 0) {
+            recurringTargetGroupId = await resolve1on1ReminderGroupId(householdId, phone);
+            recurringDeliveryMode = recurringTargetGroupId.endsWith("@g.us")
+              ? (action.delivery_mode === "both" ? "both" : "group")
+              : "dm";
+            recurringRecipientPhones = recurringDeliveryMode === "dm" ? [phone] : null;
+          } else {
+            recurringTargetGroupId = `${phone}@s.whatsapp.net`;
+            recurringDeliveryMode = "dm";
+            recurringRecipientPhones = [phone];
+          }
           const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
             household_id: householdId,
             group_id: recurringTargetGroupId,
