@@ -149,3 +149,41 @@ def test_score_case_masculine_drift_blocks_pass():
     result = score_case(case, actual, CALQUE_BANK, judge_natural=lambda *_: True)
     assert result["feminine_clean"] is False
     assert result["pass"] is False
+
+
+# ─── judge_natural_comparative_anthropic ───
+
+def test_judge_comparative_passes_when_actual_wins():
+    """Judge says 'A' (actual wins) → pass."""
+    from hebrew_naturalness_eval import judge_natural_comparative_anthropic
+    import unittest.mock as mock
+    fake_response = mock.MagicMock()
+    fake_response.json.return_value = {"content": [{"text": "A"}]}
+    fake_response.raise_for_status = mock.MagicMock()
+    with mock.patch("requests.post", return_value=fake_response):
+        result = judge_natural_comparative_anthropic("user", "actual", "ideal")
+    assert result is True
+
+
+def test_judge_comparative_passes_when_tie():
+    """Judge says 'tie' → pass (actual is at least as natural)."""
+    from hebrew_naturalness_eval import judge_natural_comparative_anthropic
+    import unittest.mock as mock
+    fake_response = mock.MagicMock()
+    fake_response.json.return_value = {"content": [{"text": "tie"}]}
+    fake_response.raise_for_status = mock.MagicMock()
+    with mock.patch("requests.post", return_value=fake_response):
+        result = judge_natural_comparative_anthropic("user", "actual", "ideal")
+    assert result is True
+
+
+def test_judge_comparative_fails_when_ideal_wins():
+    """Judge says 'B' (ideal wins) → fail."""
+    from hebrew_naturalness_eval import judge_natural_comparative_anthropic
+    import unittest.mock as mock
+    fake_response = mock.MagicMock()
+    fake_response.json.return_value = {"content": [{"text": "B"}]}
+    fake_response.raise_for_status = mock.MagicMock()
+    with mock.patch("requests.post", return_value=fake_response):
+        result = judge_natural_comparative_anthropic("user", "actual", "ideal")
+    assert result is False

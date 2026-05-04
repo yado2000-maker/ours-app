@@ -1,14 +1,28 @@
 """
 Sheli Hebrew Naturalness Eval
 
-Runs each curated case through the configured Sonnet model and scores 4 binary
-checks: calque-free, no Latin mid-Hebrew, feminine first-person, Haiku-judge
-naturalness. Reports per-case pass/fail and aggregate score.
+Runs each curated case through the configured Sonnet model and scores 4 checks:
+calque-free, no Latin mid-Hebrew, feminine first-person, Haiku-judge naturalness.
+Reports per-case pass/fail and aggregate score.
 
 Run:  python tests/hebrew_naturalness_eval.py
 Env:  ANTHROPIC_API_KEY (required)
       REPLY_MODEL (default: claude-sonnet-4-20250514)
       JUDGE_MODEL (default: claude-haiku-4-5-20251001)
+
+JUDGE — comparative (default) vs binary
+---------------------------------------
+The default judge is `judge_natural_comparative_anthropic`: it asks Haiku
+"is the actual reply AT LEAST AS natural as the curated ideal_reply?" and
+passes when the answer is "actual" or "tie". This lets alternative-but-
+natural paraphrases pass even when they don't match the curated ideal
+verbatim, while still failing genuinely calque-y or stilted output.
+
+The legacy binary judge is preserved as `judge_natural_binary_anthropic` —
+it asks "is this natural Hebrew?" against an absolute bar. It's available
+for A/B comparisons against the comparative judge on the same data.
+
+Pass = actual >= ideal in naturalness; Fail = ideal > actual.
 
 NOTE on the reference set: this harness ships with 7 illustrative STUB cases
 in `tests/fixtures/hebrew_naturalness_cases.json` covering the failure modes
@@ -108,8 +122,18 @@ def has_feminine_first_person(text):
     return True
 
 
-def judge_natural_anthropic(user_msg, actual_reply, ideal_reply):
-    """Haiku-as-judge: is `actual_reply` natural Hebrew (similar quality to `ideal_reply`)?"""
+def judge_natural_binary_anthropic(user_msg, actual_reply, ideal_reply):
+    """LEGACY binary naturalness judge — asks Haiku "is this natural Hebrew?"
+    against an absolute bar.
+
+    Returns True only when the actual reply clears the absolute "natural
+    Israeli Hebrew" threshold. On small fixtures, this judge tends to
+    collapse different-quality outputs together because the bar is stricter
+    than "as good as the curated ideal". Kept available for A/B comparisons
+    against the comparative judge on the same data.
+
+    Prefer `judge_natural_comparative_anthropic` for between-model deltas.
+    """
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY not set in env")
     prompt = f"""User wrote: {user_msg}
@@ -136,6 +160,56 @@ Is the bot's reply natural Hebrew that a native Israeli would say? Answer ONLY "
     res.raise_for_status()
     answer = res.json()["content"][0]["text"].strip().lower()
     return answer.startswith("yes")
+
+
+def judge_natural_comparative_anthropic(user_msg, actual_reply, ideal_reply):
+    """Comparative naturalness judge — asks Haiku which of two replies reads
+    more naturally as Hebrew, using the curated `ideal_reply` as the ceiling.
+
+    Returns True if the actual reply is AT LEAST AS natural as the ideal —
+    i.e., judge says "actual" or "tie". This lets alternative-but-natural
+    paraphrases pass even when they don't match the curated ideal verbatim,
+    while still failing genuinely calque-y or stilted outputs.
+
+    Compared to the binary judge, this is more sensitive to between-model
+    differences on small fixtures because the comparison is RELATIVE rather
+    than against an absolute "natural Hebrew" bar that may be too strict.
+    """
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("ANTHROPIC_API_KEY not set in env")
+    prompt = f"""User wrote (in Hebrew): {user_msg}
+
+Reply A (the bot's actual response): {actual_reply}
+Reply B (a reference natural Hebrew response): {ideal_reply}
+
+Which reply reads MORE NATURALLY as Hebrew that a native Israeli would say in casual WhatsApp conversation? Consider:
+- Idioms and word choice (Israeli vs translated-from-English)
+- Tone and register (casual vs stilted)
+- Length appropriateness
+- Use of common Israeli emoji/slang patterns
+
+Answer ONE word only:
+- "A" if Reply A is more natural
+- "B" if Reply B is more natural
+- "tie" if both are equally natural (different but both fine)"""
+    res = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+        },
+        json={
+            "model": JUDGE_MODEL,
+            "max_tokens": 8,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=30,
+    )
+    res.raise_for_status()
+    answer = res.json()["content"][0]["text"].strip().lower()
+    # Pass if A wins or tie. Fail only if B (ideal) clearly wins.
+    return answer.startswith("a") or answer.startswith("tie")
 
 
 # ─── Reply generation (calls the configured Sonnet model directly) ───
@@ -170,7 +244,7 @@ def generate_reply(user_msg, system_prompt=None):
 
 # ─── Per-case scorer ───
 
-def score_case(case, actual, bank, judge_natural=judge_natural_anthropic):
+def score_case(case, actual, bank, judge_natural=judge_natural_comparative_anthropic):
     calque_found = contains_calque(actual, bank)
     latin_violation = contains_latin_in_hebrew(actual)
     masc_drift = not has_feminine_first_person(actual)
@@ -215,6 +289,7 @@ def main():
     score = passed / len(results) * 100 if results else 0
     print("\n=== RESULTS ===")
     print(f"Model: {REPLY_MODEL}")
+    print("Judge: comparative (passes when actual >= ideal in naturalness)")
     print(f"Passed: {passed}/{len(results)} ({score:.1f}%)")
     print("\nFailures:")
     for r in results:
