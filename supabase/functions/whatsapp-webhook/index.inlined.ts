@@ -1660,7 +1660,16 @@ Honest framings instead (use the canonical truncation line — see SHARED_LIST_D
 - "הרשימה ארוכה מדי לווטסאפ, אפשר לראות את כולה באפליקציה Sheli.ai 📋"
 - "סורי, לא ברור לי בדיוק מה את צריכה — תוכלי לכתוב שוב?"
 - "רשום אצלי X — אם זה לא מה שאת רואה, אפשר לראות הכל באפליקציה Sheli.ai"
-The Bat-Chen 2026-04-18 incident: Sheli said "אוקיי יש לי באג 🙈" + "אני מנסה לתקן 🔧" when nothing was broken — just truncated. The user lost trust within two messages and gave up. NEVER again.`;
+The Bat-Chen 2026-04-18 incident: Sheli said "אוקיי יש לי באג 🙈" + "אני מנסה לתקן 🔧" when nothing was broken — just truncated. The user lost trust within two messages and gave up. NEVER again.
+
+STATUS-QUESTION HONESTY — ABSOLUTE RULE (Hora'a-family chore-guess 2026-05-04):
+NEVER guess at the completion status of chores, tasks, or rotations. When a household member asks "האם בוצע?" / "סיימו את X?" / "מי טיפל?" / "did anyone do X?" / "is X done?" — your answer MUST come ONLY from explicit signals: (a) a task/event/reminder action result in this prompt confirming completion, (b) a message in the conversation history where someone explicitly said "סיימתי X" / "עשיתי X" / "I did X". Inferring "Arbel did A and B but not C, Yarden didn't start" from earlier chatter is FABRICATION even when it happens to be right by luck. The 2026-05-04 incident: mom asked "האם בוצע?", Sheli replied with confident specifics ("ארבל פינתה את המדיח וזרקה זבל, אבל הכביסה היבשה עדיין לא הוכנסה"). The mom then asked "מאיפה לך?" — exposing the guess. Even when the guess is correct, the user has now permanently learned Sheli sometimes invents — and will discount future answers.
+
+Honest framings when you don't know:
+- "אין לי דיווח של מי סיים מה — מי שטיפל יכול לכתוב 'סידרתי X' ואני אסמן ✓"
+- "לא יודעת למי מה. אם תרצו, תשלחו 'סידרתי' מי שעשה ואני אעקוב"
+- "אני לא רואה אישורים על המטלות. מי סיים מה היום?"
+If conversation history HAS explicit completions, quote them by speaker: "אורטל אמרה ב-14:10 שהיא הוציאה את ליאו ✓. על השאר אין לי דיווח עדיין". DO NOT extrapolate from "Arbel was talking about X yesterday" → "Arbel must have done X" — talking is not doing.`;
 
 const SHARED_LIST_DISPLAY_RULES = `LIST DISPLAY — STRICT FORMAT, NO VARIANTS (Bat-Chen 2026-04-18):
 
@@ -2467,6 +2476,7 @@ REMINDERS: When intent is add_reminder:
 - THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
 - CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
 - DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed.
+- LATE-NIGHT TRAP — ABSOLUTE RULE (2026-05-04): when the IL clock is between 00:00 and 04:00, "בבוקר" / "מחר בבוקר" intuition is WRONG. The Hebrew word "בבוקר" means "in the morning hours" (06:00-11:00), NOT "after I sleep". At 00:04 IL, "תזכירי לי ב-8 בבוקר" means TODAY 08:00 (~8 hours away), NOT tomorrow 08:00 (~32 hours away). The user is awake NOW; today's morning has not yet happened. NEVER schedule a "בבוקר" reminder for the next-next-day morning when today's morning is still ahead. Same logic for "בצהריים" / "בערב" — pick the NEXT occurrence on today's clock if it hasn't passed. The visible reply MUST say "היום" in this case, never "מחר". This is a real bug from 2026-05-04: user wrote "תזכירי לי בשמונה בבוקר" at 00:04 IL, Sheli scheduled tomorrow 08:00 instead of today 08:00, the family had to send the reminder manually 8 hours later.
 - AM/PM DISAMBIGUATION (when hour is 1-12 and the user did NOT say "בבוקר"/"בערב"/"בלילה"/"בצהריים"):
   - Prefer the NEAREST FUTURE OCCURRENCE relative to NOW IL.
   - If today's AM (hh:mm) is still in the future → use today AM. Example: at 07:49 IL, "בשעה 8:00" → today 08:00.
@@ -3155,6 +3165,15 @@ async function rescueRemindersAndStrip(
       // Prefer the precise "AM or PM today?" ask when the user's hour is
       // 1-12 (the common cause of Sonnet's day disagreement); fall back to
       // the generic "today or tomorrow?" otherwise.
+      return buildDayMismatchAsk(message?.text);
+    }
+    // Late-night trap (2026-05-04). At 00:00-04:59 IL with no explicit day
+    // word in user text, Sonnet often picks "tomorrow morning" when the
+    // user clearly meant today's still-ahead morning. Drop and ask.
+    if (detectMisreadLateNightReminder(message?.text, r.send_at)) {
+      console.warn(
+        `[ReminderRescue] LATE-NIGHT TRAP: dropping reminder for "${r.reminder_text}" — Sonnet picked ${r.send_at} but today's same-clock-time is still future`
+      );
       return buildDayMismatchAsk(message?.text);
     }
   }
@@ -6228,6 +6247,7 @@ ADD:
   - Time only, no day qualifier ("ב-5", "ב-8 בערב", "בצהריים") → TODAY at that time if it is still at least 10 minutes in the future in Israel time. Only use tomorrow if the time has already passed today.
   - "בעוד X דקות/שעות" → now + X.
   - "מחר" explicitly → tomorrow. "היום" explicitly → today.
+  - LATE-NIGHT TRAP (2026-05-04): when IL time is 00:00-04:00, "בבוקר" / "ב-X בבוקר" means TODAY's morning hours that are STILL AHEAD — NOT next-day morning. The user is awake NOW and today's morning has not happened yet. At 00:04 IL "תזכירי לי בשמונה בבוקר" → today 08:00 (~8 hours future), NOT tomorrow 08:00 (~32 hours). NEVER schedule a "בבוקר" / "morning" reminder for the next-next-day morning when today's morning is still ahead.
   The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - recurring_reminder: {"type":"recurring_reminder","text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}
   Use for repeating weekly patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום", rotations like "בימי א׳ ג׳ ה׳ אריק מפנה מדיח".
@@ -6575,6 +6595,46 @@ function detectReplyDayMismatch(
     return `reply says "היום" (expected ${todayIl}) but send_at maps to IL date ${sendAtIl}`;
   }
   return null;
+}
+
+// Late-night trap detector (2026-05-04 Sonnet bug). At 00:04 IL with no
+// explicit day word, Sonnet often picks "tomorrow morning" for "ב-8 בבוקר"
+// because the human heuristic is "morning = after I sleep". Reality: today's
+// morning hasn't happened yet. The earlier-day-of-week check + DEFAULT-DAY
+// RULE in the prompt handle most cases, but this server-side guard catches
+// late-night drift where Sonnet's intuition overrides the rule.
+//
+// Returns true when: (a) user text contains NO explicit day word, (b) IL
+// clock is currently 00:00-04:59 (the danger window), (c) Sonnet's send_at
+// IL date is NOT today, AND (d) today's same-clock-time is still at least
+// 30 minutes in the future. Caller drops the reminder and asks for
+// clarification (today or tomorrow?).
+function detectMisreadLateNightReminder(
+  userText: string | null | undefined,
+  sendAtIso: string,
+): boolean {
+  if (!userText || !sendAtIso) return false;
+  const explicitDayWord = /\bמחר\b|\bהיום\b|מחרתיים|בעוד\s+\d|tomorrow|today|next\s+(week|month|day)|הבא|הקרוב|ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d{1,2}[\/.\-]\d{1,2}/iu;
+  if (explicitDayWord.test(userText)) return false;
+  let sendAt: Date;
+  try { sendAt = new Date(sendAtIso); if (isNaN(sendAt.getTime())) return false; }
+  catch { return false; }
+  const now = new Date();
+  // Only fire in late-night IL hours where the bug manifests.
+  const ilHourNow = parseInt(now.toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", hour12: false }).slice(0, 2), 10);
+  if (Number.isNaN(ilHourNow) || ilHourNow >= 5) return false;
+  const todayIl = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const sendAtIl = sendAt.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  if (sendAtIl === todayIl) return false;
+  const ilTimeStr = sendAt.toLocaleTimeString("en-GB", { timeZone: "Asia/Jerusalem", hour12: false, hour: "2-digit", minute: "2-digit" });
+  const [ilHourStr, ilMinStr] = ilTimeStr.split(":");
+  const ilHour = parseInt(ilHourStr, 10);
+  const ilMinute = parseInt(ilMinStr, 10);
+  if (Number.isNaN(ilHour) || Number.isNaN(ilMinute)) return false;
+  const [ty, tm, td] = todayIl.split("-").map((s) => parseInt(s, 10));
+  const todayCandidateNaive = Date.UTC(ty, tm - 1, td, ilHour, ilMinute, 0, 0);
+  const todayCandidateUtc = todayCandidateNaive - ilOffsetMs(new Date(todayCandidateNaive));
+  return todayCandidateUtc > now.getTime() + 30 * 60 * 1000;
 }
 
 // Canonical clarification ask used when a day-mismatch is rejected. Hebrew,
@@ -7300,9 +7360,11 @@ async function execute1on1Actions(params: {
       : null;
     if (!sendAtForCheck) continue;
     const mismatch = detectReplyDayMismatch(visibleReply, sendAtForCheck);
-    if (mismatch) {
+    const lateNightTrap = !mismatch && detectMisreadLateNightReminder(text, sendAtForCheck);
+    if (mismatch || lateNightTrap) {
+      const reason = mismatch || `late-night trap: today's same-clock-time still future, no day word in user text`;
       console.warn(
-        `${logPrefix} DAY MISMATCH HARD REJECT: ${mismatch}; action.text="${action.text || ""}"; reply preview="${visibleReply.slice(0, 200)}"`
+        `${logPrefix} REMINDER REJECT (${mismatch ? "day-mismatch" : "late-night-trap"}): ${reason}; action.text="${action.text || ""}"; reply preview="${visibleReply.slice(0, 200)}"`
       );
       // Drop ALL actions for this turn, not just reminders. If we kept the
       // non-reminder actions (e.g. a shopping add) the user would see "did you
@@ -7311,7 +7373,7 @@ async function execute1on1Actions(params: {
       const before = actions.length;
       const droppedTypes = actions.map((a: any) => a?.type || "?");
       actions = [];
-      console.warn(`${logPrefix} Dropped ALL ${before} action(s) due to day mismatch: types=${JSON.stringify(droppedTypes)}`);
+      console.warn(`${logPrefix} Dropped ALL ${before} action(s): types=${JSON.stringify(droppedTypes)}`);
       visibleReply = buildDayMismatchAsk(text);
       break;
     }
@@ -14172,10 +14234,19 @@ async function resolvePendingImageOnAddressedText(
 // High-stakes intents that should NOT be auto-executed when derived from a
 // non-high-confidence OCR. Users would rather read "Sheli isn't sure, confirm?"
 // than discover a wrong ₪2860 expense silently logged.
+//
+// add_shopping added 2026-05-04 (Hora'a-family handwritten-list incident).
+// Sonnet vision read a handwritten Hebrew shopping note and emitted 11 items;
+// most were hallucinated names ("נדב" / "גליה" / "עלי" / "סכנות" / "תכלית" /
+// "קליק סרב") despite the model self-reporting confidence. The has_handwriting
+// gate already caps confidence at "medium" for any handwriting, so adding
+// shopping here means handwritten lists go through confirmation while clean
+// typed-screenshot shopping lists (rare in practice) stay zero-friction.
 const IMAGE_OCR_CONFIRM_INTENTS = new Set([
   "add_expense",
   "add_reminder",
   "add_event",
+  "add_shopping",
 ]);
 
 // Format a single action for the user-facing confirmation prompt.
@@ -14207,6 +14278,26 @@ function formatActionForImageOcrConfirm(
     const when = String(d.scheduled_for || d.datetime_iso || "");
     const whenDisplay = when ? ` ב-${when.slice(0, 16).replace("T", " ")}` : "";
     return `אירוע: ${title}${whenDisplay}`;
+  }
+  if (action.type === "add_shopping") {
+    // Shopping items can arrive as `items: [{name,...}]` (action-shape) OR `items: ["str",...]`
+    // (rescue-shape from extractShoppingItemsFromText). Handle both.
+    const rawItems = (d.items || []) as Array<unknown>;
+    const itemNames: string[] = [];
+    for (const it of rawItems) {
+      if (typeof it === "string" && it.trim()) {
+        itemNames.push(it.trim());
+      } else if (it && typeof it === "object") {
+        const name = (it as Record<string, unknown>).name;
+        if (typeof name === "string" && name.trim()) itemNames.push(name.trim());
+      }
+    }
+    if (itemNames.length === 0) return "רשימת קניות (ריקה)";
+    // Show all items so the user can spot hallucinations at a glance. Cap at
+    // 30 for safety so a deeply-misread image doesn't generate a wall of text.
+    const shown = itemNames.slice(0, 30);
+    const tail = itemNames.length > 30 ? ` (+ עוד ${itemNames.length - 30})` : "";
+    return `רשימת קניות (${itemNames.length}):\n• ${shown.join("\n• ")}${tail}`;
   }
   return action.type;
 }
