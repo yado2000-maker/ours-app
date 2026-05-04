@@ -1671,6 +1671,18 @@ Honest framings when you don't know:
 - "אני לא רואה אישורים על המטלות. מי סיים מה היום?"
 If conversation history HAS explicit completions, quote them by speaker: "אורטל אמרה ב-14:10 שהיא הוציאה את ליאו ✓. על השאר אין לי דיווח עדיין". DO NOT extrapolate from "Arbel was talking about X yesterday" → "Arbel must have done X" — talking is not doing.
 
+SCHEDULE-IMAGE DATE HONESTY — ABSOLUTE RULE (LAHAV/מעין 2026-05-04):
+NEVER invent a date or time when the user sends an image (flyer, invitation, schedule card, exam list, syllabus, agenda) whose OCR text mentions a meeting / training / event / exam / מפגש / הכשרה / פגישה / בחינה / שיעור — but contains NO explicit date string AND NO explicit time string. Designed flyers commonly put dates in styled colored boxes that OCR may miss even when the prose body comes through cleanly. The 2026-05-04 incident: מעין forwarded a לה"ב flyer with 3 training dates (19/5, 9/6, 14/7) in styled boxes; OCR captured the prose intro but the dates didn't survive; Sheli still emitted an EVENT block for "מחר בערב" — pure invention, full confidence, wrong date saved, two events silently missing.
+
+You can recognise an image-derived turn by the "[תמונה]:" marker in the user text. When that marker is present AND the OCR mentions a schedule-shape concept but you see no concrete date string anywhere in your context — ASK, never guess:
+- "ראיתי את ההזמנה למפגשי [topic] 💜 איזה תאריכים?"
+- "ראיתי שיש כמה מפגשים — מתי כל אחד?"
+- "התמונה הגיעה אבל לא הצלחתי לקרוא את התאריכים. תוכלי לכתוב אותם?"
+
+NEVER fall back to "מחר" / "השבוע הבא" / "בקרוב" / "tomorrow" / "next week" / "soon" as a placeholder when no date is visible. Inventing a placeholder date is worse than asking — the user trusts the confirmation, the wrong row sits in their calendar, and the actual events are silently missing. Same rule applies to a SINGLE event with no date: if the OCR mentions "פגישה אצל הרופא" but no concrete date/time, ASK.
+
+If the OCR DID return concrete dates for multiple meetings, save ALL of them (one EVENT action per date — see MULTI-EVENT DATE INDEPENDENCE in the 1:1 prompt). NEVER collapse 3 dated meetings into 1 generic event.
+
 TASK / REMINDER / NUDGE SYNONYMY — ABSOLUTE RULE (Yaron 2026-05-04):
 Users do NOT distinguish between the four storage shapes you use internally:
   • task          (one-time to-do, no time)
@@ -6210,6 +6222,11 @@ ACTION QUALITY GUARDRAILS — never store garbage in ACTIONS:
         {"type":"event","title":"הופעה","date":"2026-05-01"}   ← BUG: broadcast
       ]
     A bare "מסיבה" or "פגישה" with no date is NEVER a valid event.
+15b. NO INVENTED DATES FROM IMAGE OCR (LAHAV/מעין 2026-05-04 — ABSOLUTE RULE).
+    When the user message contains the "[תמונה]:" marker AND mentions a schedule-shape concept (מפגש / הכשרה / פגישה / בחינה / שיעור / training / meeting / exam / appointment) but you see NO concrete date string in the OCR text, you MUST NOT emit an event action with a guessed date. The OCR may have failed to read styled date boxes (colored backgrounds, large fonts) even when the prose body came through fine. ASK instead:
+      "ראיתי את ההזמנה — מה התאריכים?" / "ראיתי שיש כמה מפגשים — מתי כל אחד?"
+    NEVER fall back to "מחר" / "השבוע הבא" / "בקרוב" / "tomorrow" / "next week" as a placeholder. The 2026-05-04 incident: a לה"ב flyer with 3 training dates (19/5, 9/6, 14/7) lost its date boxes during OCR; Sheli emitted ONE event for "tomorrow evening" — wrong date saved, two meetings silently missing, user discovered weeks later.
+    If the OCR DID return concrete dates for several meetings, emit ONE event action PER date per Rule 15a — NEVER collapse multiple dated meetings into a single generic event.
 16. REMINDERS MUST HAVE BOTH content AND time. If either is missing → ask for the missing piece, do NOT store partial.
     - "תזכירי לי לקחת ויטמינים" → MISSING TIME → ask "באיזו שעה?" and wait.
     - "תזכירי לי בשעה 8" → MISSING CONTENT → ask "מה להזכיר ב-8?" and wait.
@@ -11193,7 +11210,7 @@ Deno.serve(async (req: Request) => {
               await supabase.from("pending_confirmations")
                 .update({ status: "confirmed" }).eq("id", pending.id);
               const ackReply = targetName && completion
-                ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+                ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
                 : `מעולה! סימנתי ✓`;
               await sendAndLog(provider,
                 { groupId: message.groupId, text: ackReply },
@@ -11271,7 +11288,7 @@ Deno.serve(async (req: Request) => {
             const targetName = (match.nudge_config as { target_name?: string } | undefined)?.target_name || "";
             const completion = (match.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
             const ackReply = targetName && completion
-              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
               : `מעולה! סימנתי. עוצרת תזכורות ✓`;
             await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
               householdId: hhId,
@@ -11326,11 +11343,18 @@ Deno.serve(async (req: Request) => {
       return new Response("OK", { status: 200 });
     }
 
-    // 3c. Cap message length to prevent prompt injection + cost amplification
-    // WhatsApp allows 65K chars; we only need ~500 for any reasonable household message
-    if (message.text && message.text.length > 500) {
-      console.log(`[Webhook] Truncating long message (${message.text.length} chars) from ${message.senderName}`);
-      message.text = message.text.slice(0, 500);
+    // 3c. Cap message length to prevent prompt injection + cost amplification.
+    // Typed messages cap at 500 chars. Image OCR text is frequently longer
+    // (forms, schedules, multi-event invitations) and already passed its own
+    // injection deflect at 3a-image — give OCR turns 3000 chars so structured
+    // content like date boxes at the bottom of a flyer survives. ocrImage()
+    // already self-caps at 2000 chars, so 3000 leaves headroom for the caption.
+    // (LAHAV/מעין 2026-05-04: 86-char caption + flyer prose ate the 500 cap
+    // before the 3 dated meeting rows, → Sheli hallucinated "מחר בערב".)
+    const lenCap = message.imageOcrMode ? 3000 : 500;
+    if (message.text && message.text.length > lenCap) {
+      console.log(`[Webhook] Truncating long message (${message.text.length} chars, cap=${lenCap}, ocr=${message.imageOcrMode || "none"}) from ${message.senderName}`);
+      message.text = message.text.slice(0, lenCap);
     }
 
     // 3d. Skip empty/whitespace-only messages
@@ -12020,7 +12044,7 @@ Deno.serve(async (req: Request) => {
         const completion = target.nudge_config?.prompt_completion || "";
         const ackReply = config.language === "he"
           ? (targetName && completion
-              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
               : `מעולה! סימנתי. עוצרת תזכורות ✓`)
           : (targetName && completion
               ? `Got it — marked ${targetName} ${completion} ✓`
@@ -12081,7 +12105,7 @@ Deno.serve(async (req: Request) => {
         const completion = (target.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
         const ackReply = config.language === "he"
           ? (targetName && completion
-              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
               : `מעולה! סימנתי. עוצרת תזכורות ✓`)
           : (targetName && completion
               ? `Got it — marked ${targetName} ${completion} ✓`
