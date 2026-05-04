@@ -1454,7 +1454,7 @@ function fallbackRateLimited(message: string): ClassificationOutput {
 // SONNET REPLY GENERATOR (from reply-generator.ts)
 // ============================================================================
 
-const SONNET_MODEL = "claude-sonnet-4-20250514";
+const SONNET_MODEL = Deno.env.get("REPLY_MODEL") || "claude-sonnet-4-20250514";
 
 // ─── Shared prompt rules (single source of truth for both group + 1:1 prompts) ───
 // IMPORTANT: Edit these ONCE — they're interpolated into both buildReplyPrompt and ONBOARDING_1ON1_PROMPT.
@@ -1660,7 +1660,35 @@ Honest framings instead (use the canonical truncation line — see SHARED_LIST_D
 - "הרשימה ארוכה מדי לווטסאפ, אפשר לראות את כולה באפליקציה Sheli.ai 📋"
 - "סורי, לא ברור לי בדיוק מה את צריכה — תוכלי לכתוב שוב?"
 - "רשום אצלי X — אם זה לא מה שאת רואה, אפשר לראות הכל באפליקציה Sheli.ai"
-The Bat-Chen 2026-04-18 incident: Sheli said "אוקיי יש לי באג 🙈" + "אני מנסה לתקן 🔧" when nothing was broken — just truncated. The user lost trust within two messages and gave up. NEVER again.`;
+The Bat-Chen 2026-04-18 incident: Sheli said "אוקיי יש לי באג 🙈" + "אני מנסה לתקן 🔧" when nothing was broken — just truncated. The user lost trust within two messages and gave up. NEVER again.
+
+STATUS-QUESTION HONESTY — ABSOLUTE RULE (Hora'a-family chore-guess 2026-05-04):
+NEVER guess at the completion status of chores, tasks, or rotations. When a household member asks "האם בוצע?" / "סיימו את X?" / "מי טיפל?" / "did anyone do X?" / "is X done?" — your answer MUST come ONLY from explicit signals: (a) a task/event/reminder action result in this prompt confirming completion, (b) a message in the conversation history where someone explicitly said "סיימתי X" / "עשיתי X" / "I did X". Inferring "Arbel did A and B but not C, Yarden didn't start" from earlier chatter is FABRICATION even when it happens to be right by luck. The 2026-05-04 incident: mom asked "האם בוצע?", Sheli replied with confident specifics ("ארבל פינתה את המדיח וזרקה זבל, אבל הכביסה היבשה עדיין לא הוכנסה"). The mom then asked "מאיפה לך?" — exposing the guess. Even when the guess is correct, the user has now permanently learned Sheli sometimes invents — and will discount future answers.
+
+Honest framings when you don't know:
+- "אין לי דיווח של מי סיים מה — מי שטיפל יכול לכתוב 'סידרתי X' ואני אסמן ✓"
+- "לא יודעת למי מה. אם תרצו, תשלחו 'סידרתי' מי שעשה ואני אעקוב"
+- "אני לא רואה אישורים על המטלות. מי סיים מה היום?"
+If conversation history HAS explicit completions, quote them by speaker: "אורטל אמרה ב-14:10 שהיא הוציאה את ליאו ✓. על השאר אין לי דיווח עדיין". DO NOT extrapolate from "Arbel was talking about X yesterday" → "Arbel must have done X" — talking is not doing.
+
+TASK / REMINDER / NUDGE SYNONYMY — ABSOLUTE RULE (Yaron 2026-05-04):
+Users do NOT distinguish between the four storage shapes you use internally:
+  • task          (one-time to-do, no time)
+  • reminder      (one-shot, fires once at send_at)
+  • recurring_reminder  (parent that fires on a weekly/monthly cadence)
+  • nudge         (active series — fires on a deadline with multiple reminders)
+From the family's perspective these are ALL "tasks" / "things to do" / "מטלות" / "תזכורות" interchangeably. A user who said "תזכירי לי כל בוקר ב-7 לקחת ויטמין" 3 weeks ago and now asks "מה המטלות שלי?" expects the vitamin row in the answer. A user who said "תוסיפי לסדר את החדר" and later asks "מה התזכורות?" expects to see that task too.
+
+Apply this in TWO directions:
+1. CREATING: when the user uses one word but means another — "תוסיפי משימה לקחת ויטמין כל בוקר" is a recurring_reminder despite the word "משימה". "תזכירי לי לתקן את הברז" with no time is a task despite "תזכירי". Pick the storage shape based on STRUCTURE (has-time? recurs? has-deadline-with-nudge?), not the user's chosen word.
+2. ANSWERING list questions ("מה המטלות?" / "מה התזכורות?" / "מה יש לי לעשות?" / "what tasks?" / "what reminders?"):
+   - Surface ALL FOUR types from the snapshot — tasks, one-shot reminders (next 7 days), recurring_reminder parents, active nudge series.
+   - Group by category, NOT by storage shape: "מטלות פתוחות" can include the vitamin recurring + the pill nudge + the "fix the sink" task. The user does not need to know they live in different tables.
+   - Recurring reminders display with their cadence: "ויטמין לילדים — כל יום ב-07:00".
+   - Active nudges display with target + deadline: "עופרי — לקחת את הכדור עד 22:30".
+   - When the user filters by phrasing ("רק תזכורות חוזרות"/"only one-time tasks") — THEN respect the distinction. Default is unified.
+
+The four storage shapes are an implementation detail. The product surface is one list of things the family is tracking together.`;
 
 const SHARED_LIST_DISPLAY_RULES = `LIST DISPLAY — STRICT FORMAT, NO VARIANTS (Bat-Chen 2026-04-18):
 
@@ -2078,7 +2106,7 @@ async function callCorrectionSonnet(prompt: string): Promise<CorrectionSonnetRes
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 (truncation safety, see Netzer leak).
         max_tokens: 4096,
         messages: [{ role: "user", content: prompt }],
@@ -2467,6 +2495,7 @@ REMINDERS: When intent is add_reminder:
 - THIRD-PERSON REMINDERS: Messages like "תזכירי ל[person] ל[action]" ask you to remind ANOTHER family member, not the sender. The reminder_queue fires into the group chat for everyone, so just include the target person's name in reminder_text so the message reads naturally when delivered.
 - CONTEXT CARRYOVER: If the message references a time/hour but no day, and a recent message mentioned a day (e.g., "יום רביעי"), carry that day into send_at. When genuinely unclear, ask.
 - DEFAULT-DAY RULE (critical): when the user gives only a time ("ב-5", "ב-8 בערב") with no day qualifier, use TODAY at that time if it is still at least 10 minutes in the future. Only use tomorrow if the time has already passed.
+- LATE-NIGHT TRAP — ABSOLUTE RULE (2026-05-04): when the IL clock is between 00:00 and 04:00, "בבוקר" / "מחר בבוקר" intuition is WRONG. The Hebrew word "בבוקר" means "in the morning hours" (06:00-11:00), NOT "after I sleep". At 00:04 IL, "תזכירי לי ב-8 בבוקר" means TODAY 08:00 (~8 hours away), NOT tomorrow 08:00 (~32 hours away). The user is awake NOW; today's morning has not yet happened. NEVER schedule a "בבוקר" reminder for the next-next-day morning when today's morning is still ahead. Same logic for "בצהריים" / "בערב" — pick the NEXT occurrence on today's clock if it hasn't passed. The visible reply MUST say "היום" in this case, never "מחר". This is a real bug from 2026-05-04: user wrote "תזכירי לי בשמונה בבוקר" at 00:04 IL, Sheli scheduled tomorrow 08:00 instead of today 08:00, the family had to send the reminder manually 8 hours later.
 - AM/PM DISAMBIGUATION (when hour is 1-12 and the user did NOT say "בבוקר"/"בערב"/"בלילה"/"בצהריים"):
   - Prefer the NEAREST FUTURE OCCURRENCE relative to NOW IL.
   - If today's AM (hh:mm) is still in the future → use today AM. Example: at 07:49 IL, "בשעה 8:00" → today 08:00.
@@ -3155,6 +3184,15 @@ async function rescueRemindersAndStrip(
       // Prefer the precise "AM or PM today?" ask when the user's hour is
       // 1-12 (the common cause of Sonnet's day disagreement); fall back to
       // the generic "today or tomorrow?" otherwise.
+      return buildDayMismatchAsk(message?.text);
+    }
+    // Late-night trap (2026-05-04). At 00:00-04:59 IL with no explicit day
+    // word in user text, Sonnet often picks "tomorrow morning" when the
+    // user clearly meant today's still-ahead morning. Drop and ask.
+    if (detectMisreadLateNightReminder(message?.text, r.send_at)) {
+      console.warn(
+        `[ReminderRescue] LATE-NIGHT TRAP: dropping reminder for "${r.reminder_text}" — Sonnet picked ${r.send_at} but today's same-clock-time is still future`
+      );
       return buildDayMismatchAsk(message?.text);
     }
   }
@@ -3996,7 +4034,7 @@ async function classifyMessages(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 1024→4096 (truncation safety, see Netzer leak).
         max_tokens: 4096,
         system: systemPrompt,
@@ -4472,7 +4510,23 @@ async function ackNudgeSeries(
 // out / done" completion phrases. Scoped: only fires when there is at
 // least one ACTIVE nudge_series in the chat the message came from, so a
 // stray "בוצע" in social chatter without an open series stays silent.
-const NUDGE_ACK_REGEX = /(בוצע|בוצעה|עשיתי|הוצאתי|הוצאת|נלקח|לקחתי|לקחת|טיפלתי|טיפלת|done|did it|finished|took it|took out|i did|got it done)/i;
+const NUDGE_ACK_REGEX = /(בוצע|בוצעה|עשיתי|הוצאתי|הוצאת|נלקח|לקחתי|לקחת|טיפלתי|טיפלת|סיימתי|סיימת|גמרתי|גמרת|done|did it|finished|took it|took out|i did|got it done)/i;
+
+// Vague-self-completion detector (Netzer Arik 2026-05-04). When a family
+// member says "I'm done too" / "אני גם סיימתי שלי" / "סיימתי את כולם"
+// without naming what they finished, the regex fast-path above would either
+// miss it OR ack the OLDEST active series (often targeted at someone else,
+// e.g. Ofri's pill nudge). Both outcomes are wrong. Instead, match this
+// pattern PRE-Haiku and stage a pending_confirmation showing what we think
+// the user means: "did you mean you're done with X? 👍/👎". The user
+// confirms via reaction → ackNudgeSeries fires; rejects → nothing happens.
+//
+// Designed to overlap with NUDGE_ACK_REGEX (the generic verbs are the same)
+// but require a possessive scope marker — "שלי" / "הכל" / "כולם" / "mine" /
+// "all" — so explicit completions like "הוצאתי את ליאו" still hit the
+// auto-ack fast-path without confirmation friction.
+const VAGUE_SELF_COMPLETION_REGEX =
+  /(?:סיימתי|גמרתי|עשיתי|טיפלתי).{0,15}(?:שלי|הכל|את\s+כולם|כולם)|(?:i'm|i\s+am|i\s+just)\s+(?:also\s+|too\s+)?(?:done|finished)\b(?:\s+(?:with\s+(?:my|mine)|mine|all\s+(?:of\s+)?mine|too))?|done\s+too|finished\s+(?:mine|too)/iu;
 
 // ─── Conversation Context Fetcher ───
 
@@ -6224,10 +6278,12 @@ ADD:
 - topic: {"type":"topic","text":"בית מרקחת"} — creates a new topic/sub-list. NO item added. Reply: "סבבה, יצרתי לך את הרשימה בית מרקחת ✓ מה להוסיף?". Use ONLY when user explicitly names a topic with no item content.
 - reminder: {"type":"reminder","text":"להוציא בשר","time":"17:00","send_at":"2026-04-12T17:00:00+03:00"}
   IMPORTANT: always include send_at as full ISO 8601 with Israel timezone (+03:00).
+  DELIVERY ROUTING IN 1:1 (Yaron 2026-05-04): you are talking to one person in their PRIVATE chat with you. By DEFAULT, "תזכירי לי..." / "remind me..." reminders fire IN THIS 1:1 chat — that's where the user expects to see them. Your visible confirmation should say "אזכיר לך" (singular), NEVER "אזכיר בקבוצה" / "אזכיר במשפחתי". Only set delivery_mode='group' when the user EXPLICITLY says "תזכירי לכולם" / "תזכירי במשפחתי" / "תזכירי בקבוצה" / "remind everyone" / "in the family group". Reminders that target a third-party family member ("תזכירי לאריק...") also route to the family group automatically — server-side enforces this.
   DEFAULT-DAY RULE (critical — users noticed this):
   - Time only, no day qualifier ("ב-5", "ב-8 בערב", "בצהריים") → TODAY at that time if it is still at least 10 minutes in the future in Israel time. Only use tomorrow if the time has already passed today.
   - "בעוד X דקות/שעות" → now + X.
   - "מחר" explicitly → tomorrow. "היום" explicitly → today.
+  - LATE-NIGHT TRAP (2026-05-04): when IL time is 00:00-04:00, "בבוקר" / "ב-X בבוקר" means TODAY's morning hours that are STILL AHEAD — NOT next-day morning. The user is awake NOW and today's morning has not happened yet. At 00:04 IL "תזכירי לי בשמונה בבוקר" → today 08:00 (~8 hours future), NOT tomorrow 08:00 (~32 hours). NEVER schedule a "בבוקר" / "morning" reminder for the next-next-day morning when today's morning is still ahead.
   The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - recurring_reminder: {"type":"recurring_reminder","text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}
   Use for repeating weekly patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום", rotations like "בימי א׳ ג׳ ה׳ אריק מפנה מדיח".
@@ -6577,6 +6633,46 @@ function detectReplyDayMismatch(
   return null;
 }
 
+// Late-night trap detector (2026-05-04 Sonnet bug). At 00:04 IL with no
+// explicit day word, Sonnet often picks "tomorrow morning" for "ב-8 בבוקר"
+// because the human heuristic is "morning = after I sleep". Reality: today's
+// morning hasn't happened yet. The earlier-day-of-week check + DEFAULT-DAY
+// RULE in the prompt handle most cases, but this server-side guard catches
+// late-night drift where Sonnet's intuition overrides the rule.
+//
+// Returns true when: (a) user text contains NO explicit day word, (b) IL
+// clock is currently 00:00-04:59 (the danger window), (c) Sonnet's send_at
+// IL date is NOT today, AND (d) today's same-clock-time is still at least
+// 30 minutes in the future. Caller drops the reminder and asks for
+// clarification (today or tomorrow?).
+function detectMisreadLateNightReminder(
+  userText: string | null | undefined,
+  sendAtIso: string,
+): boolean {
+  if (!userText || !sendAtIso) return false;
+  const explicitDayWord = /\bמחר\b|\bהיום\b|מחרתיים|בעוד\s+\d|tomorrow|today|next\s+(week|month|day)|הבא|הקרוב|ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת|sunday|monday|tuesday|wednesday|thursday|friday|saturday|\d{1,2}[\/.\-]\d{1,2}/iu;
+  if (explicitDayWord.test(userText)) return false;
+  let sendAt: Date;
+  try { sendAt = new Date(sendAtIso); if (isNaN(sendAt.getTime())) return false; }
+  catch { return false; }
+  const now = new Date();
+  // Only fire in late-night IL hours where the bug manifests.
+  const ilHourNow = parseInt(now.toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", hour12: false }).slice(0, 2), 10);
+  if (Number.isNaN(ilHourNow) || ilHourNow >= 5) return false;
+  const todayIl = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const sendAtIl = sendAt.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  if (sendAtIl === todayIl) return false;
+  const ilTimeStr = sendAt.toLocaleTimeString("en-GB", { timeZone: "Asia/Jerusalem", hour12: false, hour: "2-digit", minute: "2-digit" });
+  const [ilHourStr, ilMinStr] = ilTimeStr.split(":");
+  const ilHour = parseInt(ilHourStr, 10);
+  const ilMinute = parseInt(ilMinStr, 10);
+  if (Number.isNaN(ilHour) || Number.isNaN(ilMinute)) return false;
+  const [ty, tm, td] = todayIl.split("-").map((s) => parseInt(s, 10));
+  const todayCandidateNaive = Date.UTC(ty, tm - 1, td, ilHour, ilMinute, 0, 0);
+  const todayCandidateUtc = todayCandidateNaive - ilOffsetMs(new Date(todayCandidateNaive));
+  return todayCandidateUtc > now.getTime() + 30 * 60 * 1000;
+}
+
 // Canonical clarification ask used when a day-mismatch is rejected. Hebrew,
 // short, no robotic apology. Generic fallback when we can't extract a specific
 // AM/PM-ambiguous hour from the user's input. Used by both group rescue path
@@ -6718,21 +6814,64 @@ async function loadHouseholdItems(householdId: string): Promise<{ type: string; 
   // only the oldest 10 with no tag column — so any tag-related question to
   // Sonnet missed the recently-tagged items entirely AND had no way to
   // group/filter by tag. 50 is the new soft cap; events/reminders bumped 10→20.
-  const [tasksRes, shopRes, eventsRes, remindersRes, expensesRes] = await Promise.all([
+  // 2026-05-04 (Yaron task/nudge synonymy): also surface RECURRING REMINDER
+  // parents and ACTIVE NUDGE SERIES. Users say "what tasks do I have?" and
+  // mentally include their daily pill nudge, weekly chore rotation, and
+  // tomorrow's one-shot reminder all in the same bucket as `tasks` rows.
+  // Without these, Sonnet's "מטלות פתוחות" answer was incomplete by design —
+  // a recurring "every morning vitamin" parent was invisible to a list query.
+  const [tasksRes, shopRes, eventsRes, remindersRes, recurringRes, nudgesRes, expensesRes] = await Promise.all([
     supabase.from("tasks").select("title, tags").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(50),
     supabase.from("shopping_items").select("name, tags").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(50),
     supabase.from("events").select("title, scheduled_for, tags").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(20),
     supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(20),
+    // Recurring reminder PARENTS (sentinel rows: sent=true, recurrence set,
+    // no recurrence_parent_id, no nudge_config). Their materialized children
+    // already land in remindersRes; the parent row carries the cadence.
+    supabase.from("reminder_queue").select("message_text, recurrence")
+      .eq("household_id", householdId).not("recurrence", "is", null).is("recurrence_parent_id", null).is("nudge_config", null)
+      .order("created_at", { ascending: true }).limit(15),
+    // Active nudge SERIES anchors: includes both one-shot active series
+    // (series_status='active') AND recurring nudge parents (recurrence set,
+    // no recurrence_parent_id). Both are user-visible "tasks" the bot is
+    // tracking. The OR matches either condition.
+    supabase.from("reminder_queue").select("message_text, nudge_config, recurrence, send_at, series_status")
+      .eq("household_id", householdId).not("nudge_config", "is", null)
+      .or("series_status.eq.active,and(recurrence.not.is.null,recurrence_parent_id.is.null)")
+      .order("created_at", { ascending: true }).limit(10),
     supabase.from("expenses").select("amount_minor, currency, description, category, paid_by, attribution, occurred_at")
       .eq("household_id", householdId).eq("deleted", false)
       .gte("occurred_at", thirtyDaysAgo)
       .order("occurred_at", { ascending: false }).limit(20),
   ]);
+  const formatRecurrence = (rec: any): string => {
+    if (!rec || typeof rec !== "object") return "";
+    if (rec.type === "monthly" && rec.day_of_month) return `monthly day ${rec.day_of_month} ${rec.time || ""}`.trim();
+    if (Array.isArray(rec.days)) {
+      const dayNames = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+      const named = rec.days.map((d: number) => dayNames[d] || d).join(",");
+      return `${named} ${rec.time || ""}`.trim();
+    }
+    return "";
+  };
   return [
     ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [] })),
     ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name, tags: Array.isArray(r.tags) ? r.tags : [] })),
     ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [], scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
     ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: formatTimeWithDayLabel(r.send_at) })),
+    ...(recurringRes.data || []).map((r: any) => ({
+      type: "recurring_reminder",
+      text: `${r.message_text} [${formatRecurrence(r.recurrence)}]`.trim(),
+    })),
+    ...(nudgesRes.data || []).map((r: any) => {
+      const cfg = (r.nudge_config || {}) as { target_name?: string; prompt_completion?: string; deadline_time_il?: string };
+      const cadence = r.recurrence ? ` [${formatRecurrence(r.recurrence)}]` : "";
+      const deadline = cfg.deadline_time_il ? ` עד ${cfg.deadline_time_il}` : "";
+      const display = cfg.target_name && cfg.prompt_completion
+        ? `${cfg.target_name} — ${cfg.prompt_completion}${deadline}${cadence}`
+        : `${r.message_text}${cadence}`;
+      return { type: "nudge", text: display };
+    }),
     ...(expensesRes.data || []).map((r: any) => {
       const unit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100 };
       const sym: Record<string, string> = { ILS: "\u20AA", USD: "$", EUR: "\u20AC", GBP: "\u00A3" };
@@ -7300,9 +7439,11 @@ async function execute1on1Actions(params: {
       : null;
     if (!sendAtForCheck) continue;
     const mismatch = detectReplyDayMismatch(visibleReply, sendAtForCheck);
-    if (mismatch) {
+    const lateNightTrap = !mismatch && detectMisreadLateNightReminder(text, sendAtForCheck);
+    if (mismatch || lateNightTrap) {
+      const reason = mismatch || `late-night trap: today's same-clock-time still future, no day word in user text`;
       console.warn(
-        `${logPrefix} DAY MISMATCH HARD REJECT: ${mismatch}; action.text="${action.text || ""}"; reply preview="${visibleReply.slice(0, 200)}"`
+        `${logPrefix} REMINDER REJECT (${mismatch ? "day-mismatch" : "late-night-trap"}): ${reason}; action.text="${action.text || ""}"; reply preview="${visibleReply.slice(0, 200)}"`
       );
       // Drop ALL actions for this turn, not just reminders. If we kept the
       // non-reminder actions (e.g. a shopping add) the user would see "did you
@@ -7311,7 +7452,7 @@ async function execute1on1Actions(params: {
       const before = actions.length;
       const droppedTypes = actions.map((a: any) => a?.type || "?");
       actions = [];
-      console.warn(`${logPrefix} Dropped ALL ${before} action(s) due to day mismatch: types=${JSON.stringify(droppedTypes)}`);
+      console.warn(`${logPrefix} Dropped ALL ${before} action(s): types=${JSON.stringify(droppedTypes)}`);
       visibleReply = buildDayMismatchAsk(text);
       break;
     }
@@ -7537,22 +7678,48 @@ async function execute1on1Actions(params: {
             // minutes or hours later → Haiku re-classifies as fresh add_reminder
             // with identical entities. Skip if an equivalent pending row exists.
             //
-            // Bug fix (2026-04-26 Netzer): target the family group when paired
-            // so 1:1-authored reminders fire where the family sees them.
-            // Explicit delivery_mode='dm' (private DM reminder feature) wins.
-            const reminderTargetGroupId = action.delivery_mode === "dm"
-              ? `${phone}@s.whatsapp.net`
-              : await resolve1on1ReminderGroupId(householdId, phone);
-            const reminderDeliveryMode = action.delivery_mode === "dm"
-              ? "dm"
-              : (reminderTargetGroupId.endsWith("@g.us") ? "group" : "dm");
-            // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
-            // recipient_phones MUST be populated or fire_due_reminders_inner
-            // marks the row as no_recipients and silently skips it. Solo
-            // households (no paired group) hit this path — the resolved JID is
-            // phone@s.whatsapp.net, so the recipient is the speaker themselves.
-            const reminderRecipientPhones: string[] | null =
-              reminderDeliveryMode === "dm" ? [phone] : null;
+            // Routing (2026-05-04, Yaron 1:1 group-leak fix):
+            //   1. delivery_mode='dm' explicit → 1:1 self (private DM feature)
+            //   2. delivery_mode='group'|'both' OR recipient_names names a
+            //      person OTHER than the speaker → family group (this is the
+            //      Einat→Ofri case the 2026-04-26 fix targeted).
+            //   3. Otherwise (1:1 self-reminder by default) → 1:1 chat.
+            // Previous default routed EVERY 1:1-authored reminder to the
+            // family group when paired, leaking Yaron's 6 personal "remind
+            // me" requests into his "טסט של שלי" group on 2026-05-03/04.
+            const otherRecipients = Array.isArray(action.recipient_names)
+              ? (action.recipient_names as unknown[]).filter((n) => {
+                  const t = (typeof n === "string" ? n : "").trim().toLowerCase();
+                  if (!t) return false;
+                  if (["self", "me", "myself", "אני", "לי", "עצמי"].includes(t)) return false;
+                  const userLower = (userName || "").toLowerCase();
+                  return userLower.length === 0 || !t.includes(userLower);
+                })
+              : [];
+            const explicitDmMode = action.delivery_mode === "dm";
+            const explicitGroupMode = action.delivery_mode === "group" || action.delivery_mode === "both";
+            let reminderTargetGroupId: string;
+            let reminderDeliveryMode: string;
+            let reminderRecipientPhones: string[] | null;
+            if (explicitDmMode) {
+              reminderTargetGroupId = `${phone}@s.whatsapp.net`;
+              reminderDeliveryMode = "dm";
+              reminderRecipientPhones = [phone];
+            } else if (explicitGroupMode || otherRecipients.length > 0) {
+              reminderTargetGroupId = await resolve1on1ReminderGroupId(householdId, phone);
+              reminderDeliveryMode = reminderTargetGroupId.endsWith("@g.us")
+                ? (action.delivery_mode === "both" ? "both" : "group")
+                : "dm";
+              // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
+              // recipient_phones MUST be populated or fire_due_reminders_inner
+              // marks the row as no_recipients and silently skips it.
+              reminderRecipientPhones = reminderDeliveryMode === "dm" ? [phone] : null;
+            } else {
+              // 1:1 default: self-reminder fires in 1:1 chat.
+              reminderTargetGroupId = `${phone}@s.whatsapp.net`;
+              reminderDeliveryMode = "dm";
+              reminderRecipientPhones = [phone];
+            }
             const dup = await findDuplicateReminder(
               reminderTargetGroupId,
               action.text || "",
@@ -7612,22 +7779,42 @@ async function execute1on1Actions(params: {
             recurrenceJson = { days: action.days, time: action.time };
             cadenceDesc = `days=${JSON.stringify(action.days)}`;
           }
-          // Bug fix (2026-04-26 Netzer): default reminder target to the
-          // household's family group when paired, not the speaker's 1:1 JID.
-          // Respect explicit delivery_mode='dm' from the action (private DM
-          // reminder feature, 2026-04-22).
-          const recurringTargetGroupId = action.delivery_mode === "dm"
-            ? `${phone}@s.whatsapp.net`
-            : await resolve1on1ReminderGroupId(householdId, phone);
-          const recurringDeliveryMode = action.delivery_mode === "dm"
-            ? "dm"
-            : (recurringTargetGroupId.endsWith("@g.us") ? "group" : "dm");
-          // Drain v4 (no_recipients fix, 2026-04-27): when delivery_mode='dm',
-          // recipient_phones MUST be populated. Children inherit recipient_phones
-          // from this parent at materialize time, so getting it right here also
-          // fixes future child rows.
-          const recurringRecipientPhones: string[] | null =
-            recurringDeliveryMode === "dm" ? [phone] : null;
+          // Routing — same rule as the one-shot reminder case (Yaron 2026-05-04):
+          //   1. delivery_mode='dm' → 1:1 self
+          //   2. delivery_mode='group'|'both' OR recipient_names names someone
+          //      other than the speaker → family group
+          //   3. otherwise → 1:1 self (default for personal recurring reminders)
+          // Children inherit recipient_phones from the parent at materialize
+          // time, so getting it right here also fixes future child rows.
+          const recurringOtherRecipients = Array.isArray(action.recipient_names)
+            ? (action.recipient_names as unknown[]).filter((n) => {
+                const t = (typeof n === "string" ? n : "").trim().toLowerCase();
+                if (!t) return false;
+                if (["self", "me", "myself", "אני", "לי", "עצמי"].includes(t)) return false;
+                const userLower = (userName || "").toLowerCase();
+                return userLower.length === 0 || !t.includes(userLower);
+              })
+            : [];
+          const recurringExplicitDm = action.delivery_mode === "dm";
+          const recurringExplicitGroup = action.delivery_mode === "group" || action.delivery_mode === "both";
+          let recurringTargetGroupId: string;
+          let recurringDeliveryMode: string;
+          let recurringRecipientPhones: string[] | null;
+          if (recurringExplicitDm) {
+            recurringTargetGroupId = `${phone}@s.whatsapp.net`;
+            recurringDeliveryMode = "dm";
+            recurringRecipientPhones = [phone];
+          } else if (recurringExplicitGroup || recurringOtherRecipients.length > 0) {
+            recurringTargetGroupId = await resolve1on1ReminderGroupId(householdId, phone);
+            recurringDeliveryMode = recurringTargetGroupId.endsWith("@g.us")
+              ? (action.delivery_mode === "both" ? "both" : "group")
+              : "dm";
+            recurringRecipientPhones = recurringDeliveryMode === "dm" ? [phone] : null;
+          } else {
+            recurringTargetGroupId = `${phone}@s.whatsapp.net`;
+            recurringDeliveryMode = "dm";
+            recurringRecipientPhones = [phone];
+          }
           const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
             household_id: householdId,
             group_id: recurringTargetGroupId,
@@ -7937,7 +8124,7 @@ Reply with ONLY the welcome text. No quotes, no labels, no metadata blocks.`;
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         max_tokens: 256,
         system: systemPrompt,
         messages: [{
@@ -9218,11 +9405,17 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 to prevent <!--ACTIONS:[...]--> truncation
         // on multi-action turns (Netzer rotation leak).
         max_tokens: 4096,
-        system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
+        // Prompt caching: ONBOARDING_1ON1_PROMPT (~10K tokens, static) is cached,
+        // contextBlock (per-user dynamic) follows uncached. Saves ~$0.0027 per
+        // cache hit. Break-even: 2 hits within 5-min TTL. See claude-api skill.
+        system: [
+          { type: "text", text: ONBOARDING_1ON1_PROMPT, cache_control: { type: "ephemeral" } },
+          { type: "text", text: contextBlock },
+        ],
         messages: mergedMessages,
       }),
     });
@@ -9237,6 +9430,12 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
 
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
+
+    // Cache stats — verify hit rate in production via grep `[Cache:Sonnet-1on1]`
+    const usage1on1 = result.usage || {};
+    if (usage1on1.cache_read_input_tokens || usage1on1.cache_creation_input_tokens) {
+      console.log(`[Cache:Sonnet-1on1] read=${usage1on1.cache_read_input_tokens || 0} write=${usage1on1.cache_creation_input_tokens || 0} input=${usage1on1.input_tokens || 0}`);
+    }
 
     // Execute actions via shared function
     const { actions, visibleReply, triedCaps: parsedTried } = await execute1on1Actions({
@@ -9434,10 +9633,15 @@ CONVERSATION CONTINUITY — CRITICAL:
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 (truncation safety, Netzer leak).
         max_tokens: 4096,
-        system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
+        // Prompt caching: ONBOARDING_1ON1_PROMPT (~10K tokens, static) is cached,
+        // contextBlock (per-user dynamic) follows uncached.
+        system: [
+          { type: "text", text: ONBOARDING_1ON1_PROMPT, cache_control: { type: "ephemeral" } },
+          { type: "text", text: contextBlock },
+        ],
         messages: mergedMessages,
       }),
     });
@@ -9445,6 +9649,12 @@ CONVERSATION CONTINUITY — CRITICAL:
     if (!response.ok) return;
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
+
+    // Cache stats — verify hit rate via grep `[Cache:Sonnet-1on1-personal]`
+    const usagePersonal = result.usage || {};
+    if (usagePersonal.cache_read_input_tokens || usagePersonal.cache_creation_input_tokens) {
+      console.log(`[Cache:Sonnet-1on1-personal] read=${usagePersonal.cache_read_input_tokens || 0} write=${usagePersonal.cache_creation_input_tokens || 0} input=${usagePersonal.input_tokens || 0}`);
+    }
 
     // Execute actions via shared function
     const { actions, visibleReply } = await execute1on1Actions({
@@ -10969,6 +11179,31 @@ Deno.serve(async (req: Request) => {
 
       if (pending) {
         if (isConfirm) {
+          // Special case: ack_nudge_series doesn't go through executeActions.
+          // It calls ackNudgeSeries directly, like the regex/haiku fast-paths.
+          // Staged by the vague-self-completion branch (Arik 2026-05-04).
+          if (pending.action_type === "ack_nudge_series") {
+            const ad = pending.action_data || {};
+            const seriesId = ad.series_id;
+            const targetName = ad.target_name || "";
+            const completion = ad.completion_text || "";
+            const acker = ad.acked_by_phone || message.senderPhone;
+            if (seriesId) {
+              await ackNudgeSeries(seriesId, acker, "vague_completion_confirmed");
+              await supabase.from("pending_confirmations")
+                .update({ status: "confirmed" }).eq("id", pending.id);
+              const ackReply = targetName && completion
+                ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+                : `מעולה! סימנתי ✓`;
+              await sendAndLog(provider,
+                { groupId: message.groupId, text: ackReply },
+                { householdId: hhId, groupId: message.groupId, replyType: "vague_completion_confirmed" });
+              await logMessage(message, "reaction_confirmed_vague_completion", hhId);
+              return new Response("OK", { status: 200 });
+            }
+            // Missing series_id — fall through to the generic path which
+            // will fail loudly instead of silently no-op'ing.
+          }
           const actions = [{ type: pending.action_type, data: pending.action_data }];
           const { summary } = await executeActions(hhId, actions, message.senderName, message.senderPhone);
           console.log(`[Reaction] Confirmed via ${message.reactionEmoji}:`, summary);
@@ -10981,8 +11216,14 @@ Deno.serve(async (req: Request) => {
         } else {
           await supabase.from("pending_confirmations")
             .update({ status: "rejected" }).eq("id", pending.id);
+          // Slightly different text for vague-completion rejection so the
+          // user can re-state which chore. Same reply for OCR / other
+          // pending cases.
+          const rejectText = pending.action_type === "ack_nudge_series"
+            ? "אוקי, אז איזו מטלה סיימת? תכתבו לי 🙏"
+            : "אוקי, ביטלתי 🤷‍♀️";
           await sendAndLog(provider,
-            { groupId: message.groupId, text: "אוקי, ביטלתי 🤷‍♀️" },
+            { groupId: message.groupId, text: rejectText },
             { householdId: hhId, groupId: message.groupId, replyType: "confirmation_reject_reaction" });
           await logMessage(message, "reaction_rejected", hhId);
         }
@@ -11658,6 +11899,85 @@ Deno.serve(async (req: Request) => {
     const textForClassifier = message.quotedText
       ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
       : (cleanedText || message.text);
+
+    // ─── Vague self-completion → confirmation ask (Netzer Arik 2026-05-04) ───
+    // BEFORE the auto-ack regex fast-path. When the sender uses generic
+    // completion language with a possessive scope marker ("אני גם סיימתי
+    // שלי" / "I'm done too") instead of naming the specific item, the
+    // auto-ack would silently mark the OLDEST active series done — likely
+    // the wrong target (Ofri's pill nudge, when Arik meant his rotation
+    // chores). Stage a pending_confirmation instead: "did you mean you're
+    // done with X? 👍/👎". The 👍 reaction routes to the existing
+    // ack_nudge_series action handler.
+    if (VAGUE_SELF_COMPLETION_REGEX.test(message.text || "")) {
+      const chatTargetForVague = message.groupId.endsWith("@g.us")
+        ? message.groupId
+        : `${message.senderPhone}@s.whatsapp.net`;
+      const { data: vagueCandidates } = await supabase
+        .from("reminder_queue")
+        .select("id, nudge_config, created_at, send_at")
+        .eq("household_id", householdId)
+        .eq("series_status", "active")
+        .eq("group_id", chatTargetForVague)
+        .lte("send_at", new Date().toISOString())
+        .order("created_at", { ascending: true })
+        .limit(5);
+      if (vagueCandidates && vagueCandidates.length > 0) {
+        const top = vagueCandidates[0];
+        const topName = (top.nudge_config as { target_name?: string } | undefined)?.target_name || "";
+        const topCompletion = (top.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
+        if (topCompletion) {
+          const others = vagueCandidates.slice(1)
+            .map((s: { nudge_config?: { target_name?: string; prompt_completion?: string } }) => {
+              const n = s.nudge_config?.target_name || "";
+              const c = s.nudge_config?.prompt_completion || "";
+              return n && c ? `${n} — ${c}` : c;
+            })
+            .filter((x: string) => x.length > 0);
+          const headline = topName
+            ? `התכוונת ש${topName} ${topCompletion}? 👍 / 👎`
+            : `התכוונת ש${topCompletion}? 👍 / 👎`;
+          const otherLine = others.length > 0
+            ? `\n(יש עוד מטלות פתוחות: ${others.join(", ")} — אם זו לא, תכתבו לי איזו)`
+            : "";
+          const confText = headline + otherLine;
+          const sendResult = await sendAndLog(provider, { groupId: message.groupId, text: confText }, {
+            householdId,
+            groupId: message.groupId,
+            inReplyTo: message.messageId,
+            replyType: "vague_completion_confirm_ask",
+          });
+          const confId = Math.random().toString(36).slice(2, 10);
+          const { error: confErr } = await supabase.from("pending_confirmations").insert({
+            id: confId,
+            household_id: householdId,
+            group_id: message.groupId,
+            action_type: "ack_nudge_series",
+            action_data: {
+              series_id: top.id,
+              target_name: topName,
+              completion_text: topCompletion,
+              acked_by_phone: message.senderPhone,
+            },
+            confirmation_text: confText,
+            created_by: message.senderName,
+            expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+            status: "pending",
+            bot_message_id: sendResult?.messageId || null,
+          });
+          if (!confErr) {
+            console.log(`[VagueCompletion] staged confirmation: id=${confId} series=${top.id} (${vagueCandidates.length} active candidates)`);
+            await logMessage(message, "vague_completion_awaiting_confirmation", householdId, null);
+            return new Response("OK", { status: 200 });
+          }
+          console.error(`[VagueCompletion] pending_confirmations insert error:`, confErr);
+          // Fall through to normal flow on insert failure — better to maybe
+          // ack the wrong series than silently drop the user's signal.
+        }
+      }
+      // No active series in scope → fall through to Haiku/Sonnet, which
+      // will probably reply "אין לי מטלות פתוחות עליך 🤷" (or similar).
+    }
 
     // ─── Nudge-series regex ack fast-path (Phase 3 Task 3.1, 2026-04-26) ───
     // BEFORE Haiku: if any active nudge_series exists in this chat AND the
@@ -13126,6 +13446,12 @@ interface VoiceTranscription {
   language?: string;
   avgLogprob?: number;
   noSpeechProb?: number;
+  // Set when the dispatcher had to retry on a different provider after the
+  // primary returned a non-ok result. Currently only `ivrit_ai_hf_to_groq`
+  // is emitted (when VOICE_PROVIDER=ivrit_ai_hf primary failed and Groq
+  // served the result instead). Lets downstream / DB queries later
+  // measure fallback frequency without re-parsing logs.
+  fallbackUsed?: "ivrit_ai_hf_to_groq";
 }
 
 // ─── Voice provider helpers ───
@@ -13367,10 +13693,31 @@ export async function transcribeVoice(
 
   // 3. Route to the chosen provider. Default = "groq" for instant rollback.
   const provider = (Deno.env.get("VOICE_PROVIDER") || "groq").toLowerCase();
+  const useIvrit = provider === "ivrit_ai_hf" || provider === "ivritai" || provider === "ivrit-ai-hf";
   console.log(`[Voice] provider=${provider}`);
-  if (provider === "ivrit_ai_hf" || provider === "ivritai" || provider === "ivrit-ai-hf") {
-    return transcribeVoiceIvritAi(audioBlob, biasPrompt);
+
+  if (useIvrit) {
+    const primary = await transcribeVoiceIvritAi(audioBlob, biasPrompt);
+    if (primary.quality === "ok") {
+      return primary;
+    }
+    // Fallback to Groq for ANY non-ok quality. Covers HF outages
+    // (401/503/timeout), model load failures, AWS capacity events, plus
+    // wrong_language / unclear / no_speech — even no_speech, because Groq
+    // may disagree with ivrit-ai's VAD threshold. Strictly better than
+    // silently dropping the voice and forcing the user to repeat themselves.
+    console.log(
+      `[Voice] ivrit-ai returned quality=${primary.quality} text="${(primary.text || "").slice(0, 40)}" → falling back to Groq`,
+    );
+    const fallback = await transcribeVoiceGroq(audioBlob, biasPrompt);
+    if (fallback.quality === "ok") {
+      // Tag so DB/log readers can later count fallback frequency.
+      return { ...fallback, fallbackUsed: "ivrit_ai_hf_to_groq" };
+    }
+    console.error(`[Voice] Both providers failed (ivrit=${primary.quality}, groq=${fallback.quality})`);
+    return fallback;
   }
+
   return transcribeVoiceGroq(audioBlob, biasPrompt);
 }
 
@@ -13745,7 +14092,7 @@ async function ocrImage(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         max_tokens: 1500,
         system: systemPrompt,
         messages: [{
@@ -14145,10 +14492,19 @@ async function resolvePendingImageOnAddressedText(
 // High-stakes intents that should NOT be auto-executed when derived from a
 // non-high-confidence OCR. Users would rather read "Sheli isn't sure, confirm?"
 // than discover a wrong ₪2860 expense silently logged.
+//
+// add_shopping added 2026-05-04 (Hora'a-family handwritten-list incident).
+// Sonnet vision read a handwritten Hebrew shopping note and emitted 11 items;
+// most were hallucinated names ("נדב" / "גליה" / "עלי" / "סכנות" / "תכלית" /
+// "קליק סרב") despite the model self-reporting confidence. The has_handwriting
+// gate already caps confidence at "medium" for any handwriting, so adding
+// shopping here means handwritten lists go through confirmation while clean
+// typed-screenshot shopping lists (rare in practice) stay zero-friction.
 const IMAGE_OCR_CONFIRM_INTENTS = new Set([
   "add_expense",
   "add_reminder",
   "add_event",
+  "add_shopping",
 ]);
 
 // Format a single action for the user-facing confirmation prompt.
@@ -14180,6 +14536,26 @@ function formatActionForImageOcrConfirm(
     const when = String(d.scheduled_for || d.datetime_iso || "");
     const whenDisplay = when ? ` ב-${when.slice(0, 16).replace("T", " ")}` : "";
     return `אירוע: ${title}${whenDisplay}`;
+  }
+  if (action.type === "add_shopping") {
+    // Shopping items can arrive as `items: [{name,...}]` (action-shape) OR `items: ["str",...]`
+    // (rescue-shape from extractShoppingItemsFromText). Handle both.
+    const rawItems = (d.items || []) as Array<unknown>;
+    const itemNames: string[] = [];
+    for (const it of rawItems) {
+      if (typeof it === "string" && it.trim()) {
+        itemNames.push(it.trim());
+      } else if (it && typeof it === "object") {
+        const name = (it as Record<string, unknown>).name;
+        if (typeof name === "string" && name.trim()) itemNames.push(name.trim());
+      }
+    }
+    if (itemNames.length === 0) return "רשימת קניות (ריקה)";
+    // Show all items so the user can spot hallucinations at a glance. Cap at
+    // 30 for safety so a deeply-misread image doesn't generate a wall of text.
+    const shown = itemNames.slice(0, 30);
+    const tail = itemNames.length > 30 ? ` (+ עוד ${itemNames.length - 30})` : "";
+    return `רשימת קניות (${itemNames.length}):\n• ${shown.join("\n• ")}${tail}`;
   }
   return action.type;
 }
