@@ -1669,7 +1669,26 @@ Honest framings when you don't know:
 - "אין לי דיווח של מי סיים מה — מי שטיפל יכול לכתוב 'סידרתי X' ואני אסמן ✓"
 - "לא יודעת למי מה. אם תרצו, תשלחו 'סידרתי' מי שעשה ואני אעקוב"
 - "אני לא רואה אישורים על המטלות. מי סיים מה היום?"
-If conversation history HAS explicit completions, quote them by speaker: "אורטל אמרה ב-14:10 שהיא הוציאה את ליאו ✓. על השאר אין לי דיווח עדיין". DO NOT extrapolate from "Arbel was talking about X yesterday" → "Arbel must have done X" — talking is not doing.`;
+If conversation history HAS explicit completions, quote them by speaker: "אורטל אמרה ב-14:10 שהיא הוציאה את ליאו ✓. על השאר אין לי דיווח עדיין". DO NOT extrapolate from "Arbel was talking about X yesterday" → "Arbel must have done X" — talking is not doing.
+
+TASK / REMINDER / NUDGE SYNONYMY — ABSOLUTE RULE (Yaron 2026-05-04):
+Users do NOT distinguish between the four storage shapes you use internally:
+  • task          (one-time to-do, no time)
+  • reminder      (one-shot, fires once at send_at)
+  • recurring_reminder  (parent that fires on a weekly/monthly cadence)
+  • nudge         (active series — fires on a deadline with multiple reminders)
+From the family's perspective these are ALL "tasks" / "things to do" / "מטלות" / "תזכורות" interchangeably. A user who said "תזכירי לי כל בוקר ב-7 לקחת ויטמין" 3 weeks ago and now asks "מה המטלות שלי?" expects the vitamin row in the answer. A user who said "תוסיפי לסדר את החדר" and later asks "מה התזכורות?" expects to see that task too.
+
+Apply this in TWO directions:
+1. CREATING: when the user uses one word but means another — "תוסיפי משימה לקחת ויטמין כל בוקר" is a recurring_reminder despite the word "משימה". "תזכירי לי לתקן את הברז" with no time is a task despite "תזכירי". Pick the storage shape based on STRUCTURE (has-time? recurs? has-deadline-with-nudge?), not the user's chosen word.
+2. ANSWERING list questions ("מה המטלות?" / "מה התזכורות?" / "מה יש לי לעשות?" / "what tasks?" / "what reminders?"):
+   - Surface ALL FOUR types from the snapshot — tasks, one-shot reminders (next 7 days), recurring_reminder parents, active nudge series.
+   - Group by category, NOT by storage shape: "מטלות פתוחות" can include the vitamin recurring + the pill nudge + the "fix the sink" task. The user does not need to know they live in different tables.
+   - Recurring reminders display with their cadence: "ויטמין לילדים — כל יום ב-07:00".
+   - Active nudges display with target + deadline: "עופרי — לקחת את הכדור עד 22:30".
+   - When the user filters by phrasing ("רק תזכורות חוזרות"/"only one-time tasks") — THEN respect the distinction. Default is unified.
+
+The four storage shapes are an implementation detail. The product surface is one list of things the family is tracking together.`;
 
 const SHARED_LIST_DISPLAY_RULES = `LIST DISPLAY — STRICT FORMAT, NO VARIANTS (Bat-Chen 2026-04-18):
 
@@ -6794,21 +6813,64 @@ async function loadHouseholdItems(householdId: string): Promise<{ type: string; 
   // only the oldest 10 with no tag column — so any tag-related question to
   // Sonnet missed the recently-tagged items entirely AND had no way to
   // group/filter by tag. 50 is the new soft cap; events/reminders bumped 10→20.
-  const [tasksRes, shopRes, eventsRes, remindersRes, expensesRes] = await Promise.all([
+  // 2026-05-04 (Yaron task/nudge synonymy): also surface RECURRING REMINDER
+  // parents and ACTIVE NUDGE SERIES. Users say "what tasks do I have?" and
+  // mentally include their daily pill nudge, weekly chore rotation, and
+  // tomorrow's one-shot reminder all in the same bucket as `tasks` rows.
+  // Without these, Sonnet's "מטלות פתוחות" answer was incomplete by design —
+  // a recurring "every morning vitamin" parent was invisible to a list query.
+  const [tasksRes, shopRes, eventsRes, remindersRes, recurringRes, nudgesRes, expensesRes] = await Promise.all([
     supabase.from("tasks").select("title, tags").eq("household_id", householdId).eq("done", false).order("created_at", { ascending: true }).limit(50),
     supabase.from("shopping_items").select("name, tags").eq("household_id", householdId).eq("got", false).order("created_at", { ascending: true }).limit(50),
     supabase.from("events").select("title, scheduled_for, tags").eq("household_id", householdId).gte("scheduled_for", nowIso).order("scheduled_for", { ascending: true }).limit(20),
     supabase.from("reminder_queue").select("message_text, send_at").eq("household_id", householdId).eq("sent", false).gte("send_at", nowIso).order("send_at", { ascending: true }).limit(20),
+    // Recurring reminder PARENTS (sentinel rows: sent=true, recurrence set,
+    // no recurrence_parent_id, no nudge_config). Their materialized children
+    // already land in remindersRes; the parent row carries the cadence.
+    supabase.from("reminder_queue").select("message_text, recurrence")
+      .eq("household_id", householdId).not("recurrence", "is", null).is("recurrence_parent_id", null).is("nudge_config", null)
+      .order("created_at", { ascending: true }).limit(15),
+    // Active nudge SERIES anchors: includes both one-shot active series
+    // (series_status='active') AND recurring nudge parents (recurrence set,
+    // no recurrence_parent_id). Both are user-visible "tasks" the bot is
+    // tracking. The OR matches either condition.
+    supabase.from("reminder_queue").select("message_text, nudge_config, recurrence, send_at, series_status")
+      .eq("household_id", householdId).not("nudge_config", "is", null)
+      .or("series_status.eq.active,and(recurrence.not.is.null,recurrence_parent_id.is.null)")
+      .order("created_at", { ascending: true }).limit(10),
     supabase.from("expenses").select("amount_minor, currency, description, category, paid_by, attribution, occurred_at")
       .eq("household_id", householdId).eq("deleted", false)
       .gte("occurred_at", thirtyDaysAgo)
       .order("occurred_at", { ascending: false }).limit(20),
   ]);
+  const formatRecurrence = (rec: any): string => {
+    if (!rec || typeof rec !== "object") return "";
+    if (rec.type === "monthly" && rec.day_of_month) return `monthly day ${rec.day_of_month} ${rec.time || ""}`.trim();
+    if (Array.isArray(rec.days)) {
+      const dayNames = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+      const named = rec.days.map((d: number) => dayNames[d] || d).join(",");
+      return `${named} ${rec.time || ""}`.trim();
+    }
+    return "";
+  };
   return [
     ...(tasksRes.data || []).map((r: any) => ({ type: "task", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [] })),
     ...(shopRes.data || []).map((r: any) => ({ type: "shopping", text: r.name, tags: Array.isArray(r.tags) ? r.tags : [] })),
     ...(eventsRes.data || []).map((r: any) => ({ type: "event", text: r.title, tags: Array.isArray(r.tags) ? r.tags : [], scheduled_for: formatTimeWithDayLabel(r.scheduled_for) })),
     ...(remindersRes.data || []).map((r: any) => ({ type: "reminder", text: r.message_text, send_at: formatTimeWithDayLabel(r.send_at) })),
+    ...(recurringRes.data || []).map((r: any) => ({
+      type: "recurring_reminder",
+      text: `${r.message_text} [${formatRecurrence(r.recurrence)}]`.trim(),
+    })),
+    ...(nudgesRes.data || []).map((r: any) => {
+      const cfg = (r.nudge_config || {}) as { target_name?: string; prompt_completion?: string; deadline_time_il?: string };
+      const cadence = r.recurrence ? ` [${formatRecurrence(r.recurrence)}]` : "";
+      const deadline = cfg.deadline_time_il ? ` עד ${cfg.deadline_time_il}` : "";
+      const display = cfg.target_name && cfg.prompt_completion
+        ? `${cfg.target_name} — ${cfg.prompt_completion}${deadline}${cadence}`
+        : `${r.message_text}${cadence}`;
+      return { type: "nudge", text: display };
+    }),
     ...(expensesRes.data || []).map((r: any) => {
       const unit: Record<string, number> = { ILS: 100, USD: 100, EUR: 100, GBP: 100 };
       const sym: Record<string, string> = { ILS: "\u20AA", USD: "$", EUR: "\u20AC", GBP: "\u00A3" };
