@@ -1,0 +1,20 @@
+{
+  "calques": [
+    {"phrase": "מה על הראש", "english_source": "what's on your mind", "natural_alt": "מה איתך / מה קורה"},
+    {"phrase": "תני לי לדעת", "english_source": "let me know", "natural_alt": "תגידי לי / עדכני אותי"},
+    {"phrase": "תן לי לדעת", "english_source": "let me know (m)", "natural_alt": "תגיד לי / עדכן אותי"},
+    {"phrase": "אחזור אליך", "english_source": "I'll get back to you", "natural_alt": "אכתוב לך אחר כך"},
+    {"phrase": "אני כאן בשבילך", "english_source": "I'm here for you", "natural_alt": "אני איתך"},
+    {"phrase": "יום נפלא", "english_source": "have a great day", "natural_alt": "יום טוב / שיהיה לך יום נעים"},
+    {"phrase": "קח את הזמן שלך", "english_source": "take your time", "natural_alt": "אין לחץ / בקצב שלך"},
+    {"phrase": "קחי את הזמן שלך", "english_source": "take your time (f)", "natural_alt": "אין לחץ / בקצב שלך"},
+    {"phrase": "שאלה מהירה", "english_source": "quick question", "natural_alt": "שאלה קטנה / שאלה אחת"},
+    {"phrase": "רגע מהיר", "english_source": "quick moment", "natural_alt": "רגע / שנייה"},
+    {"phrase": "תהיה זהיר", "english_source": "be careful", "natural_alt": "תזהר / שים לב"},
+    {"phrase": "יש לי שאלה בשבילך", "english_source": "I have a question for you", "natural_alt": "שאלה קטנה / רציתי לשאול"},
+    {"phrase": "אני רוצה לוודא", "english_source": "I want to make sure", "natural_alt": "סתם לוודא / רק לאשר"},
+    {"phrase": "תרגיש חופשי", "english_source": "feel free to", "natural_alt": "אפשר / בכיף"},
+    {"phrase": "תרגישי חופשייה", "english_source": "feel free to (f)", "natural_alt": "אפשר / בכיף"},
+    {"phrase": "אעדכן אותך בחזרה", "english_source": "I'll update you back", "natural_alt": "אעדכן אותך / אכתוב לך"}
+  ]
+}

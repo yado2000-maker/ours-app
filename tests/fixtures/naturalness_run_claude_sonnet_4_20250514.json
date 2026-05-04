@@ -1,0 +1,76 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "score": 14.285714285714285,
+  "results": [
+    {
+      "id": "stub_001",
+      "actual": "היי יקירה! הכל בסדר, תודה שאלת 😊 \n\nאיך אתה? מה חדש אצלך היום?",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_002",
+      "actual": "בבקשה מותק! 😊\n\nתמיד כאן בשבילך. איך אני יכולה לעזור לך היום?",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_003",
+      "actual": "בסדר גמור! אני כאן כשתרצי לעדכן או לשתף. תכתבי לי מתי שנוח לך 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_004",
+      "actual": "איזה כיף! לאן את עוברת? זה תמיד מרגש וקצת מלחיץ בו זמנית 😊\n\nצריכה עזרה בארגון או שאלות על הדירה החדשה?",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": true,
+      "pass": true
+    },
+    {
+      "id": "stub_005",
+      "actual": "היי! אני לא זוכרת מה אמא ביקשה אתמול - אין לי גישה להיסטוריית השיחות שלנו מהעבר.\n\nתוכל להזכיר לי מה היא אמרה? אשמח לעזור עם מה שהיא ביקשה! 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_006",
+      "actual": "כן מתוקה, מה השאלה? אני כאן ☺️",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_007",
+      "actual": "בסדר גמור, אני כאן כשתסיימי לבדוק 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    }
+  ]
+}
