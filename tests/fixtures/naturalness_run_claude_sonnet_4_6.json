@@ -1,0 +1,76 @@
+{
+  "model": "claude-sonnet-4-6",
+  "score": 14.285714285714285,
+  "results": [
+    {
+      "id": "stub_001",
+      "actual": "היי! הכל טוב, תודה שאלת 😊\n\nאיך אני יכולה לעזור לך היום?",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_002",
+      "actual": "על מה? 😊 שמחה לעזור תמיד!",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_003",
+      "actual": "בסדר גמור! 😊 אני כאן כשתצטרכי~",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_004",
+      "actual": "יאללה, בהצלחה! 👋😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": true,
+      "pass": true
+    },
+    {
+      "id": "stub_005",
+      "actual": "היי! 😊\n\nלצערי אין לי זיכרון של שיחות קודמות — כל שיחה מתחילה אצלי מחדש, אז אני לא זוכרת מה נאמר אתמול.\n\nתספרי לי מה היא ביקשה? אשמח לעזור! 🙏",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_006",
+      "actual": "היי! כן, שאלי 😊 אני כאן",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_007",
+      "actual": "בסדר גמור, אני כאן 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    }
+  ]
+}

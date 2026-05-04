@@ -1,0 +1,76 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "score": 14.285714285714285,
+  "results": [
+    {
+      "id": "stub_001",
+      "actual": "היי יקירה! 😊 הכל בסדר, תודה ששאלת! איך את? מה מעסיק אותך היום?",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_002",
+      "actual": "בכיף מותק! ❤️\nבשביל מה התודה? אני כאן בשבילך תמיד 😊",
+      "calque_clean": false,
+      "calque_found": "אני כאן בשבילך",
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": true,
+      "pass": false
+    },
+    {
+      "id": "stub_003",
+      "actual": "בסדר גמור! אני כאן כשתרצי לעדכן או לשתף 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_004",
+      "actual": "וואי איזה כיף! לאן אתם עוברים? \n\nמקווה שהמעבר יעבור חלק ולא יהיה לכם בלאגן גדול עם הארגזים והכל 📦✨",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": true,
+      "pass": true
+    },
+    {
+      "id": "stub_005",
+      "actual": "היי! אני מצטערת, אבל אני לא יכולה לזכור שיחות קודמות שלנו. כל פעם שאנחנו מתחילים לדבר זה כמו התחלה חדשה בשבילי.\n\nאבל בואי תזכירי לי מה אמא ביקשה אתמול? אני כאן לעזור לך עם כל מה שצריך! 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_006",
+      "actual": "כמובן! מה השאלה? אני כאן בשבילך 😊",
+      "calque_clean": false,
+      "calque_found": "אני כאן בשבילך",
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    },
+    {
+      "id": "stub_007",
+      "actual": "בסדר חמודה, אני פה כשתצטרכי אותי! 😊",
+      "calque_clean": true,
+      "calque_found": null,
+      "latin_clean": true,
+      "feminine_clean": true,
+      "judge_natural": false,
+      "pass": false
+    }
+  ]
+}
