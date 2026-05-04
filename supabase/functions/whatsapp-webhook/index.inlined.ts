@@ -9409,7 +9409,13 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
         // 2026-04-26: bumped 512→4096 to prevent <!--ACTIONS:[...]--> truncation
         // on multi-action turns (Netzer rotation leak).
         max_tokens: 4096,
-        system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
+        // Prompt caching: ONBOARDING_1ON1_PROMPT (~10K tokens, static) is cached,
+        // contextBlock (per-user dynamic) follows uncached. Saves ~$0.0027 per
+        // cache hit. Break-even: 2 hits within 5-min TTL. See claude-api skill.
+        system: [
+          { type: "text", text: ONBOARDING_1ON1_PROMPT, cache_control: { type: "ephemeral" } },
+          { type: "text", text: contextBlock },
+        ],
         messages: mergedMessages,
       }),
     });
@@ -9424,6 +9430,12 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
 
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
+
+    // Cache stats — verify hit rate in production via grep `[Cache:Sonnet-1on1]`
+    const usage1on1 = result.usage || {};
+    if (usage1on1.cache_read_input_tokens || usage1on1.cache_creation_input_tokens) {
+      console.log(`[Cache:Sonnet-1on1] read=${usage1on1.cache_read_input_tokens || 0} write=${usage1on1.cache_creation_input_tokens || 0} input=${usage1on1.input_tokens || 0}`);
+    }
 
     // Execute actions via shared function
     const { actions, visibleReply, triedCaps: parsedTried } = await execute1on1Actions({
@@ -9624,7 +9636,12 @@ CONVERSATION CONTINUITY — CRITICAL:
         model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 (truncation safety, Netzer leak).
         max_tokens: 4096,
-        system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
+        // Prompt caching: ONBOARDING_1ON1_PROMPT (~10K tokens, static) is cached,
+        // contextBlock (per-user dynamic) follows uncached.
+        system: [
+          { type: "text", text: ONBOARDING_1ON1_PROMPT, cache_control: { type: "ephemeral" } },
+          { type: "text", text: contextBlock },
+        ],
         messages: mergedMessages,
       }),
     });
@@ -9632,6 +9649,12 @@ CONVERSATION CONTINUITY — CRITICAL:
     if (!response.ok) return;
     const result = await response.json();
     const raw = result.content?.[0]?.text?.trim() || "";
+
+    // Cache stats — verify hit rate via grep `[Cache:Sonnet-1on1-personal]`
+    const usagePersonal = result.usage || {};
+    if (usagePersonal.cache_read_input_tokens || usagePersonal.cache_creation_input_tokens) {
+      console.log(`[Cache:Sonnet-1on1-personal] read=${usagePersonal.cache_read_input_tokens || 0} write=${usagePersonal.cache_creation_input_tokens || 0} input=${usagePersonal.input_tokens || 0}`);
+    }
 
     // Execute actions via shared function
     const { actions, visibleReply } = await execute1on1Actions({
