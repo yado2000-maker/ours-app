@@ -13126,6 +13126,12 @@ interface VoiceTranscription {
   language?: string;
   avgLogprob?: number;
   noSpeechProb?: number;
+  // Set when the dispatcher had to retry on a different provider after the
+  // primary returned a non-ok result. Currently only `ivrit_ai_hf_to_groq`
+  // is emitted (when VOICE_PROVIDER=ivrit_ai_hf primary failed and Groq
+  // served the result instead). Lets downstream / DB queries later
+  // measure fallback frequency without re-parsing logs.
+  fallbackUsed?: "ivrit_ai_hf_to_groq";
 }
 
 // ─── Voice provider helpers ───
@@ -13367,10 +13373,31 @@ export async function transcribeVoice(
 
   // 3. Route to the chosen provider. Default = "groq" for instant rollback.
   const provider = (Deno.env.get("VOICE_PROVIDER") || "groq").toLowerCase();
+  const useIvrit = provider === "ivrit_ai_hf" || provider === "ivritai" || provider === "ivrit-ai-hf";
   console.log(`[Voice] provider=${provider}`);
-  if (provider === "ivrit_ai_hf" || provider === "ivritai" || provider === "ivrit-ai-hf") {
-    return transcribeVoiceIvritAi(audioBlob, biasPrompt);
+
+  if (useIvrit) {
+    const primary = await transcribeVoiceIvritAi(audioBlob, biasPrompt);
+    if (primary.quality === "ok") {
+      return primary;
+    }
+    // Fallback to Groq for ANY non-ok quality. Covers HF outages
+    // (401/503/timeout), model load failures, AWS capacity events, plus
+    // wrong_language / unclear / no_speech — even no_speech, because Groq
+    // may disagree with ivrit-ai's VAD threshold. Strictly better than
+    // silently dropping the voice and forcing the user to repeat themselves.
+    console.log(
+      `[Voice] ivrit-ai returned quality=${primary.quality} text="${(primary.text || "").slice(0, 40)}" → falling back to Groq`,
+    );
+    const fallback = await transcribeVoiceGroq(audioBlob, biasPrompt);
+    if (fallback.quality === "ok") {
+      // Tag so DB/log readers can later count fallback frequency.
+      return { ...fallback, fallbackUsed: "ivrit_ai_hf_to_groq" };
+    }
+    console.error(`[Voice] Both providers failed (ivrit=${primary.quality}, groq=${fallback.quality})`);
+    return fallback;
   }
+
   return transcribeVoiceGroq(audioBlob, biasPrompt);
 }
 
