@@ -4491,7 +4491,23 @@ async function ackNudgeSeries(
 // out / done" completion phrases. Scoped: only fires when there is at
 // least one ACTIVE nudge_series in the chat the message came from, so a
 // stray "בוצע" in social chatter without an open series stays silent.
-const NUDGE_ACK_REGEX = /(בוצע|בוצעה|עשיתי|הוצאתי|הוצאת|נלקח|לקחתי|לקחת|טיפלתי|טיפלת|done|did it|finished|took it|took out|i did|got it done)/i;
+const NUDGE_ACK_REGEX = /(בוצע|בוצעה|עשיתי|הוצאתי|הוצאת|נלקח|לקחתי|לקחת|טיפלתי|טיפלת|סיימתי|סיימת|גמרתי|גמרת|done|did it|finished|took it|took out|i did|got it done)/i;
+
+// Vague-self-completion detector (Netzer Arik 2026-05-04). When a family
+// member says "I'm done too" / "אני גם סיימתי שלי" / "סיימתי את כולם"
+// without naming what they finished, the regex fast-path above would either
+// miss it OR ack the OLDEST active series (often targeted at someone else,
+// e.g. Ofri's pill nudge). Both outcomes are wrong. Instead, match this
+// pattern PRE-Haiku and stage a pending_confirmation showing what we think
+// the user means: "did you mean you're done with X? 👍/👎". The user
+// confirms via reaction → ackNudgeSeries fires; rejects → nothing happens.
+//
+// Designed to overlap with NUDGE_ACK_REGEX (the generic verbs are the same)
+// but require a possessive scope marker — "שלי" / "הכל" / "כולם" / "mine" /
+// "all" — so explicit completions like "הוצאתי את ליאו" still hit the
+// auto-ack fast-path without confirmation friction.
+const VAGUE_SELF_COMPLETION_REGEX =
+  /(?:סיימתי|גמרתי|עשיתי|טיפלתי).{0,15}(?:שלי|הכל|את\s+כולם|כולם)|(?:i'm|i\s+am|i\s+just)\s+(?:also\s+|too\s+)?(?:done|finished)\b(?:\s+(?:with\s+(?:my|mine)|mine|all\s+(?:of\s+)?mine|too))?|done\s+too|finished\s+(?:mine|too)/iu;
 
 // ─── Conversation Context Fetcher ───
 
@@ -11031,6 +11047,31 @@ Deno.serve(async (req: Request) => {
 
       if (pending) {
         if (isConfirm) {
+          // Special case: ack_nudge_series doesn't go through executeActions.
+          // It calls ackNudgeSeries directly, like the regex/haiku fast-paths.
+          // Staged by the vague-self-completion branch (Arik 2026-05-04).
+          if (pending.action_type === "ack_nudge_series") {
+            const ad = pending.action_data || {};
+            const seriesId = ad.series_id;
+            const targetName = ad.target_name || "";
+            const completion = ad.completion_text || "";
+            const acker = ad.acked_by_phone || message.senderPhone;
+            if (seriesId) {
+              await ackNudgeSeries(seriesId, acker, "vague_completion_confirmed");
+              await supabase.from("pending_confirmations")
+                .update({ status: "confirmed" }).eq("id", pending.id);
+              const ackReply = targetName && completion
+                ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+                : `מעולה! סימנתי ✓`;
+              await sendAndLog(provider,
+                { groupId: message.groupId, text: ackReply },
+                { householdId: hhId, groupId: message.groupId, replyType: "vague_completion_confirmed" });
+              await logMessage(message, "reaction_confirmed_vague_completion", hhId);
+              return new Response("OK", { status: 200 });
+            }
+            // Missing series_id — fall through to the generic path which
+            // will fail loudly instead of silently no-op'ing.
+          }
           const actions = [{ type: pending.action_type, data: pending.action_data }];
           const { summary } = await executeActions(hhId, actions, message.senderName, message.senderPhone);
           console.log(`[Reaction] Confirmed via ${message.reactionEmoji}:`, summary);
@@ -11043,8 +11084,14 @@ Deno.serve(async (req: Request) => {
         } else {
           await supabase.from("pending_confirmations")
             .update({ status: "rejected" }).eq("id", pending.id);
+          // Slightly different text for vague-completion rejection so the
+          // user can re-state which chore. Same reply for OCR / other
+          // pending cases.
+          const rejectText = pending.action_type === "ack_nudge_series"
+            ? "אוקי, אז איזו מטלה סיימת? תכתבו לי 🙏"
+            : "אוקי, ביטלתי 🤷‍♀️";
           await sendAndLog(provider,
-            { groupId: message.groupId, text: "אוקי, ביטלתי 🤷‍♀️" },
+            { groupId: message.groupId, text: rejectText },
             { householdId: hhId, groupId: message.groupId, replyType: "confirmation_reject_reaction" });
           await logMessage(message, "reaction_rejected", hhId);
         }
@@ -11720,6 +11767,85 @@ Deno.serve(async (req: Request) => {
     const textForClassifier = message.quotedText
       ? `[הודעה מצוטטת: "${message.quotedText}"]\n${cleanedText || message.text}`
       : (cleanedText || message.text);
+
+    // ─── Vague self-completion → confirmation ask (Netzer Arik 2026-05-04) ───
+    // BEFORE the auto-ack regex fast-path. When the sender uses generic
+    // completion language with a possessive scope marker ("אני גם סיימתי
+    // שלי" / "I'm done too") instead of naming the specific item, the
+    // auto-ack would silently mark the OLDEST active series done — likely
+    // the wrong target (Ofri's pill nudge, when Arik meant his rotation
+    // chores). Stage a pending_confirmation instead: "did you mean you're
+    // done with X? 👍/👎". The 👍 reaction routes to the existing
+    // ack_nudge_series action handler.
+    if (VAGUE_SELF_COMPLETION_REGEX.test(message.text || "")) {
+      const chatTargetForVague = message.groupId.endsWith("@g.us")
+        ? message.groupId
+        : `${message.senderPhone}@s.whatsapp.net`;
+      const { data: vagueCandidates } = await supabase
+        .from("reminder_queue")
+        .select("id, nudge_config, created_at, send_at")
+        .eq("household_id", householdId)
+        .eq("series_status", "active")
+        .eq("group_id", chatTargetForVague)
+        .lte("send_at", new Date().toISOString())
+        .order("created_at", { ascending: true })
+        .limit(5);
+      if (vagueCandidates && vagueCandidates.length > 0) {
+        const top = vagueCandidates[0];
+        const topName = (top.nudge_config as { target_name?: string } | undefined)?.target_name || "";
+        const topCompletion = (top.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
+        if (topCompletion) {
+          const others = vagueCandidates.slice(1)
+            .map((s: { nudge_config?: { target_name?: string; prompt_completion?: string } }) => {
+              const n = s.nudge_config?.target_name || "";
+              const c = s.nudge_config?.prompt_completion || "";
+              return n && c ? `${n} — ${c}` : c;
+            })
+            .filter((x: string) => x.length > 0);
+          const headline = topName
+            ? `התכוונת ש${topName} ${topCompletion}? 👍 / 👎`
+            : `התכוונת ש${topCompletion}? 👍 / 👎`;
+          const otherLine = others.length > 0
+            ? `\n(יש עוד מטלות פתוחות: ${others.join(", ")} — אם זו לא, תכתבו לי איזו)`
+            : "";
+          const confText = headline + otherLine;
+          const sendResult = await sendAndLog(provider, { groupId: message.groupId, text: confText }, {
+            householdId,
+            groupId: message.groupId,
+            inReplyTo: message.messageId,
+            replyType: "vague_completion_confirm_ask",
+          });
+          const confId = Math.random().toString(36).slice(2, 10);
+          const { error: confErr } = await supabase.from("pending_confirmations").insert({
+            id: confId,
+            household_id: householdId,
+            group_id: message.groupId,
+            action_type: "ack_nudge_series",
+            action_data: {
+              series_id: top.id,
+              target_name: topName,
+              completion_text: topCompletion,
+              acked_by_phone: message.senderPhone,
+            },
+            confirmation_text: confText,
+            created_by: message.senderName,
+            expires_at: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+            status: "pending",
+            bot_message_id: sendResult?.messageId || null,
+          });
+          if (!confErr) {
+            console.log(`[VagueCompletion] staged confirmation: id=${confId} series=${top.id} (${vagueCandidates.length} active candidates)`);
+            await logMessage(message, "vague_completion_awaiting_confirmation", householdId, null);
+            return new Response("OK", { status: 200 });
+          }
+          console.error(`[VagueCompletion] pending_confirmations insert error:`, confErr);
+          // Fall through to normal flow on insert failure — better to maybe
+          // ack the wrong series than silently drop the user's signal.
+        }
+      }
+      // No active series in scope → fall through to Haiku/Sonnet, which
+      // will probably reply "אין לי מטלות פתוחות עליך 🤷" (or similar).
+    }
 
     // ─── Nudge-series regex ack fast-path (Phase 3 Task 3.1, 2026-04-26) ───
     // BEFORE Haiku: if any active nudge_series exists in this chat AND the
