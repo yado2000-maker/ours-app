@@ -10639,7 +10639,55 @@ Deno.serve(async (req: Request) => {
       }
 
       console.log(`[Webhook] Transcribing ${duration}s voice from ${message.senderName}`);
-      const voiceResult = await transcribeVoice(message.mediaUrl, message.mediaId);
+
+      // Resolve household for Whisper decoder bias (names + recent shopping).
+      // Voice handler runs before household resolution in the main flow, so
+      // we do a quick lookup here. Group → whatsapp_config.group_id; 1:1 →
+      // whatsapp_member_mapping.phone_number. Best-effort: a missing/null id
+      // is fine — buildVoicePromptBias short-circuits to empty string.
+      let voiceHouseholdId: string | null = null;
+      try {
+        if (message.chatType === "group" && message.groupId) {
+          const { data: cfg } = await supabase
+            .from("whatsapp_config")
+            .select("household_id")
+            .eq("group_id", message.groupId)
+            .limit(1)
+            .maybeSingle();
+          voiceHouseholdId = cfg?.household_id ?? null;
+        } else if (message.senderPhone) {
+          const { data: map } = await supabase
+            .from("whatsapp_member_mapping")
+            .select("household_id")
+            .eq("phone_number", message.senderPhone)
+            .limit(1)
+            .maybeSingle();
+          voiceHouseholdId = map?.household_id ?? null;
+        }
+      } catch (e) {
+        console.error("[Voice] household lookup for bias failed (non-fatal):", e);
+      }
+
+      const voiceResult = await transcribeVoice(message.mediaUrl, message.mediaId, voiceHouseholdId);
+
+      // Voice-compare debug (ad-hoc QA). When sender's phone is in
+      // VOICE_COMPARE_PHONES, fire BOTH providers in parallel on the same
+      // audio bytes and reply with a side-by-side debug message. Main pipeline
+      // continues unchanged with its own voiceResult — the comparison is
+      // fire-and-forget. Stays dormant when env var is unset (zero production
+      // exposure).
+      try {
+        const compareSet = parseCompareWhitelist();
+        if (compareSet.size > 0 && compareSet.has(normalizeComparePhone(message.senderPhone))) {
+          console.log(`[VoiceCompare] sender ${message.senderPhone} on whitelist — firing comparison`);
+          // fire-and-forget — must not block main pipeline
+          void runVoiceCompareDebug(message, voiceHouseholdId).catch((err) => {
+            console.error("[VoiceCompare] Debug send failed:", err);
+          });
+        }
+      } catch (err) {
+        console.error("[VoiceCompare] whitelist check failed (non-fatal):", err);
+      }
 
       // Low-quality voice gate (2026-04-21). Rather than letting Sonnet invent
       // an interpretation of a garbled Hebrew-mistranscription (Habib incident:
@@ -12969,11 +13017,102 @@ Deno.serve(async (req: Request) => {
 
 // ─── Helper Functions ───
 
+// ─── Voice prompt biasing ───
+// Whisper accepts a free-text `prompt` (initial_prompt for faster-whisper) up
+// to ~224 tokens. Tokens it sees here get strong decoder bias. We feed it
+// vocabulary the household has already mentioned in text — names, recent task
+// titles, recent event titles, and recent shopping items — so proper nouns
+// like "אביטל" / "גיורא" / "אדריכלית" / "סטייליסט" don't get mangled into
+// "הביטל" / "ג'ארסטייל" by Whisper's cold-start prior.
+//
+// Priority order (greedy-fill): members → tasks → events → shopping items.
+// Live testing 2026-04-30 showed shopping items (e.g. "בגדים לגור") rarely
+// help with conversational vocabulary; tasks/events carry most of the
+// external-contact vocabulary that matters. Reminder_queue is intentionally
+// skipped: schema lacks a direct household_id column and most reminder
+// vocabulary already appears in tasks/events.
+//
+// Groq's Whisper `prompt` parameter has an 896-byte limit (Whisper's 224-token
+// limit; ~4 bytes/token). Hebrew characters are 2 UTF-8 bytes each, so a
+// 600-JS-character cap was blowing past the limit when most of the bias was
+// Hebrew names + tasks + events. We measure in UTF-8 bytes instead and target
+// 800 bytes for safety margin (~50 chars headroom).
+const VOICE_BIAS_BYTE_CAP = 800;
+
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+export async function buildVoicePromptBias(householdId: string | null | undefined): Promise<string> {
+  if (!householdId) return "";
+  try {
+    const headers = {
+      apikey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""}`,
+    };
+    const base = Deno.env.get("SUPABASE_URL") ?? "";
+    const hh = encodeURIComponent(householdId);
+
+    const memRes = await fetch(
+      `${base}/rest/v1/whatsapp_member_mapping?household_id=eq.${hh}&select=member_name`,
+      { headers },
+    );
+    const members: Array<{ member_name: string }> = memRes.ok ? await memRes.json() : [];
+    const names = members.map((m) => (m.member_name || "").trim()).filter(Boolean);
+
+    const taskRes = await fetch(
+      `${base}/rest/v1/tasks?household_id=eq.${hh}&select=title&order=created_at.desc&limit=30`,
+      { headers },
+    );
+    const tasks: Array<{ title: string }> = taskRes.ok ? await taskRes.json() : [];
+    const taskTitles = tasks.map((t) => (t.title || "").trim()).filter(Boolean);
+
+    const eventRes = await fetch(
+      `${base}/rest/v1/events?household_id=eq.${hh}&select=title&order=created_at.desc&limit=30`,
+      { headers },
+    );
+    const events: Array<{ title: string }> = eventRes.ok ? await eventRes.json() : [];
+    const eventTitles = events.map((e) => (e.title || "").trim()).filter(Boolean);
+
+    const itemRes = await fetch(
+      `${base}/rest/v1/shopping_items?household_id=eq.${hh}&select=name&order=created_at.desc&limit=30`,
+      { headers },
+    );
+    const items: Array<{ name: string }> = itemRes.ok ? await itemRes.json() : [];
+    const itemNames = items.map((i) => (i.name || "").trim()).filter(Boolean);
+
+    const seen = new Set<string>();
+    const tokens: string[] = [];
+    for (const t of [...names, ...taskTitles, ...eventTitles, ...itemNames]) {
+      if (!seen.has(t)) {
+        seen.add(t);
+        tokens.push(t);
+      }
+    }
+
+    const out: string[] = [];
+    let bytes = 0;
+    for (const t of tokens) {
+      const sep = out.length === 0 ? "" : ", ";
+      const addBytes = utf8ByteLength(sep + t);
+      if (bytes + addBytes > VOICE_BIAS_BYTE_CAP) break;
+      out.push(t);
+      bytes += addBytes;
+    }
+    return out.join(", ");
+  } catch (err) {
+    console.error("[VoiceBias] Failed to build prompt bias:", err);
+    return "";
+  }
+}
+
 // Voice transcription result carries quality signals so the caller can decide
 // whether to inject into the pipeline or ask the user to repeat. Quality states:
 //   ok              — transcript is trustworthy, inject as normal
-//   wrong_language  — Whisper detected a language other than Hebrew/English
-//                     (Italian/Arabic/etc. — usually a noisy Hebrew misheard)
+//   wrong_language  — Defense-in-depth only. Since 2026-04-30 PR 1 we force
+//                     `language=he` on the Groq call, so this branch should
+//                     not fire in normal operation. Kept in case a future
+//                     change reverts the language hint.
 //   unclear         — Hebrew/English detected but confidence too low
 //                     (avg_logprob below threshold → hallucination risk)
 //   no_speech       — majority silence; user tapped record by accident
@@ -12989,58 +13128,49 @@ interface VoiceTranscription {
   noSpeechProb?: number;
 }
 
-async function transcribeVoice(
-  mediaUrl: string | undefined,
-  mediaId: string | undefined,
+// ─── Voice provider helpers ───
+//
+// `transcribeVoice` (top-level, below) downloads the audio + builds the
+// household-vocab bias prompt once, then dispatches to one of two providers
+// based on the VOICE_PROVIDER env var. Default = "groq" for instant rollback;
+// "ivrit_ai_hf" routes to the private HuggingFace Inference Endpoint hosting
+// `ivrit-ai/whisper-large-v3-turbo` (Hebrew-fine-tuned).
+//
+// Quality-gate caveat for the ivrit-ai path: HF transformers ASR pipeline
+// does NOT expose `avg_logprob` / `no_speech_prob` per segment (those are
+// faster-whisper features). The wrong_language / no_speech / unclear branches
+// degrade to "ok" for ivrit-ai. The downstream Haiku fixer
+// (`fixVoiceTranscription`) remains the safety net via __UNCLEAR__ for
+// garbled output.
+
+export async function transcribeVoiceGroq(
+  audioBlob: Blob,
+  biasPrompt: string,
 ): Promise<VoiceTranscription> {
   const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY") || "";
   if (!GROQ_API_KEY) {
-    console.error("[Voice] GROQ_API_KEY not set");
-    return { text: null, quality: "failed" };
-  }
-
-  if (!mediaUrl && !mediaId) {
-    console.error("[Voice] No media URL or media ID available");
+    console.error("[VoiceGroq] GROQ_API_KEY not set");
     return { text: null, quality: "failed" };
   }
 
   try {
-    // 1. Download audio — either from direct link or via Whapi media API
-    let audioBlob: Blob;
-    if (mediaUrl) {
-      const audioResponse = await fetch(mediaUrl);
-      if (!audioResponse.ok) {
-        console.error("[Voice] Failed to download audio from link:", audioResponse.status);
-        return { text: null, quality: "failed" };
-      }
-      audioBlob = await audioResponse.blob();
-    } else {
-      // No direct link — download via Whapi GET /media/{mediaId}
-      const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
-      const token = Deno.env.get("WHAPI_TOKEN") || "";
-      const mediaResponse = await fetch(`${apiUrl}/media/${mediaId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "audio/ogg",
-        },
-      });
-      if (!mediaResponse.ok) {
-        console.error("[Voice] Whapi media download failed:", mediaResponse.status, await mediaResponse.text());
-        return { text: null, quality: "failed" };
-      }
-      audioBlob = await mediaResponse.blob();
-    }
-
-    // 2. Build multipart form data for Groq Whisper API.
+    // Build multipart form data for Groq Whisper API.
     // response_format=verbose_json returns language + per-segment confidence
     // signals (avg_logprob, no_speech_prob) used by the quality gate below.
-    // No language hint — Whisper auto-detects Hebrew, English, or mixed.
+    // language=he forces Hebrew decoding (auto-detect was misfiring on noisy
+    // audio). temperature=0 disables sampling. `prompt` carries household
+    // vocab as decoder bias.
     const formData = new FormData();
     formData.append("file", audioBlob, "voice.ogg");
     formData.append("model", "whisper-large-v3");
     formData.append("response_format", "verbose_json");
+    formData.append("language", "he");
+    formData.append("temperature", "0");
 
-    // 3. Call Groq Whisper API (OpenAI-compatible endpoint)
+    if (biasPrompt) {
+      formData.append("prompt", biasPrompt);
+    }
+
     const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
@@ -13048,7 +13178,7 @@ async function transcribeVoice(
     });
 
     if (!response.ok) {
-      console.error("[Voice] Groq API error:", response.status, await response.text());
+      console.error("[VoiceGroq] Groq API error:", response.status, await response.text());
       return { text: null, quality: "failed" };
     }
 
@@ -13056,7 +13186,7 @@ async function transcribeVoice(
     const text = result.text?.trim() || null;
     if (!text) return { text: null, quality: "failed" };
 
-    // 4. Quality gate.
+    // Quality gate.
     // (a) Language — Whisper language codes: ISO 639-1 (e.g. "he", "en", "iw"
     //     is legacy Hebrew, "ar" Arabic, "it" Italian). Anything outside
     //     Hebrew/English is rejected — Sheli's users are Hebrew-speaking
@@ -13064,6 +13194,8 @@ async function transcribeVoice(
     //     exact symptom we saw on 2026-04-21.
     const language: string | undefined = result.language;
     const hebrewOrEnglish = !language || ["he", "iw", "hebrew", "en", "english"].includes(language.toLowerCase());
+    // Defense-in-depth — language=he is forced in the form data, so this
+    // branch should not fire. Left in to catch upstream regressions.
     if (!hebrewOrEnglish) {
       return { text, quality: "wrong_language", language };
     }
@@ -13090,8 +13222,286 @@ async function transcribeVoice(
 
     return { text, quality: "ok", language, avgLogprob, noSpeechProb: maxNoSpeech };
   } catch (err) {
-    console.error("[Voice] Transcription error:", err);
+    console.error("[VoiceGroq] Transcription error:", err);
     return { text: null, quality: "failed" };
+  }
+}
+
+// Encode an audio Blob to base64 in chunks. Naive `btoa(String.fromCharCode(...bytes))`
+// fails on call-stack overflow for the ~50-500KB voice messages Whapi delivers,
+// because spreading a Uint8Array exceeds the JS argument-count limit. Chunked
+// `String.fromCharCode.apply` keeps each call under the 32K-arg threshold.
+async function audioBlobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+  }
+  return btoa(binary);
+}
+
+// ivrit-ai Hebrew-tuned Whisper via HF Inference Endpoint (paid).
+// Uses Shape B (JSON + base64) with explicit generate_kwargs to override
+// the model's baked-in forced_decoder_ids. Without these overrides, the
+// HF inference toolkit rejects the request with "You have explicitly
+// specified forced_decoder_ids" because the model's generation_config.json
+// conflicts with newer Transformers versions.
+//
+// language="hebrew" + task="transcribe" computes the right decoder_ids
+// dynamically and bypasses the conflict.
+export async function transcribeVoiceIvritAi(
+  audioBlob: Blob,
+  // biasPrompt is intentionally unused: HF Transformers ASR pipeline does not
+  // accept Whisper's `initial_prompt` decoder bias parameter. The bias remains
+  // a Groq-only feature. Kept in the signature for symmetry with
+  // `transcribeVoiceGroq` and to make the dispatcher uniform.
+  _biasPrompt: string,
+): Promise<VoiceTranscription> {
+  const url = Deno.env.get("IVRIT_AI_HF_URL") || "";
+  const token = Deno.env.get("IVRIT_AI_HF_TOKEN") || "";
+  if (!url || !token) {
+    console.error("[VoiceIvrit] IVRIT_AI_HF_URL or IVRIT_AI_HF_TOKEN missing");
+    return { text: null, quality: "failed" };
+  }
+
+  try {
+    // Shape B — JSON body with base64 audio + explicit generate_kwargs.
+    // HF Inference Endpoints serving the `automatic-speech-recognition`
+    // pipeline accept this directly and return `{"text": "..."}`.
+    // The endpoint runs `ivrit-ai/whisper-large-v3-turbo` on a T4 16GB GPU
+    // (eu-west-1, scale-to-zero after 15min idle). First call after idle
+    // takes 30-60s for cold load — hence the 90s timeout.
+    const audioB64 = await audioBlobToBase64(audioBlob);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: audioB64,
+        parameters: {
+          return_timestamps: false,
+          generate_kwargs: {
+            language: "hebrew",
+            task: "transcribe",
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("[VoiceIvrit] HF API error:", res.status, body.slice(0, 200));
+      return { text: null, quality: "failed" };
+    }
+
+    const result = await res.json();
+    // Standard transformers ASR shape: {"text": "...", optional "chunks": [...]}
+    const text: string | null = (typeof result?.text === "string" ? result.text.trim() : "") || null;
+    if (!text) return { text: null, quality: "failed" };
+
+    // Quality gate degradation: HF transformers pipeline does NOT expose
+    // avg_logprob / no_speech_prob per segment (faster-whisper features).
+    // We default to quality="ok" — the downstream Haiku fixer
+    // (fixVoiceTranscription) is the remaining safety net for garbled output
+    // via __UNCLEAR__. Tradeoff documented in the design doc:
+    //   docs/plans/2026-04-XX-hebrew-quality-design.md
+    return { text, quality: "ok", language: "he" };
+  } catch (err) {
+    console.error("[VoiceIvrit] Transcription error:", err);
+    return { text: null, quality: "failed" };
+  }
+}
+
+export async function transcribeVoice(
+  mediaUrl: string | undefined,
+  mediaId: string | undefined,
+  householdId?: string | null,
+): Promise<VoiceTranscription> {
+  if (!mediaUrl && !mediaId) {
+    console.error("[Voice] No media URL or media ID available");
+    return { text: null, quality: "failed" };
+  }
+
+  // 1. Download audio (provider-agnostic) — either from direct link or via
+  //    Whapi GET /media/{mediaId}.
+  let audioBlob: Blob;
+  try {
+    if (mediaUrl) {
+      const audioResponse = await fetch(mediaUrl);
+      if (!audioResponse.ok) {
+        console.error("[Voice] Failed to download audio from link:", audioResponse.status);
+        return { text: null, quality: "failed" };
+      }
+      audioBlob = await audioResponse.blob();
+    } else {
+      const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
+      const token = Deno.env.get("WHAPI_TOKEN") || "";
+      const mediaResponse = await fetch(`${apiUrl}/media/${mediaId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "audio/ogg",
+        },
+      });
+      if (!mediaResponse.ok) {
+        console.error("[Voice] Whapi media download failed:", mediaResponse.status, await mediaResponse.text());
+        return { text: null, quality: "failed" };
+      }
+      audioBlob = await mediaResponse.blob();
+    }
+  } catch (err) {
+    console.error("[Voice] Download error:", err);
+    return { text: null, quality: "failed" };
+  }
+
+  // 2. Build decoder bias from household vocab (names, recent shopping items,
+  //    tasks, events). Only Groq accepts this — see transcribeVoiceIvritAi.
+  const biasPrompt = await buildVoicePromptBias(householdId ?? null);
+  if (biasPrompt) {
+    console.log(`[Voice] Bias prompt (${biasPrompt.length} chars): ${biasPrompt.slice(0, 80)}...`);
+  }
+
+  // 3. Route to the chosen provider. Default = "groq" for instant rollback.
+  const provider = (Deno.env.get("VOICE_PROVIDER") || "groq").toLowerCase();
+  console.log(`[Voice] provider=${provider}`);
+  if (provider === "ivrit_ai_hf" || provider === "ivritai" || provider === "ivrit-ai-hf") {
+    return transcribeVoiceIvritAi(audioBlob, biasPrompt);
+  }
+  return transcribeVoiceGroq(audioBlob, biasPrompt);
+}
+
+// ─── Voice compare (ad-hoc QA) ───
+//
+// Side-by-side comparison helper for ad-hoc voice QA. Calls BOTH providers in
+// parallel on the same audio bytes. Used by the voice-compare debug path when
+// sender is in VOICE_COMPARE_PHONES. Each provider call is independent — one
+// failing returns its own "failed" quality without blocking the other.
+//
+// Used to verify ivrit-ai quality on real WhatsApp audio before flipping
+// VOICE_PROVIDER=ivrit_ai_hf permanently. Stays dormant when env var unset.
+export async function transcribeVoiceCompare(
+  audioBlob: Blob,
+  biasPrompt: string,
+): Promise<{ groq: VoiceTranscription; ivrit: VoiceTranscription }> {
+  const [groq, ivrit] = await Promise.all([
+    transcribeVoiceGroq(audioBlob, biasPrompt).catch((err): VoiceTranscription => {
+      console.error("[VoiceCompare] Groq error:", err);
+      return { text: null, quality: "failed" };
+    }),
+    transcribeVoiceIvritAi(audioBlob, biasPrompt).catch((err): VoiceTranscription => {
+      console.error("[VoiceCompare] ivrit-ai error:", err);
+      return { text: null, quality: "failed" };
+    }),
+  ]);
+  return { groq, ivrit };
+}
+
+// Parse VOICE_COMPARE_PHONES (CSV of phone numbers) into a normalized Set.
+// Strips leading "+" and whitespace. Empty / unset env var → empty Set
+// (zero production exposure when feature unused).
+export function parseCompareWhitelist(): Set<string> {
+  const raw = Deno.env.get("VOICE_COMPARE_PHONES") || "";
+  const set = new Set<string>();
+  for (const p of raw.split(",")) {
+    const trimmed = p.trim().replace(/^\+/, "");
+    if (trimmed) set.add(trimmed);
+  }
+  return set;
+}
+
+function normalizeComparePhone(phone: string | undefined | null): string {
+  return (phone || "").trim().replace(/^\+/, "");
+}
+
+// Fire-and-forget debug helper. Re-downloads the audio (idempotent at Whapi),
+// rebuilds the same bias prompt the main pipeline used, runs both providers
+// in parallel, then sends a debug message back to the same chat with both
+// transcripts side by side. Safe to call from anywhere — all errors are
+// caught and logged, never thrown to the caller.
+async function runVoiceCompareDebug(
+  message: IncomingMessage,
+  householdId: string | null,
+): Promise<void> {
+  // 1. Re-download audio. Slight duplication with transcribeVoice but isolated
+  //    from the main pipeline — keeps the comparison side-effect-free for the
+  //    user's experience even if download fails.
+  let audioBlob: Blob;
+  try {
+    if (message.mediaUrl) {
+      const r = await fetch(message.mediaUrl);
+      if (!r.ok) {
+        console.error("[VoiceCompare] audio download failed:", r.status);
+        return;
+      }
+      audioBlob = await r.blob();
+    } else if (message.mediaId) {
+      const apiUrl = Deno.env.get("WHAPI_API_URL") || "https://gate.whapi.cloud";
+      const token = Deno.env.get("WHAPI_TOKEN") || "";
+      const r = await fetch(`${apiUrl}/media/${message.mediaId}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "audio/ogg" },
+      });
+      if (!r.ok) {
+        console.error("[VoiceCompare] Whapi media download failed:", r.status);
+        return;
+      }
+      audioBlob = await r.blob();
+    } else {
+      console.error("[VoiceCompare] no mediaUrl or mediaId on message");
+      return;
+    }
+  } catch (err) {
+    console.error("[VoiceCompare] audio download error:", err);
+    return;
+  }
+
+  // 2. Build the same bias prompt the main pipeline used — keeps the
+  //    comparison apples-to-apples. Empty string when no household.
+  let biasPrompt = "";
+  try {
+    biasPrompt = await buildVoicePromptBias(householdId);
+  } catch (err) {
+    console.error("[VoiceCompare] buildVoicePromptBias failed (non-fatal):", err);
+  }
+
+  // 3. Run both providers in parallel.
+  const { groq, ivrit } = await transcribeVoiceCompare(audioBlob, biasPrompt);
+
+  // 4. Build debug body. Format mirrors spec — fixed separators, both
+  //    transcripts visible, quality + bias-length annotation footer.
+  const lines = [
+    "🔬 voice compare",
+    "━━━━━━━━━━━━━━━━━━",
+    "[Groq]",
+    groq.text || "(failed)",
+    "",
+    "[ivrit-ai]",
+    ivrit.text || "(failed)",
+    "━━━━━━━━━━━━━━━━━━",
+    `quality: groq=${groq.quality} ivrit=${ivrit.quality} | bias=${new TextEncoder().encode(biasPrompt).length}B (${biasPrompt.length} chars)`,
+  ];
+  const debugBody = lines.join("\n");
+
+  // 5. Send via the existing sendAndLog wrapper so the row lands in
+  //    whatsapp_messages with replyType="voice_compare_debug" — queryable
+  //    after the fact for QA review.
+  const chatTarget = message.groupId;
+  if (!chatTarget) {
+    console.error("[VoiceCompare] no chatTarget on message — cannot send debug");
+    return;
+  }
+  try {
+    await sendAndLog(provider, { groupId: chatTarget, text: debugBody }, {
+      householdId: householdId || "unknown",
+      groupId: chatTarget,
+      inReplyTo: message.messageId,
+      replyType: "voice_compare_debug",
+    });
+  } catch (err) {
+    console.error("[VoiceCompare] sendAndLog failed:", err);
   }
 }
 
