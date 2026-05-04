@@ -1454,7 +1454,7 @@ function fallbackRateLimited(message: string): ClassificationOutput {
 // SONNET REPLY GENERATOR (from reply-generator.ts)
 // ============================================================================
 
-const SONNET_MODEL = "claude-sonnet-4-20250514";
+const SONNET_MODEL = Deno.env.get("REPLY_MODEL") || "claude-sonnet-4-20250514";
 
 // ─── Shared prompt rules (single source of truth for both group + 1:1 prompts) ───
 // IMPORTANT: Edit these ONCE — they're interpolated into both buildReplyPrompt and ONBOARDING_1ON1_PROMPT.
@@ -2106,7 +2106,7 @@ async function callCorrectionSonnet(prompt: string): Promise<CorrectionSonnetRes
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 (truncation safety, see Netzer leak).
         max_tokens: 4096,
         messages: [{ role: "user", content: prompt }],
@@ -4034,7 +4034,7 @@ async function classifyMessages(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 1024→4096 (truncation safety, see Netzer leak).
         max_tokens: 4096,
         system: systemPrompt,
@@ -8124,7 +8124,7 @@ Reply with ONLY the welcome text. No quotes, no labels, no metadata blocks.`;
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         max_tokens: 256,
         system: systemPrompt,
         messages: [{
@@ -9405,7 +9405,7 @@ TURN-2 RESPONSE PATTERNS (first post-admit message from this user):
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 to prevent <!--ACTIONS:[...]--> truncation
         // on multi-action turns (Netzer rotation leak).
         max_tokens: 4096,
@@ -9621,7 +9621,7 @@ CONVERSATION CONTINUITY — CRITICAL:
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         // 2026-04-26: bumped 512→4096 (truncation safety, Netzer leak).
         max_tokens: 4096,
         system: ONBOARDING_1ON1_PROMPT + "\n\n" + contextBlock,
@@ -14069,7 +14069,7 @@ async function ocrImage(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: SONNET_MODEL,
         max_tokens: 1500,
         system: systemPrompt,
         messages: [{
