@@ -11210,7 +11210,7 @@ Deno.serve(async (req: Request) => {
               await supabase.from("pending_confirmations")
                 .update({ status: "confirmed" }).eq("id", pending.id);
               const ackReply = targetName && completion
-                ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+                ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
                 : `מעולה! סימנתי ✓`;
               await sendAndLog(provider,
                 { groupId: message.groupId, text: ackReply },
@@ -11288,7 +11288,7 @@ Deno.serve(async (req: Request) => {
             const targetName = (match.nudge_config as { target_name?: string } | undefined)?.target_name || "";
             const completion = (match.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
             const ackReply = targetName && completion
-              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
               : `מעולה! סימנתי. עוצרת תזכורות ✓`;
             await sendAndLog(provider, { groupId: message.groupId, text: ackReply }, {
               householdId: hhId,
@@ -12044,7 +12044,7 @@ Deno.serve(async (req: Request) => {
         const completion = target.nudge_config?.prompt_completion || "";
         const ackReply = config.language === "he"
           ? (targetName && completion
-              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
               : `מעולה! סימנתי. עוצרת תזכורות ✓`)
           : (targetName && completion
               ? `Got it — marked ${targetName} ${completion} ✓`
@@ -12105,7 +12105,7 @@ Deno.serve(async (req: Request) => {
         const completion = (target.nudge_config as { prompt_completion?: string } | undefined)?.prompt_completion || "";
         const ackReply = config.language === "he"
           ? (targetName && completion
-              ? `מעולה! סימנתי ש${targetName} ${completion} ✓`
+              ? `מעולה! סימנתי, ${targetName} — ${completion} ✓`
               : `מעולה! סימנתי. עוצרת תזכורות ✓`)
           : (targetName && completion
               ? `Got it — marked ${targetName} ${completion} ✓`
