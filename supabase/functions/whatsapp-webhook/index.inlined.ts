@@ -151,7 +151,14 @@ interface ClassificationOutput {
     // completion_scope: for "הושלם"/"המשימות הושלמו" replies — executor marks all open
     // tasks done since the quoted text doesn't carry IDs.
     items_from_quote?: string[];
-    completion_scope?: "all_open" | "all_in_quote";
+    // "multiple" added 2026-05-05 (Netzer multi-completion): when one message
+    // reports several distinct (actor, task) completions like "היום אריק הוציא
+    // את ליאו ועופרי פינתה מדיח", Haiku emits completion_scope="multiple" + the
+    // completions[] array below. Mapper fans out to a single complete_tasks_multi
+    // action; executor resolves each pair against tasks → active nudges → today's
+    // recurring children, in priority order.
+    completion_scope?: "all_open" | "all_in_quote" | "multiple";
+    completions?: Array<{ task_description: string; completed_by_name?: string }>;
     // Expenses (v0)
     amount_text?: string;
     amount_minor?: number;
@@ -265,7 +272,10 @@ interface ReplyResult {
 interface ClassifiedAction {
   // Patch D (Shira 2026-04-15): added complete_shopping_by_names + complete_tasks_all_open
   // for quote-reply completions where the executor resolves names/scopes to IDs via DB lookup.
-  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "add_expense" | "clear_list" | "set_reminder_rule";
+  // 2026-05-05 (Netzer multi-completion): added complete_tasks_multi for messages reporting
+  // multiple (actor, task) completions in a single sentence — executor fans out across
+  // tasks, active nudge series, and today's recurring reminder children.
+  type: "add_task" | "add_shopping" | "add_event" | "complete_task" | "complete_shopping" | "add_reminder" | "assign_task" | "create_rotation" | "override_rotation" | "complete_shopping_by_names" | "complete_tasks_all_open" | "complete_tasks_multi" | "add_expense" | "clear_list" | "set_reminder_rule";
   data: Record<string, unknown>;
 }
 
@@ -836,6 +846,7 @@ HEBREW PATTERNS:
   - Pickup/errand cluster: "אספתי את X", "הבאתי את X", "לקחתי את X מ-", "picked up X" match "לאסוף X" tasks.
   Rule: if the message verb+object overlaps an open task by SEMANTIC meaning (same object/area/activity), emit complete_task with that task_id at confidence ≥0.85 — even if the verb is different. When 2+ open tasks could match, pick the best fit; if truly ambiguous, set confidence 0.55-0.65 + needs_conversation_review:true.
 - THIRD-PERSON COMPLETION REPORT ("X עדכן שביצע Y", "X עשה Y", "X סיים Y", "X did Y", "X handled Y") = complete_task against the matching open task. The reporter may not be the doer — still credit the task as done. If Haiku can identify the doer's name, include entities.completed_by_name (optional). Example: "אריק עדכן שפינה את המדיח" → match the dishwasher task. Do NOT classify as ignore just because it's third-person.
+- MULTI-PAIR COMPLETION REPORT ("היום X עשה A ו-Y עשה B", "today X did A and Y did B", "אריק שטף כלים, עופרי קיפלה כביסה") = complete_task with completion_scope="multiple" + entities.completions=[{task_description, completed_by_name}, ...]. One inbound message reports several distinct (actor, task) completions, often retroactively for today's chores. Extract every (actor, task) pair you can see — Hebrew connectors are "ו" / "וגם" / comma. The executor will resolve each pair against the open tasks list AND active reminders/nudges, and annotate substitute-actor cases automatically — your job is just clean extraction. Do NOT collapse pairs into one item even if they share an actor or a task. CRITICAL: if any pair is unmatched against OPEN TASKS context that's fine — the executor also looks at reminder_queue (which Haiku doesn't see) and will produce a per-pair status.
 - "קניתי X" / "יש X" matching shopping item = complete_shopping
 - QUOTE-REPLY TO BOT SHOPPING-ADD: When the quoted message is a bot shopping confirmation starting with "🛒 הוספתי..." or listing items bot just added, and the reply says "זה כבר קנינו", "כבר קנינו", "כבר קניתי", "יש לנו בבית", "יש כבר", "לקחתי", "זה יש" → complete_shopping with the items from the QUOTED message. Extract the item names from the quote into entities.items_from_quote (array of names). Do NOT emit add_shopping.
 - QUOTE-REPLY completion ("הושלם", "בוצע", "סיימתי", "טיפלתי") to a bot message listing TASKS = complete_task with all task_ids from the quoted text. Mark ALL tasks in the quote as done unless the reply excludes specific ones.
@@ -1044,6 +1055,8 @@ EXAMPLES:
 [אריק]: "פיניתי את המדיח" (OPEN TASKS includes {id:"t9x3", title:"להוציא את המדיח"}) → {"intent":"complete_task","confidence":0.92,"entities":{"task_id":"t9x3","raw_text":"פיניתי את המדיח"}}
 [אריק]: "רוקנתי מדיח" (OPEN TASKS includes {id:"t9x3", title:"לרוקן מדיח"}) → {"intent":"complete_task","confidence":0.92,"entities":{"task_id":"t9x3","raw_text":"רוקנתי מדיח"}}
 [עינת]: "אריק עדכן שפינה את המדיח" (OPEN TASKS includes {id:"t9x3", title:"להוציא את המדיח"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"t9x3","completed_by_name":"אריק","raw_text":"אריק עדכן שפינה את המדיח"}}
+[עינת]: "היום אריק הוציא את ליאו ועופרי פינתה מדיח" → {"intent":"complete_task","confidence":0.92,"addressed_to_bot":true,"entities":{"raw_text":"היום אריק הוציא את ליאו ועופרי פינתה מדיח","completion_scope":"multiple","completions":[{"task_description":"להוציא את ליאו","completed_by_name":"אריק"},{"task_description":"לפנות את המדיח","completed_by_name":"עופרי"}]}}
+[שירה]: "שטפתי כלים וקיפלתי כביסה" → {"intent":"complete_task","confidence":0.90,"entities":{"raw_text":"שטפתי כלים וקיפלתי כביסה","completion_scope":"multiple","completions":[{"task_description":"שטיפת כלים","completed_by_name":"שירה"},{"task_description":"קיפול כביסה","completed_by_name":"שירה"}]}}
 [אמא]: "סיימתי את הכלים" (OPEN TASKS includes {id:"k2a7", title:"שטיפת כלים"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"k2a7","raw_text":"סיימתי את הכלים"}}
 [אבא]: "did the dishes" (OPEN TASKS includes {id:"k2a7", title:"שטיפת כלים"}) → {"intent":"complete_task","confidence":0.88,"entities":{"task_id":"k2a7","raw_text":"did the dishes"}}
 [נועה]: "הוצאתי זבל" (OPEN TASKS includes {id:"z4b1", title:"להוציא זבל"}) → {"intent":"complete_task","confidence":0.95,"entities":{"task_id":"z4b1","raw_text":"הוצאתי זבל"}}
@@ -4212,6 +4225,218 @@ function isSameEvent(existingTitle: string, newTitle: string, existingDate: stri
   return isSameTask(existingTitle, newTitle);
 }
 
+// ─── Multi-completion resolver (Netzer 2026-05-05) ───
+//
+// One message reports several distinct (actor, task) completions like
+// "היום אריק הוציא את ליאו ועופרי פינתה מדיח". Haiku fans the message into
+// completions[] with completion_scope="multiple"; the action mapper emits a
+// single complete_tasks_multi action; the executor walks each pair through
+// resolveCompletionPair() to find the row that actually holds the work.
+//
+// Resolution priority (stop at first hit):
+//   1. tasks table — open task by isSameTask() fuzz on title
+//   2. active or recently-expired nudge series — substring match on
+//      nudge_config.prompt_completion (mirrors line ~11280 reaction-match
+//      logic so a multi-pair report hits the same rows a 👍 would)
+//   3. today's recurring reminder children (Israel-time window) — substring
+//      match on message_text. completed_at written to metadata; sent stays
+//      as-is (the row may be sent already OR pre-fire — completion ≠ send)
+//
+// When the actor on the row differs from the actor in the report ("Ofri's
+// nudge series, Arik did it"), set isSubstitute=true. Caller annotates the
+// row's metadata.completed_by_substitute and includes a substitute note in
+// the reply line. We do NOT auto-shift the next slot — that's a design
+// decision (one-off favor ≠ permanent swap). Explicit reassignment goes
+// through override_rotation as before.
+
+type CompletionPair = { task_description: string; completed_by_name?: string };
+
+type CompletionHit =
+  | { source: "task"; rowId: string; matchedTitle: string; scheduledTo: string | null; isSubstitute: boolean }
+  | { source: "nudge"; rowId: string; matchedTitle: string; scheduledTo: string; isSubstitute: boolean }
+  | { source: "recurring"; rowId: string; matchedTitle: string; scheduledTo: string; isSubstitute: boolean }
+  | { source: "none" };
+
+// Compute today's IL-day [start, end) as UTC ISO strings. DST-aware via Intl
+// shortOffset (matches the parseReminderTime pattern at ilOffsetMs).
+function ilTodayBounds(now: Date = new Date()): { startUtc: string; endUtc: string } {
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const y = ymd.find((p) => p.type === "year")?.value;
+  const m = ymd.find((p) => p.type === "month")?.value;
+  const d = ymd.find((p) => p.type === "day")?.value;
+  const offsetPart = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jerusalem",
+    timeZoneName: "shortOffset",
+  })
+    .formatToParts(now)
+    .find((p) => p.type === "timeZoneName")?.value || "GMT+3";
+  const offsetMatch = offsetPart.match(/([+-]?\d+)/);
+  const offsetMin = (offsetMatch ? parseInt(offsetMatch[1], 10) : 3) * 60;
+  const startMs = Date.UTC(parseInt(y!, 10), parseInt(m!, 10) - 1, parseInt(d!, 10)) - offsetMin * 60 * 1000;
+  return {
+    startUtc: new Date(startMs).toISOString(),
+    endUtc: new Date(startMs + 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
+async function resolveCompletionPair(
+  householdId: string,
+  pair: CompletionPair,
+): Promise<CompletionHit> {
+  const desc = (pair.task_description || "").trim();
+  if (!desc) return { source: "none" };
+  const reportedActor = (pair.completed_by_name || "").trim();
+
+  // Source 1: open tasks
+  try {
+    const { data: openTasks } = await supabase
+      .from("tasks")
+      .select("id, title, assigned_to")
+      .eq("household_id", householdId)
+      .eq("done", false);
+    for (const t of openTasks || []) {
+      const title = (t as { title?: string }).title || "";
+      if (!title) continue;
+      if (isSameTask(desc, title)) {
+        const scheduledTo = ((t as { assigned_to?: string | null }).assigned_to || null);
+        const isSubstitute = !!(reportedActor && scheduledTo && reportedActor !== scheduledTo);
+        return {
+          source: "task",
+          rowId: (t as { id: string }).id,
+          matchedTitle: title,
+          scheduledTo,
+          isSubstitute,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[MultiCompletion] tasks lookup failed: ${(err as Error).message}`);
+  }
+
+  // Source 2: active or recently-expired nudge series (last 24h)
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: nudges } = await supabase
+      .from("reminder_queue")
+      .select("id, nudge_config")
+      .eq("household_id", householdId)
+      .in("series_status", ["active", "expired_deadline"])
+      .gte("created_at", since)
+      .not("nudge_config", "is", null);
+    for (const n of nudges || []) {
+      const cfg = ((n as { nudge_config?: { target_name?: string; prompt_completion?: string } }).nudge_config) || {};
+      const completion = (cfg.prompt_completion || "").trim();
+      if (!completion) continue;
+      const overlaps =
+        completion.includes(desc) ||
+        desc.includes(completion) ||
+        isSameTask(desc, completion);
+      if (overlaps) {
+        const target = (cfg.target_name || "").trim();
+        const isSubstitute = !!(reportedActor && target && reportedActor !== target);
+        return {
+          source: "nudge",
+          rowId: (n as { id: string }).id,
+          matchedTitle: completion,
+          scheduledTo: target,
+          isSubstitute,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[MultiCompletion] nudge lookup failed: ${(err as Error).message}`);
+  }
+
+  // Source 3: today's recurring reminder children (IL window)
+  try {
+    const { startUtc, endUtc } = ilTodayBounds();
+    const { data: recurring } = await supabase
+      .from("reminder_queue")
+      .select("id, message_text, metadata")
+      .eq("household_id", householdId)
+      .gte("send_at", startUtc)
+      .lt("send_at", endUtc);
+    for (const r of recurring || []) {
+      const meta = ((r as { metadata?: { materialized_from_recurring?: boolean; cancelled_at?: string; completed_at?: string } }).metadata) || {};
+      if (!meta.materialized_from_recurring) continue;
+      if (meta.cancelled_at || meta.completed_at) continue;
+      const text = ((r as { message_text?: string }).message_text || "").trim();
+      if (!text) continue;
+      // message_text format: "<name> — <task>" (em-dash)
+      const dashIdx = text.indexOf("—");
+      const taskPart = dashIdx >= 0 ? text.slice(dashIdx + 1).trim() : text;
+      const namePart = dashIdx >= 0 ? text.slice(0, dashIdx).trim() : "";
+      const overlaps =
+        taskPart.includes(desc) ||
+        desc.includes(taskPart) ||
+        text.includes(desc) ||
+        isSameTask(desc, taskPart);
+      if (overlaps) {
+        const isSubstitute = !!(reportedActor && namePart && reportedActor !== namePart);
+        return {
+          source: "recurring",
+          rowId: (r as { id: string }).id,
+          matchedTitle: taskPart || text,
+          scheduledTo: namePart,
+          isSubstitute,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[MultiCompletion] recurring lookup failed: ${(err as Error).message}`);
+  }
+
+  return { source: "none" };
+}
+
+// Result that the executor encodes into a summary string + the caller decodes
+// to build the deterministic reply (mirrors clear_list pattern at line ~12862).
+type MultiCompletionResultEntry = {
+  actor: string;
+  description: string;
+  source: "task" | "nudge" | "recurring" | "none";
+  matchedTitle?: string;
+  scheduledTo?: string;
+  isSubstitute?: boolean;
+};
+
+function formatMultiCompletionReply(entries: MultiCompletionResultEntry[], lang: "he" | "en"): string {
+  const hits = entries.filter((e) => e.source !== "none");
+  const misses = entries.filter((e) => e.source === "none");
+  const lines: string[] = [];
+  if (hits.length > 0) {
+    lines.push(lang === "he" ? "מעולה!" : "Got it!");
+    for (const h of hits) {
+      const desc = h.matchedTitle || h.description;
+      const actor = h.actor || "?";
+      let line = lang === "he" ? `✓ ${actor} — ${desc}` : `✓ ${actor} — ${desc}`;
+      if (h.isSubstitute && h.scheduledTo) {
+        line += lang === "he"
+          ? ` (היה מתוכנן ל${h.scheduledTo}, נחמד מצידו 💛)`
+          : ` (was scheduled for ${h.scheduledTo}, nice of them 💛)`;
+      }
+      lines.push(line);
+    }
+  }
+  for (const m of misses) {
+    const actor = m.actor || "?";
+    lines.push(lang === "he"
+      ? `🤔 ${actor} — ${m.description}: לא מצאתי משימה פתוחה`
+      : `🤔 ${actor} — ${m.description}: couldn't find an open task`);
+  }
+  if (lines.length === 0) {
+    return lang === "he"
+      ? "🤔 לא הבנתי איזה מטלות סומנו"
+      : "🤔 I couldn't figure out which tasks were marked";
+  }
+  return lines.join("\n");
+}
+
 // P2 #11 (2026-05-03 churn fix): apply household_rules to a newly-inserted
 // event. Looks for the most-specific matching rule (tag_reminder whose
 // tag_pattern is a substring of the event title — case-insensitive — beats
@@ -5191,6 +5416,155 @@ async function executeActions(
             .eq("household_id", householdId);
           if (error) throw error;
           summary.push(`Completed ${ids.length} tasks: ${ids.join(",")}`);
+          break;
+        }
+
+        case "complete_tasks_multi": {
+          // Netzer 2026-05-05. One inbound message reports several distinct
+          // (actor, task) completions ("היום אריק הוציא את ליאו ועופרי פינתה
+          // מדיח"). For each pair, resolveCompletionPair walks tasks → active
+          // nudge series → today's recurring children. Update the matched row
+          // in-place; substitute-actor cases get metadata.completed_by_substitute
+          // but no future-slot reshuffling (one-off favor semantics — explicit
+          // reassignment goes through override_rotation).
+          //
+          // Output: a single summary line `Multi-completion-result:<json>` that
+          // the caller (~line 12821) decodes to format the deterministic reply.
+          // No Sonnet call needed — replies are pre-shaped per-pair so the user
+          // can verify each annotation against what they reported.
+          const { completions } = action.data as { completions: CompletionPair[] };
+          if (!Array.isArray(completions) || completions.length === 0) {
+            summary.push("complete_tasks_multi: empty completions array — skipped");
+            break;
+          }
+          const results: MultiCompletionResultEntry[] = [];
+          const now = new Date().toISOString();
+          for (const pair of completions) {
+            const desc = (pair.task_description || "").trim();
+            const actor = (pair.completed_by_name || senderName || "").trim();
+            if (!desc) continue;
+            const hit = await resolveCompletionPair(householdId, pair);
+
+            if (hit.source === "task") {
+              const { error: updErr } = await supabase
+                .from("tasks")
+                .update({
+                  done: true,
+                  completed_by: actor || senderName || null,
+                  completed_at: now,
+                })
+                .eq("id", hit.rowId)
+                .eq("household_id", householdId);
+              if (updErr) {
+                console.warn(`[MultiCompletion] task update failed id=${hit.rowId}: ${updErr.message}`);
+                results.push({ actor, description: desc, source: "none" });
+                continue;
+              }
+              results.push({
+                actor,
+                description: desc,
+                source: "task",
+                matchedTitle: hit.matchedTitle,
+                scheduledTo: hit.scheduledTo || undefined,
+                isSubstitute: hit.isSubstitute,
+              });
+              summary.push(`Multi-completion-task: id=${hit.rowId} actor="${actor}" sub=${hit.isSubstitute}`);
+            } else if (hit.source === "nudge") {
+              // Read existing metadata so we don't overwrite ack-history details.
+              const { data: existingRow } = await supabase
+                .from("reminder_queue")
+                .select("metadata")
+                .eq("id", hit.rowId)
+                .single();
+              const existingMeta = ((existingRow as { metadata?: Record<string, unknown> } | null)?.metadata) || {};
+              const newMeta: Record<string, unknown> = {
+                ...existingMeta,
+                acked_at: now,
+                ack_reason: "multi_completion_report",
+                acked_by_name: actor || senderName || null,
+              };
+              if (hit.isSubstitute) {
+                newMeta.completed_by_substitute = true;
+                newMeta.actual_doer = actor;
+                newMeta.scheduled_target = hit.scheduledTo;
+              }
+              const { error: ackErr } = await supabase
+                .from("reminder_queue")
+                .update({ series_status: "acked", metadata: newMeta })
+                .eq("id", hit.rowId)
+                .in("series_status", ["active", "expired_deadline"]);
+              if (ackErr) {
+                console.warn(`[MultiCompletion] nudge ack failed id=${hit.rowId}: ${ackErr.message}`);
+                results.push({ actor, description: desc, source: "none" });
+                continue;
+              }
+              // Soft-cancel any unsent attempt children (mirrors ackNudgeSeries).
+              await supabase
+                .from("reminder_queue")
+                .update({
+                  sent: true,
+                  sent_at: now,
+                  metadata: {
+                    note: "cancelled_by_ack",
+                    cancelled_at: now,
+                    ack_series_id: hit.rowId,
+                    ack_reason: "multi_completion_report",
+                  },
+                })
+                .eq("nudge_series_id", hit.rowId)
+                .eq("sent", false);
+              results.push({
+                actor,
+                description: desc,
+                source: "nudge",
+                matchedTitle: hit.matchedTitle,
+                scheduledTo: hit.scheduledTo,
+                isSubstitute: hit.isSubstitute,
+              });
+              summary.push(`Multi-completion-nudge: id=${hit.rowId} actor="${actor}" sub=${hit.isSubstitute}`);
+            } else if (hit.source === "recurring") {
+              const { data: existingRow } = await supabase
+                .from("reminder_queue")
+                .select("metadata")
+                .eq("id", hit.rowId)
+                .single();
+              const existingMeta = ((existingRow as { metadata?: Record<string, unknown> } | null)?.metadata) || {};
+              const newMeta: Record<string, unknown> = {
+                ...existingMeta,
+                completed_at: now,
+                completed_by_name: actor || senderName || null,
+                note: "completed_by_report",
+              };
+              if (hit.isSubstitute) {
+                newMeta.completed_by_substitute = true;
+                newMeta.actual_doer = actor;
+                newMeta.scheduled_target = hit.scheduledTo;
+              }
+              const { error: recErr } = await supabase
+                .from("reminder_queue")
+                .update({ metadata: newMeta })
+                .eq("id", hit.rowId);
+              if (recErr) {
+                console.warn(`[MultiCompletion] recurring annotate failed id=${hit.rowId}: ${recErr.message}`);
+                results.push({ actor, description: desc, source: "none" });
+                continue;
+              }
+              results.push({
+                actor,
+                description: desc,
+                source: "recurring",
+                matchedTitle: hit.matchedTitle,
+                scheduledTo: hit.scheduledTo,
+                isSubstitute: hit.isSubstitute,
+              });
+              summary.push(`Multi-completion-recurring: id=${hit.rowId} actor="${actor}" sub=${hit.isSubstitute}`);
+            } else {
+              results.push({ actor, description: desc, source: "none" });
+              summary.push(`Multi-completion-no-match: actor="${actor}" desc="${desc}"`);
+            }
+          }
+          // Single packed line for the caller-side reply formatter.
+          summary.push(`Multi-completion-result:${JSON.stringify(results)}`);
           break;
         }
 
@@ -12731,6 +13105,10 @@ Deno.serve(async (req: Request) => {
         if (classification.intent === "complete_task") {
           // Lexical matcher (isSameTask) misses paraphrases — "פינה את המדיח" won't match
           // "להוציא את המדיח". Listing the open tasks lets the user pick instead of guess.
+          // 2026-05-05 (Netzer): also list active nudge series + today's recurring chore
+          // children so households whose chores live in reminder_queue (not tasks) don't
+          // get the misleading "אין כרגע מטלות פתוחות" — that line was the trust-breaking
+          // false negative on עינת's "היום אריק הוציא את ליאו ועופרי פינתה מדיח".
           const { data: openTasks } = await supabase
             .from("tasks")
             .select("title")
@@ -12738,11 +13116,49 @@ Deno.serve(async (req: Request) => {
             .eq("done", false)
             .order("created_at", { ascending: true })
             .limit(10);
-          const titles = (openTasks || []).map((t: { title: string }) => t.title).filter(Boolean);
-          if (titles.length === 0) {
+          const titles = ((openTasks || []) as Array<{ title: string }>).map((t) => t.title).filter(Boolean);
+
+          // Active nudge series (last 24h) — show "<target> — <task>" format.
+          const nudgeSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const { data: activeNudges } = await supabase
+            .from("reminder_queue")
+            .select("nudge_config")
+            .eq("household_id", householdId)
+            .in("series_status", ["active", "expired_deadline"])
+            .gte("created_at", nudgeSince)
+            .not("nudge_config", "is", null)
+            .limit(10);
+          const nudgeLines: string[] = [];
+          for (const n of activeNudges || []) {
+            const cfg = ((n as { nudge_config?: { target_name?: string; prompt_completion?: string } }).nudge_config) || {};
+            if (cfg.target_name && cfg.prompt_completion) {
+              nudgeLines.push(`${cfg.target_name} — ${cfg.prompt_completion}`);
+            }
+          }
+
+          // Today's recurring chore children (IL window).
+          const { startUtc: todayStart, endUtc: todayEnd } = ilTodayBounds();
+          const { data: todaysRecurring } = await supabase
+            .from("reminder_queue")
+            .select("message_text, metadata")
+            .eq("household_id", householdId)
+            .gte("send_at", todayStart)
+            .lt("send_at", todayEnd)
+            .limit(20);
+          const recurringLines: string[] = [];
+          for (const r of todaysRecurring || []) {
+            const meta = ((r as { metadata?: { materialized_from_recurring?: boolean; cancelled_at?: string; completed_at?: string } }).metadata) || {};
+            if (!meta.materialized_from_recurring) continue;
+            if (meta.cancelled_at || meta.completed_at) continue;
+            const text = ((r as { message_text?: string }).message_text || "").trim();
+            if (text) recurringLines.push(text);
+          }
+
+          const allItems = [...titles, ...nudgeLines, ...recurringLines];
+          if (allItems.length === 0) {
             clarifyMsg = "אין כרגע מטלות פתוחות 🤔 אפשר לפרט?";
           } else {
-            const list = titles.map((t: string) => `• ${t}`).join("\n");
+            const list = allItems.slice(0, 12).map((t: string) => `• ${t}`).join("\n");
             clarifyMsg = `רגע, על איזו מטלה מדובר? 🤔\nאלה המטלות הפתוחות:\n${list}`;
           }
         } else {
@@ -12810,6 +13226,28 @@ Deno.serve(async (req: Request) => {
 
     const { summary } = await executeActions(householdId, actions, message.senderName, message.senderPhone);
     console.log(`[Webhook] Haiku executed ${summary.length} actions:`, summary);
+
+    // 10b. Multi-completion (Netzer 2026-05-05): if the executor produced a
+    // Multi-completion-result line, the reply is fully deterministic from the
+    // resolver output. Skip Sonnet entirely so the user's verification is
+    // grounded in actual DB updates (no hallucinated extra acks). Mirrors the
+    // clear_list short-circuit pattern below.
+    const multiCompletionLine = summary.find((s) => s.startsWith("Multi-completion-result:"));
+    if (multiCompletionLine) {
+      let entries: MultiCompletionResultEntry[] = [];
+      try {
+        entries = JSON.parse(multiCompletionLine.slice("Multi-completion-result:".length));
+      } catch (parseErr) {
+        console.warn(`[Webhook] failed to parse Multi-completion-result: ${(parseErr as Error).message}`);
+      }
+      const lang: "he" | "en" = config.language === "en" ? "en" : "he";
+      const replyText = formatMultiCompletionReply(entries, lang);
+      await sendAndLog(provider, { groupId: message.groupId, text: replyText }, {
+        householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "multi_completion_ack"
+      });
+      await logMessage(message, "haiku_actionable", householdId, classification);
+      return new Response("OK", { status: 200 });
+    }
 
     // 11. Check for dedup outcomes
     const allDeduped = summary.length > 0 && summary.every(
@@ -15552,7 +15990,13 @@ function haikuEntitiesToActions(classification: ClassificationOutput) {
       // ("הושלם" quoting a task-list → all_in_quote; "המשימות הושלמו" standalone → all_open).
       // executeActions resolves this against the current open-tasks list since we don't
       // have task_ids from quoted text alone.
-      if (e.completion_scope === "all_open" || e.completion_scope === "all_in_quote") {
+      // 2026-05-05 (Netzer): completion_scope="multiple" + completions[] for messages
+      // reporting several (actor, task) pairs in one sentence. Executor's
+      // complete_tasks_multi case resolves each pair against tasks → active nudge
+      // series → today's recurring children, with substitute-actor annotation.
+      if (e.completion_scope === "multiple" && Array.isArray(e.completions) && e.completions.length > 0) {
+        actions.push({ type: "complete_tasks_multi", data: { completions: e.completions } });
+      } else if (e.completion_scope === "all_open" || e.completion_scope === "all_in_quote") {
         actions.push({ type: "complete_tasks_all_open", data: {} });
       } else if (e.task_id) {
         actions.push({ type: "complete_task", data: { id: e.task_id } });
