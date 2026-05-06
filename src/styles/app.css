@@ -202,7 +202,11 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .week-header{padding:2px 2px 12px;display:flex;align-items:center;justify-content:space-between;}
 .week-title{font-family:'Nunito',sans-serif;font-size:22px;font-weight:400;color:var(--dark);}
 .week-subtitle{font-size:12px;color:var(--muted);font-weight:400;}
-/* Mobile: vertical agenda (one row per day, full readable width) */
+/* Vertical agenda — one row per day, full readable width.
+   Note: app shell is `max-width:480px` at all viewports (mobile-first design),
+   so a desktop @media breakpoint that switches to 7-column grid would still be
+   constrained to ~68px per column → letter-per-line. Agenda layout works at
+   every screen size because the container is always mobile-shaped. */
 .week-agenda{display:flex;flex-direction:column;gap:6px;margin-bottom:4px;}
 .week-day-row{display:flex;align-items:stretch;gap:12px;padding:8px 10px;border-radius:12px;background:var(--white);border:1px solid var(--border);box-shadow:var(--sh);animation:rowIn 0.2s ease;}
 .week-day-row.today{background:var(--accent-soft);border-color:var(--accent-mid);}
@@ -232,21 +236,6 @@ html,body{height:100%;background:var(--cream);overflow:hidden;}
 .week-task-sync-btn:disabled{cursor:default;}
 .week-sync-spinner{display:inline-block;width:12px;height:12px;border:1.5px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:weekSyncSpin 0.7s linear infinite;}
 @keyframes weekSyncSpin{to{transform:rotate(360deg);}}
-
-/* Desktop: restore 7-column grid (more horizontal room) */
-@media (min-width:720px){
-  .week-agenda{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
-  .week-day-row{flex-direction:column;gap:4px;padding:8px 6px;}
-  .week-day-row.empty{opacity:0.5;}
-  .week-day-head{flex:0 0 auto;flex-direction:column;gap:2px;padding-top:0;border-bottom:1.5px solid var(--border);padding-bottom:6px;margin-bottom:2px;}
-  .week-day-row.today .week-day-head{border-bottom-color:var(--accent-mid);}
-  .week-day-items{gap:4px;}
-  .week-day-empty{display:none;}
-  .week-day-row .week-task-chip{padding:6px 7px;}
-  .week-task-name{font-size:12px;-webkit-line-clamp:3;}
-  .week-task-who{font-size:10.5px;}
-  .week-task-time{font-size:10.5px;}
-}
 .week-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:40px 24px;text-align:center;}
 .week-empty-icon{font-size:36px;opacity:0.3;}
 .week-empty-text{font-size:13.5px;color:var(--muted);font-weight:300;line-height:1.65;max-width:210px;}
