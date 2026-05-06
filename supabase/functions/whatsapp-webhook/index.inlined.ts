@@ -2500,7 +2500,8 @@ REMINDERS: When intent is add_reminder:
   "בעוד שעה" → now + 1 hour
   "בעוד 20 דקות" → now + 20 minutes
   "ביום חמישי ב-10" → next Thursday 10:00
-  "בערב" → 19:00, "בצהריים" → 12:00, "בבוקר" → 08:00
+  "בערב" alone (no hour given) → 19:00. "בצהריים" → 12:00. "בבוקר" alone → 08:00.
+  "X בערב" with an EXPLICIT hour — use the hour the user named, NEVER a generic "evening" default. For X=1..11 it is (X+12):00. EXAMPLES (locked — Sheli has historically drifted to 20:00 for any "evening" reminder, which is WRONG): "5 בערב" → 17:00, "6 בערב" → 18:00, "7 בערב" → 19:00, "8 בערב" → 20:00, "9 בערב" → 21:00, "10 בערב" → 22:00. Same in clarification context — when YOU asked "באיזו שעה בערב?" and the user replied "ב6 בערב", the answer is 18:00, NEVER 20:00. The visible reply MUST repeat the explicit hour the user named (e.g. "אזכיר היום ב-18:00 ✓") so a wrong guess is spottable.
 - "לפני X" / "before X" is NOT the same as "ב-X" / "at X". It means fire the reminder WITH BUFFER BEFORE the deadline, not AT the deadline:
   "לפני השעה 16" → 15:00 (1 hour before). "לפני הצהריים" → 11:00. "לפני שבת" → Friday afternoon.
   Default buffer: 1 hour earlier for hour-specific deadlines. Honor the user's word choice — "ב-X" and "לפני X" mean different things.
@@ -6372,6 +6373,7 @@ ADD:
   - Time only, no day qualifier ("ב-5", "ב-8 בערב", "בצהריים") → TODAY at that time if it is still at least 10 minutes in the future in Israel time. Only use tomorrow if the time has already passed today.
   - "בעוד X דקות/שעות" → now + X.
   - "מחר" explicitly → tomorrow. "היום" explicitly → today.
+  EXPLICIT-HOUR + "בערב" RULE (Dror 2026-05-06, the "ב6 בערב → 20:00" bug): when the user names a specific hour with "בערב", USE THAT HOUR — never a generic 19:00/20:00 evening default. For X=1..11 the time is (X+12):00. Locked examples: "5 בערב"=17:00, "6 בערב"=18:00, "7 בערב"=19:00, "8 בערב"=20:00, "9 בערב"=21:00, "10 בערב"=22:00. This applies INSIDE clarification flows too — if you asked "באיזו שעה בערב?" and the user replied "ב6 בערב", send_at must be 18:00, your visible reply must say "אזכיר ב-18:00", and the time field must be "18:00". 20:00 in that flow is the bug.
   - LATE-NIGHT TRAP (2026-05-04): when IL time is 00:00-04:00, "בבוקר" / "ב-X בבוקר" means TODAY's morning hours that are STILL AHEAD — NOT next-day morning. The user is awake NOW and today's morning has not happened yet. At 00:04 IL "תזכירי לי בשמונה בבוקר" → today 08:00 (~8 hours future), NOT tomorrow 08:00 (~32 hours). NEVER schedule a "בבוקר" / "morning" reminder for the next-next-day morning when today's morning is still ahead.
   The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - recurring_reminder: {"type":"recurring_reminder","text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}
