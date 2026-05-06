@@ -2608,6 +2608,232 @@ class TestReminderDedup(unittest.TestCase):
         )
 
 
+# ─── Reminder Cancellation regression (2026-05-06) ───
+# Guards against the silent-PostgREST-error bug that broke recurring-reminder
+# cancel for ~2 weeks. Root cause: executeCrudAction's SELECT listed
+# `scheduled_for` (which only `events` has) for `reminder_queue` queries.
+# PostgREST returned column-not-exist errors; supabase-js swallowed them as
+# `{data: null}`; every matcher step fell through; cascade never fired.
+# Sheli replied "ביטלתי ✓" (or honesty-fallback in v297+) but the recurring
+# parent stayed alive and kept materializing children daily.
+#
+# Run: python -m unittest tests.test_webhook.TestReminderCancellation -v
+# Prereq: deployed Edge Function with reminderColumns using `send_at`.
+
+CANCEL_TEST_HOUSEHOLD_ID = "hh_cancel_regression"
+CANCEL_TEST_PHONE = "972500099001"
+CANCEL_TEST_DM_ID = f"{CANCEL_TEST_PHONE}@s.whatsapp.net"
+
+
+def _cancel_reset():
+    for table in ["reminder_queue", "tasks", "shopping_items", "events", "whatsapp_messages"]:
+        try:
+            sb_delete(table, {"household_id": f"eq.{CANCEL_TEST_HOUSEHOLD_ID}"})
+        except Exception:
+            pass
+    try:
+        sb_delete("whatsapp_messages", {"group_id": f"eq.{CANCEL_TEST_PHONE}"})
+    except Exception:
+        pass
+    for table, params in [
+        ("whatsapp_member_mapping", {"household_id": f"eq.{CANCEL_TEST_HOUSEHOLD_ID}"}),
+        ("household_members", {"household_id": f"eq.{CANCEL_TEST_HOUSEHOLD_ID}"}),
+        ("onboarding_conversations", {"phone": f"eq.{CANCEL_TEST_PHONE}"}),
+        ("households_v2", {"id": f"eq.{CANCEL_TEST_HOUSEHOLD_ID}"}),
+    ]:
+        try:
+            sb_delete(table, params)
+        except Exception:
+            pass
+
+
+def _cancel_setup_household():
+    """Create household + member + mapping + onboarding row marked as established
+    1:1 user. Mirrors the live state of any user who has been chatting with
+    Sheli for a while (state='personal')."""
+    sb_post("households_v2", {"id": CANCEL_TEST_HOUSEHOLD_ID, "name": "Cancel Regression", "lang": "he"})
+    sb_post("household_members", {
+        "household_id": CANCEL_TEST_HOUSEHOLD_ID, "display_name": "בודק", "role": "founder", "gender": "male",
+    })
+    sb_post("whatsapp_member_mapping", {
+        "household_id": CANCEL_TEST_HOUSEHOLD_ID, "phone_number": CANCEL_TEST_PHONE, "member_name": "בודק",
+    })
+    sb_post("onboarding_conversations", {
+        "phone": CANCEL_TEST_PHONE, "household_id": CANCEL_TEST_HOUSEHOLD_ID,
+        "state": "personal", "message_count": 10,
+        "context": {"name": "בודק", "gender": "male", "name_spelling_asked": True},
+    })
+
+
+def _cancel_seed_recurring(text, time_hhmm, days=None):
+    """Insert a recurring parent + 2 future unsent children + 1 unrelated
+    reminder. Returns (parent_id, child_ids, unrelated_id)."""
+    if days is None:
+        days = [0, 1, 2, 3, 4, 5, 6]
+    parent_id = str(uuid.uuid4())
+    child1_id = str(uuid.uuid4())
+    child2_id = str(uuid.uuid4())
+    unrelated_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
+    day_after = (datetime.now(timezone.utc) + timedelta(days=2)).date().isoformat()
+    six_h_iso = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+    common = {
+        "household_id": CANCEL_TEST_HOUSEHOLD_ID,
+        "group_id": CANCEL_TEST_DM_ID,
+        "reminder_type": "user",
+        "delivery_mode": "dm",
+        "recipient_phones": [CANCEL_TEST_PHONE],
+        "created_by_phone": CANCEL_TEST_PHONE,
+        "created_by_name": "בודק",
+    }
+    sb_post("reminder_queue", {
+        **common, "id": parent_id, "message_text": text,
+        "send_at": now_iso, "sent": True, "sent_at": now_iso,
+        "recurrence": {"days": days, "time": time_hhmm},
+        "metadata": {"recurring_parent": True, "source": "regression_test"},
+    })
+    for cid, day in [(child1_id, tomorrow), (child2_id, day_after)]:
+        sb_post("reminder_queue", {
+            **common, "id": cid, "message_text": text,
+            "send_at": f"{day}T11:00:00+00:00",  # placeholder — drain doesn't fire in tests
+            "sent": False,
+            "recurrence_parent_id": parent_id,
+            "metadata": {"materialized_from": "parent", "source": "regression_test"},
+        })
+    sb_post("reminder_queue", {
+        **common, "id": unrelated_id, "message_text": "לקנות חלב",
+        "send_at": six_h_iso, "sent": False,
+        "metadata": {"source": "regression_test", "label": "unrelated_should_survive"},
+    })
+    return parent_id, [child1_id, child2_id], unrelated_id
+
+
+def _cancel_send_1on1(text):
+    """Send a 1:1 webhook (chat_id ends in @s.whatsapp.net so handleDirectMessage
+    routes via state='personal' → handlePersonalChannelMessage)."""
+    msg_id = generate_msg_id("cancel_test")
+    send_webhook(text, msg_id=msg_id, sender_phone=CANCEL_TEST_PHONE, group_id=CANCEL_TEST_DM_ID)
+    time.sleep(13)  # Sonnet + executor + DB writes
+    return msg_id
+
+
+def _cancel_fetch_state(parent_id):
+    """Return (parent_recurrence_alive, child_count_pending, unrelated_alive)."""
+    rows = sb_get("reminder_queue", {
+        "household_id": f"eq.{CANCEL_TEST_HOUSEHOLD_ID}",
+        "select": "id,message_text,recurrence,recurrence_parent_id,sent,metadata",
+    })
+    parent_alive = False
+    pending_children = 0
+    unrelated_alive = False
+    for r in rows or []:
+        if r["id"] == parent_id:
+            parent_alive = r.get("recurrence") is not None
+        elif r.get("recurrence_parent_id") == parent_id:
+            if not r.get("sent"):
+                pending_children += 1
+        elif r.get("message_text") == "לקנות חלב":
+            unrelated_alive = not r.get("sent")
+    return parent_alive, pending_children, unrelated_alive
+
+
+@unittest.skipUnless(SUPABASE_URL and SUPABASE_KEY, "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
+class TestReminderCancellation(unittest.TestCase):
+    """End-to-end tests for the recurring-cancel cascade.
+    Requires deployed Edge Function with `reminderColumns = "id, send_at, ..."` (NOT scheduled_for).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        _cancel_reset()
+        _cancel_setup_household()
+
+    @classmethod
+    def tearDownClass(cls):
+        _cancel_reset()
+
+    def setUp(self):
+        # Each test gets a fresh reminder_queue + clean conversation history
+        try:
+            sb_delete("reminder_queue", {"household_id": f"eq.{CANCEL_TEST_HOUSEHOLD_ID}"})
+            sb_delete("whatsapp_messages", {"group_id": f"eq.{CANCEL_TEST_PHONE}"})
+            sb_delete("whatsapp_messages", {"group_id": f"eq.{CANCEL_TEST_DM_ID}"})
+        except Exception:
+            pass
+
+    def test_01_recurring_cascade_clean_text(self):
+        """Recurring parent + 2 children. User: "תבטלי את התזכורת היומית לבדוק משהו".
+        Expected: parent.recurrence=NULL, both children sent=true, unrelated untouched.
+        Regression for: silent-PostgREST scheduled_for column bug (2026-05-06)."""
+        parent_id, _, _ = _cancel_seed_recurring("לבדוק משהו", "14:00")
+        _cancel_send_1on1("תבטלי את התזכורת היומית לבדוק משהו")
+        parent_alive, pending_children, unrelated_alive = _cancel_fetch_state(parent_id)
+        self.assertFalse(parent_alive, "parent.recurrence must be NULL after cancel")
+        self.assertEqual(pending_children, 0, "all unsent children must be soft-cancelled")
+        self.assertTrue(unrelated_alive, "unrelated reminder must NOT be touched")
+
+    def test_02_recurring_cascade_with_prefix_in_search(self):
+        """Same scenario but Sonnet might emit text WITH 'תזכורת' prefix.
+        The matcher's prefix-strip step should normalize and still match."""
+        parent_id, _, _ = _cancel_seed_recurring("ויטמין", "08:00")
+        _cancel_send_1on1("תפסיקי לתזכר אותי על ויטמין")
+        parent_alive, pending_children, _ = _cancel_fetch_state(parent_id)
+        self.assertFalse(parent_alive, "parent.recurrence must be NULL after cancel")
+        self.assertEqual(pending_children, 0, "all unsent children must be soft-cancelled")
+
+    def test_03_cancel_unknown_does_not_lie(self):
+        """Send a cancel for a reminder that DOESN'T exist. Bot must NOT reply
+        with a phantom-success "ביטלתי ✓". Either ask for clarification OR
+        emit the honesty-fallback rewrite ("לא הצלחתי למצוא")."""
+        # Seed an unrelated reminder so the household exists with content.
+        _cancel_seed_recurring("ויטמין", "08:00")
+        _cancel_send_1on1("תבטלי את התזכורת לדבר שלא קיים בכלל")
+        # Find bot replies in this 1:1 within last 30s.
+        rows = sb_get("whatsapp_messages", {
+            "group_id": f"eq.{CANCEL_TEST_PHONE}",
+            "sender_phone": f"eq.{BOT_PHONE}",
+            "select": "message_text,classification",
+            "order": "created_at.desc", "limit": "3",
+        }) or []
+        replies = [r.get("message_text") or "" for r in rows]
+        self.assertTrue(replies, "expected at least one bot reply")
+        # No reply should be a confident "ביטלתי ✓" without honesty markers.
+        # Acceptable replies: ask for clarification, or honesty-fallback.
+        text = replies[0]
+        confident_lie = (
+            ("ביטלתי" in text or "מחקתי" in text or "בוטל" in text)
+            and not any(kw in text for kw in ["לא הצלחתי", "לא מצאתי", "איזו", "תוכלי לפרט", "תוכל לפרט"])
+        )
+        self.assertFalse(
+            confident_lie,
+            f"Bot must NOT confidently claim cancellation when nothing matched. reply={text!r}",
+        )
+
+    def test_04_one_shot_cancel(self):
+        """One-shot reminder cancel. Soft-cancel only that row; recurring
+        cascade branch should NOT fire (no parent). Regression for the
+        general remove_reminder path."""
+        # Seed: insert a single one-shot reminder (no recurrence, no parent_id)
+        rid = str(uuid.uuid4())
+        future = (datetime.now(timezone.utc) + timedelta(hours=8)).isoformat()
+        sb_post("reminder_queue", {
+            "id": rid, "household_id": CANCEL_TEST_HOUSEHOLD_ID,
+            "group_id": CANCEL_TEST_DM_ID, "message_text": "להתקשר לרופא",
+            "send_at": future, "sent": False,
+            "reminder_type": "user", "delivery_mode": "dm",
+            "recipient_phones": [CANCEL_TEST_PHONE],
+            "created_by_phone": CANCEL_TEST_PHONE, "created_by_name": "בודק",
+            "metadata": {"source": "regression_test"},
+        })
+        _cancel_send_1on1("בטלי את התזכורת להתקשר לרופא")
+        rows = sb_get("reminder_queue", {
+            "id": f"eq.{rid}", "select": "sent,metadata",
+        }) or []
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["sent"], "one-shot must be soft-cancelled")
+
+
 # ─── Task 1: executeCrudAction helper regression test ───
 # Baseline: the 1:1 update_shopping path (which drove the extraction) must not
 # regress. Test is skipped until Task 7 deploy — runs in the Task 8 smoke sweep.
