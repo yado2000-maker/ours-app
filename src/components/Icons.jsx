@@ -817,3 +817,59 @@ export function HeartIcon({ size = 16, filled = false }) {
     </svg>
   );
 }
+
+/** Calendar with sync arrows — for Google Calendar sync action.
+ *  When `synced=true`, swaps the sync glyph for a checkmark.
+ *  Stroke-based, currentColor — matches the Sheli icon system. */
+export function CalendarSyncIcon({ size = 14, synced = false }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Calendar frame */}
+      <rect
+        x="2"
+        y="3"
+        width="12"
+        height="11"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Date tabs (binder pins) */}
+      <path d="M5.5 1.5V4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M10.5 1.5V4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      {/* Header divider */}
+      <path d="M2 6.2H14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+
+      {synced ? (
+        /* Checkmark — confirmed/synced state */
+        <path
+          d="M5.4 10.6L7.2 12.3L10.7 8.6"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : (
+        /* Refresh / sync arrow — open arc + arrowhead */
+        <>
+          <path
+            d="M10.6 9.6A2.5 2.5 0 1 0 10.9 12.1"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M10.6 8.1V9.7H9.1"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      )}
+    </svg>
+  );
+}

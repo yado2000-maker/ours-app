@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { EmptyCalendarIcon, ChevronLeftIcon, ChevronRightIcon, DeleteIcon } from "./Icons.jsx";
+import { EmptyCalendarIcon, ChevronLeftIcon, ChevronRightIcon, DeleteIcon, CalendarSyncIcon } from "./Icons.jsx";
 import { syncEventToGoogleCalendar } from "../lib/google-calendar.js";
 
 export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEvent, googleAccessToken }) {
@@ -147,12 +147,12 @@ export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEv
               {lang === "he" ? "\u05D4\u05E9\u05D1\u05D5\u05E2" : "This week"}
             </button>
           )}
-          <button className="week-nav-btn" onClick={() => setWeekOffset(w => w - 1)}>
-            <ChevronLeftIcon size={16} />
+          <button className="week-nav-btn" onClick={() => setWeekOffset(w => w - 1)} aria-label={lang === "he" ? "השבוע הקודם" : "Previous week"}>
+            {lang === "he" ? <ChevronRightIcon size={16} /> : <ChevronLeftIcon size={16} />}
           </button>
           <div style={{fontSize:11.5,color:"var(--muted)",minWidth:70,textAlign:"center"}}>{weekRange}</div>
-          <button className="week-nav-btn" onClick={() => setWeekOffset(w => w + 1)}>
-            <ChevronRightIcon size={16} />
+          <button className="week-nav-btn" onClick={() => setWeekOffset(w => w + 1)} aria-label={lang === "he" ? "השבוע הבא" : "Next week"}>
+            {lang === "he" ? <ChevronLeftIcon size={16} /> : <ChevronRightIcon size={16} />}
           </button>
         </div>
       </div>
@@ -162,56 +162,72 @@ export default function WeekView({ tasks, events, rotations, t, lang, onDeleteEv
           <p className="week-empty-text">{t.weekEmpty}</p>
         </div>
       ) : (
-        <div className="week-grid">
-          {days.map((day, i) => (
-            <div key={i} className="week-col">
-              <div className={`week-day-label ${isToday(day) ? "today" : ""}`}>{t.weekDays[i]}</div>
-              <div className={`week-date ${isToday(day) ? "today" : ""}`}>{day.getDate()}</div>
-              {(byDay[i] || []).map(item => (
-                <div key={item.id} className={`week-task-chip ${item._type === "rotation" ? "scheduled" : item._type === "event" ? "scheduled" : ""}`}>
-                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:3}}>
-                    <div className="week-task-name">{item.title}</div>
-                    {item._type === "event" && (
-                      <div style={{display:"flex",alignItems:"flex-start",gap:6,flexShrink:0}}>
-                        <button onClick={() => handleSync(item)}
-                          disabled={syncingId === item.id || !!syncedIds[item.id]}
-                          title={syncedIds[item.id] ? t.gcalSynced : t.syncToGcal}
-                          style={{background:"none",border:"none",cursor:syncedIds[item.id]?"default":"pointer",color:syncedIds[item.id]?"var(--accent)":"var(--muted)",fontSize:12,lineHeight:1,padding:0,opacity:syncingId===item.id?0.4:0.8,marginTop:1}}>
-                          {syncedIds[item.id] ? "✓📅" : syncingId === item.id ? "…" : "📅"}
-                        </button>
-                        <button onClick={() => onDeleteEvent(item.id)}
-                          style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:12,lineHeight:1,padding:0,opacity:0.6,marginTop:1}}
-                          onMouseOver={e=>e.currentTarget.style.opacity=1}
-                          onMouseOut={e=>e.currentTarget.style.opacity=0.6}>
-                          <DeleteIcon size={12} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {item._type === "rotation" ? (
-                    <>
-                      {item.assignedTo && <div className="week-task-who">{item.assignedTo}</div>}
-                      <div className="week-task-time" style={{color: "var(--accent)", fontSize: 10, opacity: 0.8}}>
-                        {item._rotationType === "order" ? "סדר" : "תורנות"}
-                      </div>
-                    </>
-                  ) : item._type === "event" ? (
-                    <>
-                      {item.assignedTo && <div className="week-task-who">{item.assignedTo}</div>}
-                      <div className="week-task-time" style={{color:"var(--accent)"}}>
-                        {fmtTime(item.scheduledFor)}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {item.completedBy && <div className="week-task-who">{item.completedBy}</div>}
-                      <div className="week-task-time">{fmtTime(item.completedAt)}</div>
-                    </>
-                  )}
+        <div className="week-agenda">
+          {days.map((day, i) => {
+            const dayItems = byDay[i] || [];
+            const todayFlag = isToday(day);
+            return (
+              <div key={i} className={`week-day-row ${todayFlag ? "today" : ""} ${dayItems.length === 0 ? "empty" : ""}`}>
+                <div className="week-day-head">
+                  <div className={`week-day-name ${todayFlag ? "today" : ""}`}>{t.weekDays[i]}</div>
+                  <div className={`week-day-num ${todayFlag ? "today" : ""}`}>{day.getDate()}</div>
+                  {todayFlag && <div className="week-day-badge">{lang === "he" ? "היום" : "Today"}</div>}
                 </div>
-              ))}
-            </div>
-          ))}
+                <div className="week-day-items">
+                  {dayItems.length === 0 ? (
+                    <div className="week-day-empty" aria-hidden="true">—</div>
+                  ) : dayItems.map(item => (
+                    <div key={item.id} className={`week-task-chip ${item._type === "rotation" ? "scheduled" : item._type === "event" ? "scheduled" : ""}`}>
+                      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:6}}>
+                        <div className="week-task-name">{item.title}</div>
+                        {item._type === "event" && (
+                          <div style={{display:"flex",alignItems:"flex-start",gap:6,flexShrink:0}}>
+                            <button onClick={() => handleSync(item)}
+                              disabled={syncingId === item.id || !!syncedIds[item.id]}
+                              title={syncedIds[item.id] ? t.gcalSynced : t.syncToGcal}
+                              aria-label={syncedIds[item.id] ? t.gcalSynced : t.syncToGcal}
+                              className={`week-task-sync-btn ${syncedIds[item.id] ? "synced" : ""} ${syncingId === item.id ? "syncing" : ""}`}>
+                              {syncingId === item.id ? (
+                                <span className="week-sync-spinner" aria-hidden="true" />
+                              ) : (
+                                <CalendarSyncIcon size={14} synced={!!syncedIds[item.id]} />
+                              )}
+                            </button>
+                            <button onClick={() => onDeleteEvent(item.id)}
+                              style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:12,lineHeight:1,padding:0,opacity:0.6,marginTop:1}}
+                              onMouseOver={e=>e.currentTarget.style.opacity=1}
+                              onMouseOut={e=>e.currentTarget.style.opacity=0.6}>
+                              <DeleteIcon size={12} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {item._type === "rotation" ? (
+                        <div className="week-task-meta">
+                          {item.assignedTo && <span className="week-task-who">{item.assignedTo}</span>}
+                          <span className="week-task-time" style={{color: "var(--accent)", opacity: 0.8}}>
+                            {item._rotationType === "order" ? "סדר" : "תורנות"}
+                          </span>
+                        </div>
+                      ) : item._type === "event" ? (
+                        <div className="week-task-meta">
+                          {item.assignedTo && <span className="week-task-who">{item.assignedTo}</span>}
+                          <span className="week-task-time" style={{color:"var(--accent)"}}>
+                            {fmtTime(item.scheduledFor)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="week-task-meta">
+                          {item.completedBy && <span className="week-task-who">{item.completedBy}</span>}
+                          <span className="week-task-time">{fmtTime(item.completedAt)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
