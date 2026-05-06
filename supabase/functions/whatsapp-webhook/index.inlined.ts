@@ -10876,6 +10876,94 @@ async function claimAndProcessBatch(
     .eq("batch_status", "processing");
 }
 
+// ─── Shopping-List Shape Detector (post-Sonnet rescue) ───
+// 2026-05-06 שני / "קניות באושר" incident: Sonnet escalator misclassified an
+// 18-item Hebrew grocery list as social continuation because the bot had just
+// replied to a SIMILAR list 3 min earlier with the truncation template
+// ("הרשימה ארוכה מדי לווטסאפ... הנה 7 הראשונים: ..."). The conversation-context
+// anchoring was strong enough to override Sonnet's own "newline list = shopping"
+// rule. The dropped 18 items never landed in shopping_items.
+//
+// This detector is a STRUCTURAL safety net: when Sonnet says "social" but the
+// message looks like a Hebrew grocery list (≥5 short Hebrew lines, no numbering,
+// no headings, no URLs, terse), we override and execute add_shopping. The
+// detector intentionally REJECTS:
+//   - numbered/bulleted lists (legal doc checklists, instructions)
+//   - heading-style messages (lines ending with ':')
+//   - URL-bearing messages (shared links, broadcasts)
+//   - mostly-Latin lines (English prose, code)
+//   - prose with avg line length > 25 chars
+//   - non-Hebrew-dominant messages
+// Validated against 3 real `sonnet_escalated_social` multi-line rows in the
+// last 14 days: matches the 1 grocery-list bug, rejects the 2 legit social
+// cases (legal-document numbered list + Sheli intro template echo).
+function looksLikeGroceryListShape(text: string): boolean {
+  if (!text) return false;
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 5) return false;
+  // Numbered/bulleted prefixes — legal docs, instruction lists, recipes
+  const NUMBERED_OR_BULLETED = /^(?:[*•·▪◦\-–—]|\(?\d+[\)\.])\s/;
+  if (lines.some((l) => NUMBERED_OR_BULLETED.test(l))) return false;
+  // Heading-style: any line ending with a colon
+  if (lines.some((l) => /:\s*$/.test(l))) return false;
+  // URL or domain anywhere
+  if (lines.some((l) => /(?:https?:\/\/|www\.|\.(?:com|co\.il|ai|net|org)\b)/i.test(l))) return false;
+  // Mostly-Latin lines longer than 15 chars (English prose, code, instructions)
+  const mostlyLatin = (l: string): boolean => {
+    if (l.length < 15) return false;
+    const latin = (l.match(/[A-Za-z]/g) || []).length;
+    return latin / l.length > 0.6;
+  };
+  if (lines.some(mostlyLatin)) return false;
+  // Avg line length must be terse (real grocery items are short)
+  const avgLen = lines.reduce((s, l) => s + l.length, 0) / lines.length;
+  if (avgLen > 25) return false;
+  // ≥80% of lines must be ≤30 chars (not prose)
+  const shortLines = lines.filter((l) => l.length <= 30).length;
+  if (shortLines / lines.length < 0.8) return false;
+  // ≥70% of lines must contain at least one Hebrew character (U+0590..U+05FF)
+  const hebLines = lines.filter((l) => /[֐-׿]/.test(l)).length;
+  if (hebLines / lines.length < 0.7) return false;
+  return true;
+}
+
+function parseGroceryListLines(text: string): Array<{ name: string }> {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && l.length <= 80)
+    .map((l) => ({ name: l }));
+}
+
+// Builds the same multi-part reply that claimAndProcessBatch uses (newItems +
+// updatedItems + existsItems). Reused by the shopping-list rescue path so the
+// user-visible reply pattern matches a normal batch shopping confirmation.
+function buildShoppingBatchReply(summary: string[]): { reply: string; newCount: number } {
+  const newItems = summary.filter((s) => s.startsWith("Shopping:"));
+  const updatedItems = summary.filter((s) => s.includes("Shopping-updated:"));
+  const existsItems = summary.filter((s) => s.includes("Shopping-exists:"));
+  const replyParts: string[] = [];
+  if (newItems.length > 0) {
+    const names = newItems.map((s) => s.match(/"(.+?)"/)?.[1]).filter(Boolean) as string[];
+    const nameList = names.length <= 2
+      ? names.join(" ו")
+      : names.slice(0, -1).join(", ") + " ו" + names[names.length - 1];
+    replyParts.push(`🛒 הוספתי ${nameList} לרשימה`);
+  }
+  if (updatedItems.length > 0) {
+    for (const s of updatedItems) {
+      const m = s.match(/"(.+?)" → qty (.+)/);
+      if (m) replyParts.push(`עדכנתי ${m[1]} ל-${m[2]}`);
+    }
+  }
+  if (existsItems.length > 0) {
+    const names = existsItems.map((s) => s.match(/"(.+?)"/)?.[1]).filter(Boolean) as string[];
+    replyParts.push(`${names.join(", ")} כבר ברשימה 👍`);
+  }
+  const reply = replyParts.join("\n") || "🛒 עדכנתי את הרשימה";
+  return { reply, newCount: newItems.length };
+}
+
 // ─── Quick Undo Patterns (pre-classifier, no Haiku call needed) ───
 // Layer 1: Keyword undo — these words/phrases always mean "undo last action".
 // Includes META-level phrases ("לא צריך להוסיף מטלה") which target the action
@@ -12865,6 +12953,30 @@ Deno.serve(async (req: Request) => {
       const sonnetResult = await classifyMessages(householdId, sonnetMessages);
 
       if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
+        // SHOPPING-LIST RESCUE — same structural override as the medium-conf
+        // escalation path below. Mirrored here so onboarding-mode groups don't
+        // silently drop grocery lists when Sonnet anchors on its own recent reply.
+        if (looksLikeGroceryListShape(message.text)) {
+          console.warn(
+            `[ShoppingListRescue] Onboarding-path: Sonnet said social but message has grocery-list shape — overriding to add_shopping. ` +
+            `msgId=${message.messageId} household=${householdId} senderPhone=${message.senderPhone} lineCount=${message.text.split(/\r?\n/).filter((l) => l.trim()).length}`
+          );
+          if (!usageOk) {
+            await sendUpgradePrompt(message.groupId, householdId, config.language);
+            await logMessage(message, "usage_limit_reached", householdId, classification);
+            return new Response("OK", { status: 200 });
+          }
+          const rescueItems = parseGroceryListLines(message.text);
+          const rescueActions = [{ type: "add_shopping" as const, data: { items: rescueItems } }];
+          const { summary: rescueSummary } = await executeActions(householdId, rescueActions, message.senderName, message.senderPhone);
+          const { reply: rescueReply, newCount } = buildShoppingBatchReply(rescueSummary);
+          if (newCount > 0) await incrementUsage(householdId);
+          await sendAndLog(provider, { groupId: message.groupId, text: rescueReply }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "shopping_list_rescue_reply"
+          });
+          await logMessage(message, "sonnet_escalated_shopping_rescue", householdId, classification);
+          return new Response("OK", { status: 200 });
+        }
         if (directAddress) {
           const replyCtx = await buildReplyCtx(householdId, "group");
           let { reply } = await generateReply(classification, message.senderName, replyCtx);
@@ -13084,6 +13196,35 @@ Deno.serve(async (req: Request) => {
       const sonnetResult = await classifyMessages(householdId, sonnetMessages);
 
       if (!sonnetResult.respond || sonnetResult.actions.length === 0) {
+        // SHOPPING-LIST RESCUE (2026-05-06, "קניות באושר" שני incident)
+        // Sonnet's escalator can be fooled by recent conversation context: when
+        // the bot just sent a list-truncation reply, a new multi-item grocery
+        // list reads to Sonnet as the user "echoing" the bot rather than
+        // dictating fresh items. Structural shape detector overrides the social
+        // verdict when the message is clearly a Hebrew grocery list. Detector
+        // intentionally rejects numbered/bulleted lists, headings, URL-bearing
+        // messages, and prose — see looksLikeGroceryListShape().
+        if (looksLikeGroceryListShape(message.text)) {
+          console.warn(
+            `[ShoppingListRescue] Sonnet said social but message has grocery-list shape — overriding to add_shopping. ` +
+            `msgId=${message.messageId} household=${householdId} senderPhone=${message.senderPhone} lineCount=${message.text.split(/\r?\n/).filter((l) => l.trim()).length}`
+          );
+          if (!usageOk) {
+            await sendUpgradePrompt(message.groupId, householdId, config.language);
+            await logMessage(message, "usage_limit_reached", householdId, classification);
+            return new Response("OK", { status: 200 });
+          }
+          const rescueItems = parseGroceryListLines(message.text);
+          const rescueActions = [{ type: "add_shopping" as const, data: { items: rescueItems } }];
+          const { summary: rescueSummary } = await executeActions(householdId, rescueActions, message.senderName, message.senderPhone);
+          const { reply: rescueReply, newCount } = buildShoppingBatchReply(rescueSummary);
+          if (newCount > 0) await incrementUsage(householdId);
+          await sendAndLog(provider, { groupId: message.groupId, text: rescueReply }, {
+            householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "shopping_list_rescue_reply"
+          });
+          await logMessage(message, "sonnet_escalated_shopping_rescue", householdId, classification);
+          return new Response("OK", { status: 200 });
+        }
         if (directAddress) {
           // Sonnet says social, but user addressed Sheli — still reply.
           // Note: classifyMessages (Sonnet classifier) has no add_reminder in its action schema
