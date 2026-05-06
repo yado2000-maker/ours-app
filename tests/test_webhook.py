@@ -375,6 +375,18 @@ def clear_expenses():
     except Exception:
         pass
 
+def clear_shopping_items():
+    """Drop all shopping_items rows for the test household.
+
+    Used by the shopping-list rescue test (2026-05-06 שני incident) so the
+    db_check that asserts the rescued items landed isn't satisfied by
+    pre-existing rows from earlier shopping tests in the same run.
+    """
+    try:
+        sb_delete("shopping_items", {"household_id": f"eq.{TEST_HOUSEHOLD_ID}"})
+    except Exception:
+        pass
+
 # ─── Test Cases ───
 
 def build_test_cases():
@@ -444,6 +456,18 @@ def build_test_cases():
             add_test_item("shopping_items", {"name": "חלב אורז", "got": False}),
             add_test_item("shopping_items", {"name": "חלב", "got": False}),
         ),
+    ))
+    # 2026-05-06 שני / "קניות באושר" regression: 18-item Hebrew grocery list was
+    # mis-classified as `sonnet_escalated_social` and silently dropped. The
+    # post-Sonnet shopping-list-shape rescue (looksLikeGroceryListShape) overrides
+    # that verdict and routes through executeActions. The test verifies the
+    # net-new last item ("מגנום" — never used in earlier tests) lands in DB.
+    cases.append(TestCase(
+        "multi_line_grocery_list_rescue", "Shopping",
+        "תחבושות\nניוקי\nמגבונים\nרשת לכיור\nסוכר\nספוג חום\nקפה\nחלב\nביצים\nשוקו\nחטיפים\nגבנ״צ\nקפואים\nמיונז\nפול\nחמאה\nאורז\nמגנום",
+        db_check={"table": "shopping_items", "column": "name", "value": "מגנום", "should_exist": True},
+        setup=clear_shopping_items,
+        notes="Bug B (2026-05-06): 18-item grocery list must NOT be silently dropped as sonnet_escalated_social",
     ))
 
     # ── Category 2: Task Management (8 tests) ──
