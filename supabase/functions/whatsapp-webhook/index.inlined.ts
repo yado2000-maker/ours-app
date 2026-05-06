@@ -3413,6 +3413,20 @@ async function rescueRemindersAndStrip(
     const recurrenceJson = r.cadence === "monthly"
       ? { type: "monthly", day_of_month: r.day_of_month, time: r.time }
       : { days: r.days, time: r.time }; // weekly (default shape, no explicit type for backward compat)
+    // Dedup (2026-05-06 double-fire fix): skip if a matching active recurring
+    // parent already exists for this group + text + cadence. Sonnet's rescue
+    // emission can fire even when the action-mapper already created the same
+    // parent on the same turn — without this guard each turn doubles the count.
+    const dupRescueParent = await findDuplicateRecurringParent(
+      householdId,
+      message.groupId,
+      r.reminder_text,
+      recurrenceJson,
+    );
+    if (dupRescueParent) {
+      console.log(`[RecurringReminderRescue] Dedup skip: matched parent=${dupRescueParent.id} text="${r.reminder_text}" recur=${JSON.stringify(recurrenceJson)}`);
+      continue;
+    }
     const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
       household_id: householdId,
       group_id: message.groupId,
@@ -4432,6 +4446,64 @@ async function findDuplicateReminder(
     for (const row of data) {
       if (isSameTask(row.message_text || "", text)) {
         return { id: row.id, message_text: row.message_text, send_at: row.send_at };
+      }
+    }
+    return null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Recurring-parent dedup helpers (2026-05-06 double-fire fix).
+// Sonnet sometimes re-emits a full schedule when the user revises ONE slot
+// ("change the 18:00 to 21:00" → re-emits 12:00 + 15:00 + 21:00 instead of
+// update_reminder). Without dedup the recurring_reminder INSERT path creates
+// new parents alongside the existing ones, and BOTH fire — visible as
+// double-shots at every recurring time.
+//
+// recurrenceEquals: structural equality on the recurrence JSONB shape.
+// Handles weekly ({days, time}) and monthly ({day_of_month, time}). Sorts
+// days[] before comparison so [0,1,2,3,4,5,6] and [6,5,4,3,2,1,0] are equal.
+function recurrenceEquals(a: any, b: any): boolean {
+  if (!a || !b) return false;
+  if (String(a.time || "") !== String(b.time || "")) return false;
+  if (Array.isArray(a.days) && Array.isArray(b.days)) {
+    if (a.days.length !== b.days.length) return false;
+    const sortedA = [...a.days].map(Number).sort((x, y) => x - y);
+    const sortedB = [...b.days].map(Number).sort((x, y) => x - y);
+    return sortedA.every((d, i) => d === sortedB[i]);
+  }
+  if (a.day_of_month != null && b.day_of_month != null) {
+    return Number(a.day_of_month) === Number(b.day_of_month);
+  }
+  return false;
+}
+
+// findDuplicateRecurringParent: returns an existing active recurring parent
+// matching (household_id, group_id, exact message_text, recurrenceEquals).
+// Used at all three recurring_reminder INSERT sites to prevent re-emitted
+// parents from accumulating. Returns null when no duplicate exists or on
+// any DB error (fail-open — the INSERT still proceeds).
+async function findDuplicateRecurringParent(
+  householdId: string,
+  groupId: string,
+  text: string,
+  recurrenceJson: Record<string, unknown>,
+): Promise<{ id: string } | null> {
+  try {
+    if (!householdId || !groupId || !text) return null;
+    const { data } = await supabase
+      .from("reminder_queue")
+      .select("id, recurrence")
+      .eq("household_id", householdId)
+      .eq("group_id", groupId)
+      .eq("message_text", text)
+      .not("recurrence", "is", null)
+      .limit(20);
+    if (!data || data.length === 0) return null;
+    for (const row of data as Array<{ id: string; recurrence: any }>) {
+      if (recurrenceEquals(row.recurrence, recurrenceJson)) {
+        return { id: row.id };
       }
     }
     return null;
@@ -6304,6 +6376,12 @@ ADD:
   The "time" field is a display hint; "send_at" is what actually schedules the reminder.
 - recurring_reminder: {"type":"recurring_reminder","text":"ויטמין לילדים","days":[0,1,2,3,4,5,6],"time":"07:00"}
   Use for repeating weekly patterns: "כל יום ראשון", "בימי ב׳ ד׳ ו׳", "כל יום", rotations like "בימי א׳ ג׳ ה׳ אריק מפנה מדיח".
+  SCHEDULE REVISION — MANDATORY (2026-05-06 double-fire fix). When the user REVISES an existing recurring schedule (changes ONE time, drops a slot, replaces a slot), DO NOT re-emit the entire schedule as fresh recurring_reminder actions. The duplicates that survive cause double-fires every day at the unchanged times. Instead, emit ONLY the diff:
+    - Changing one slot ("תקדמי לי לשעה 9 במקום 8" / "האחרון יהיה ב-21:00 במקום 18:00") → emit ONE update_reminder with old_text + new_send_at, OR remove_reminder + recurring_reminder for the replacement.
+    - Adding a slot → emit ONE recurring_reminder for the NEW slot only.
+    - Removing a slot → emit ONE remove_reminder for the dropped slot only.
+    - Verify against the snapshot: scan "Items collected so far" for recurring reminders with matching text — those already exist, do NOT re-add them. Only emit recurring_reminder actions for slots that genuinely don't exist yet.
+    Live failure (אליזה 2026-05-06): user said "האחרון ב-21:00 במקום 18:00" → Sheli re-emitted three recurring_reminders (12:00 + 15:00 + 21:00) → server already had 12:00 + 15:00 + 18:00 → duplicates accumulated → 12:00 fired twice, 15:00 fired twice, 18:00 still alive. The right move was a single remove_reminder for 18:00 + a single recurring_reminder for 21:00.
   days encoding: 0=ראשון (Sunday), 1=שני, 2=שלישי, 3=רביעי, 4=חמישי, 5=שישי, 6=שבת (Saturday).
   time is HH:MM in Israel time. System materializes next 7 days automatically.
   For ROTATIONS with different people on different days → emit MULTIPLE recurring_reminder actions, one per person with their own days array.
@@ -6337,6 +6415,23 @@ REMOVE (delete existing):
 - remove_task: {"type":"remove_task","text":"לנקות"}
 - remove_reminder: {"type":"remove_reminder","text":"להוציא בשר"}
 - remove_event: {"type":"remove_event","title":"ארוחת ערב"}
+
+REMINDER CANCELLATION — MANDATORY WHEN USER ASKS TO STOP/REMOVE A REMINDER (2026-05-06 phantom-cancel fix). The live failure pattern: a daily recurring reminder kept firing after Sheli replied "בוטל ✓" because she NEVER emitted remove_reminder in ACTIONS — just chatted "ביטלתי" while leaving the reminder scheduled. Triggers (any of these in the user message → emit remove_reminder):
+  "בטלי / תבטלי / לבטל את התזכורת..."
+  "מחקי / תמחקי את התזכורת..."
+  "אני לא רוצה את התזכורת על X" / "אני לא צריך / לא צריכה את התזכורת הזאת"
+  "תפסיקי לתזכר אותי על X" / "די עם התזכורת הזאת" / "מספיק עם X"
+  Reply to a 🔔 reminder bubble with "לבטל" / "בטלי" / "מחקי" / "די" / "לא צריך" — even one bare word counts when [Quoted message being replied to: "🔔 ..."] is present.
+Examples:
+  User: "תבטלי את התזכורת היומית לבדוק משהו" → ACTIONS: [{"type":"remove_reminder","text":"לבדוק משהו"}] + reply: "ביטלתי את התזכורת היומית לבדוק משהו ✓"
+  User: "אני לא רוצה את התזכורת על שטיפת הגג" → ACTIONS: [{"type":"remove_reminder","text":"שטיפת הגג"}] + reply: "סבבה, ביטלתי את התזכורת על שטיפת הגג ✓"
+  User: "תפסיקי לתזכר אותי על ויטמין" → ACTIONS: [{"type":"remove_reminder","text":"ויטמין"}] + reply: "ביטלתי את התזכורת לוויטמין ✓"
+  Quote "🔔 תזכורת מחר בבוקר מגיעים לשטוף את הגג" + user "לבטל" → ACTIONS: [{"type":"remove_reminder","text":"מחר בבוקר מגיעים לשטוף את הגג"}] + reply: "סבבה, ביטלתי ✓"
+TEXT NORMALIZATION — CRITICAL: when emitting remove_reminder, the "text" field should be the CORE reminder body. STRIP these prefix tokens if you copy them from a quoted bubble: "🔔", "תזכורת ", "תזכורת:", "Reminder ". The matcher does substring search BOTH ways, so cleaner core text matches more rows. NEVER include the bell emoji or the word "תזכורת" inside the text field.
+DISAMBIGUATION: if the user asks to cancel but you cannot identify the specific target (no quote, generic phrasing, multiple candidates in the snapshot), do NOT guess. ASK ONCE: "איזו תזכורת בדיוק לבטל? יש לי כמה" — and emit ACTIONS:[]. Wait for clarification.
+
+CANCELLATION-EMISSION INVARIANT — MANDATORY (mirror of rule 21): If your visible reply contains ANY commitment to cancellation/removal ("ביטלתי", "מחקתי", "הסרתי", "בוטל ✓", "בוטלה ✓", "סבבה, מחקתי", "I cancelled", "removed"), you MUST also emit a matching ACTIONS entry — remove_reminder, remove_task, remove_shopping, remove_event, or update_reminder/update_event. A "ביטלתי ✓" with NO remove_* in ACTIONS is a LIE — the reminder/task is still active and WILL fire again, breaking the user's trust. If you are not confident which row to target, ASK rather than fake-confirm. Silence beats a lying ✓.
+
 OTHER:
 - name_correction: {"type":"name_correction","name":"ירון"}
 
@@ -7014,7 +7109,19 @@ async function executeCrudAction(
   // not just one row. Without these columns, cancelling a child leaves the
   // parent's recurrence JSONB intact and the next materialize cycle creates
   // fresh children for future weekdays — the Globerman 2026-04-26 phantom-fire bug.
-  const reminderColumns = "id, scheduled_for, recurrence, recurrence_parent_id, metadata";
+  // 2026-05-06: include message_text so the reverse-substring fallback (below)
+  // can compare row text against search text client-side. Without this column
+  // the candidate list comes back without message_text and every comparison
+  // reads undefined → fallback never matches → executor returns not_found and
+  // the user's "תבטלי את התזכורת היומית לבדוק משהו" cascade never fires.
+  // 2026-05-06 v298 — THE actual root cause of every cancel-fail:
+  // reminder_queue has NO `scheduled_for` column (that's only on `events`).
+  // It uses `send_at`. With `scheduled_for` in the SELECT list, PostgREST
+  // returned column-not-exist errors; supabase-js returned `{data: null}`
+  // silently (no throw); every matcher step fell through with no rows. This
+  // is why the v294-v297 normalization/word-overlap/prefix-strip never
+  // helped — the query that fed those steps was ERRORING, not just missing.
+  const reminderColumns = "id, send_at, recurrence, recurrence_parent_id, metadata, message_text";
   const eventColumns = "id, scheduled_for";
   const selectColumns = cfg.table === "reminder_queue" ? reminderColumns : eventColumns;
   let match: { id: string; scheduled_for?: string | null; recurrence?: any; recurrence_parent_id?: string | null; metadata?: Record<string, unknown> | null } | null = null;
@@ -7029,19 +7136,157 @@ async function executeCrudAction(
   }
   // Fall back to fuzzy match (legacy 1:1 path — Sonnet emits old_text/old_title).
   if (!match) {
-    const searchText = isRemove
+    const rawSearchText = isRemove
       ? (action.name || action.text || action.title)
       : (action.old_name || action.old_text || action.old_title);
-    if (!searchText) return { ok: false, summary: "", error: "no_target" };
-    const skipActiveFilter = cfg.table === "reminder_queue" && isRemove;
+    if (!rawSearchText) return { ok: false, summary: "", error: "no_target" };
+    // Unicode normalization (2026-05-06 v297 fix). Sonnet sometimes emits
+    // Hebrew text with invisible marks — BIDI controls (U+200E/200F, U+202A-E),
+    // zero-width chars (U+200B-D, U+FEFF), Hebrew points/cantillation, or
+    // non-NFC composed forms. Visually identical to the stored row, but
+    // byte-level different so .eq() and ilike both miss. The v296 diagnostic
+    // alert showed `searchRaw="לבדוק משהו"` exact-matching a clean 19-byte row,
+    // yet all 4 matcher steps failed — confirming invisible-char drift.
+    // Strip invisibles + NFC normalize on BOTH sides.
+    const normalizeForMatch = (s: string): string =>
+      String(s || "")
+        .normalize("NFC")
+        .replace(/[​-‏‪-‮⁦-⁩﻿]/g, "")
+        .replace(/[֑-ֽֿׁ-ׂׄ-ׇׅ]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    // Reminder-cancel matcher hardening (2026-05-06 phantom-cancel fix). Sonnet
+    // sometimes copies "🔔" / "תזכורת " prefix from a quoted reminder bubble into
+    // the search text, which makes forward ilike fail because the stored
+    // message_text is just the core body. Strip those prefixes before matching.
+    const isReminderTable = cfg.table === "reminder_queue";
+    const normalizedRaw = normalizeForMatch(String(rawSearchText));
+    const strippedSearchText = isReminderTable
+      ? normalizedRaw
+          .replace(/^\s*[\u{1F514}\u{1F389}\u{23F0}]\s*/u, "")
+          .replace(/^\s*(?:תזכורת(?:\s+חוזרת|\s+יומית)?|reminder)\s*[:\-—]?\s*/i, "")
+          .trim()
+      : normalizedRaw;
+    const searchText = strippedSearchText || normalizedRaw;
+    const skipActiveFilter = isReminderTable && isRemove;
+    // 1) Exact match on the (possibly stripped) search text.
     let exactQ = supabase.from(cfg.table).select(selectColumns).eq("household_id", householdId).eq(cfg.matchCol, searchText);
     if (cfg.activeFilter && !skipActiveFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) exactQ = exactQ.eq(k, v);
     let { data: exact } = await exactQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
+    // 2) Forward ilike: rows whose stored text contains the search.
     if (!exact) {
       let fuzzyQ = supabase.from(cfg.table).select(selectColumns).eq("household_id", householdId).ilike(cfg.matchCol, `%${searchText}%`);
       if (cfg.activeFilter && !skipActiveFilter) for (const [k, v] of Object.entries(cfg.activeFilter)) fuzzyQ = fuzzyQ.eq(k, v);
       const { data: fuzzy } = await fuzzyQ.order("created_at", { ascending: false }).limit(1).maybeSingle();
       exact = fuzzy;
+    }
+    // 3+4 candidate-set matching: fetch up to 60 rows for this household and
+    // try (a) reverse-substring containment and (b) word-overlap match.
+    // Reverse-substring fallback for reminder removes (the live bug pattern):
+    //    user/Sonnet pass a longer search like "מחר בבוקר מגיעים לשטוף את הגג"
+    //    while the stored row is the shorter core body "לשטוף את הגג". Forward
+    //    ilike misses because search has more text than row. Fetch a bounded
+    //    candidate set and check substring containment client-side.
+    if (!exact && isRemove && isReminderTable) {
+      const normSearch = searchText;  // already normalized above
+      const lowerSearch = normSearch.toLowerCase();
+      // 0+) Retry exact match with the normalized search (in case server-side
+      // step 1 missed because of invisible chars in the original Sonnet text).
+      // This covers the most common bug — visible-identical strings that
+      // differ at byte-level. We re-query with the cleaned string.
+      if (normSearch !== rawSearchText) {
+        const { data: cleanExact } = await supabase
+          .from(cfg.table)
+          .select(selectColumns)
+          .eq("household_id", householdId)
+          .eq(cfg.matchCol, normSearch)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (cleanExact) {
+          exact = cleanExact as any;
+          console.log(`${logPrefix} remove_reminder normalized-exact match: rawLen=${rawSearchText.length} normLen=${normSearch.length}`);
+        }
+      }
+      // Tokenize search into Hebrew/Latin words >= 3 chars, drop trigger words
+      // and connectives that match anything ("את", "של", "the", "a", etc.).
+      const STOPWORDS = new Set([
+        "את","זה","זאת","זו","אלה","אלו","של","עם","ב","ל","מ","ש","ה",
+        "תזכורת","תזכורות","reminder","reminders","תזכרי","תזכירי","תבטלי","לבטל",
+        "מחקי","תמחקי","להסיר","הסירי","תסירי",
+      ]);
+      const searchWords = lowerSearch
+        .replace(/[\u{1F514}\u{1F389}\u{23F0}.,!?\-—:;()\[\]{}"'״׳]/gu, " ")
+        .split(/\s+/)
+        .map((w) => w.trim())
+        .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+      // Local copy of normalize so the inner loop doesn't recompute the regex.
+      const normRow = (s: unknown): string =>
+        String(s || "")
+          .normalize("NFC")
+          .replace(/[​-‏‪-‮⁦-⁩﻿]/g, "")
+          .replace(/[֑-ֽֿׁ-ׂׄ-ׇׅ]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      let candQ = supabase
+        .from(cfg.table)
+        .select(selectColumns)
+        .eq("household_id", householdId)
+        .order("created_at", { ascending: false })
+        .limit(60);
+      // Skip activeFilter — we want to match recurring parents (sent=true) too.
+      const { data: candidates } = (exact ? { data: null } : await candQ) as { data: any };
+      const candidateRows = Array.isArray(candidates)
+        ? (candidates as Array<Record<string, unknown>>)
+        : [];
+      // 3) Reverse-substring containment: row text appears as a substring of
+      //    search. Both sides normalized to NFC + invisible-stripped.
+      if (!exact) {
+        for (const c of candidateRows) {
+          const rowText = normRow((c as any).message_text);
+          if (!rowText || rowText.length < 3) continue;
+          const lowerRow = rowText.toLowerCase();
+          if (lowerSearch.includes(lowerRow)) {
+            exact = c as any;
+            break;
+          }
+          // Also try: normalized-search exactly equals normalized-row (covers
+          // the exact-match-with-invisibles case at the row side).
+          if (lowerSearch === lowerRow) {
+            exact = c as any;
+            break;
+          }
+        }
+      }
+      // 4) Word-overlap fallback (2026-05-06 לבדוק-משהו incident): if the
+      // search and a candidate row share at least 1 significant word AND the
+      // search has 3+ chars, accept the most-recent matching row. Defends
+      // against Sonnet emitting embellished or partial text where neither
+      // forward nor reverse substring catches.
+      if (!exact && searchWords.length > 0) {
+        let bestRow: any = null;
+        let bestOverlap = 0;
+        for (const c of candidateRows) {
+          const rowText = normRow((c as any).message_text);
+          if (!rowText) continue;
+          const lowerRow = rowText.toLowerCase();
+          let overlap = 0;
+          for (const w of searchWords) {
+            if (lowerRow.includes(w)) overlap++;
+          }
+          // Require at least 1 significant word overlap. Prefer the row with
+          // the most overlap; ties break on first encountered (most recent
+          // by created_at DESC ordering).
+          if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            bestRow = c;
+          }
+        }
+        if (bestRow && bestOverlap >= 1) {
+          exact = bestRow as any;
+          console.log(`${logPrefix} remove_reminder word-overlap match: searchWords=${JSON.stringify(searchWords)} matched_row="${String((bestRow as any).message_text || "").slice(0, 60)}" overlap=${bestOverlap}`);
+        }
+      }
     }
     match = (exact as any) || null;
   }
@@ -7074,17 +7319,63 @@ async function executeCrudAction(
         if (parentErr) { console.error(`${logPrefix} recurring parent disable error:`, parentErr); return { ok: false, summary: "", error: "db_error" }; }
 
         // Soft-cancel all unsent children of this parent so already-materialized
-        // future rows don't fire either.
-        const { error: childErr } = await supabase
+        // future rows don't fire either. Also collect their IDs so we can sweep
+        // any NUDGE_SERIES attempts that link back to them via nudge_series_id.
+        const { data: cancelledChildren, error: childErr } = await supabase
           .from("reminder_queue")
           .update({ sent: true, metadata: { ...cancelMeta, cancelled_via_parent: parentId } })
           .eq("recurrence_parent_id", parentId)
           .eq("household_id", householdId)
-          .eq("sent", false);
+          .eq("sent", false)
+          .select("id");
         if (childErr) console.error(`${logPrefix} recurring children soft-cancel error (non-fatal):`, childErr);
 
-        console.log(`${logPrefix} Cancelled recurring series: parent=${parentId} (was_${isParent ? "parent" : "child"}=${match.id})`);
+        // NUDGE_SERIES extension (project_instruct_bot_silent_cancel_miss.md):
+        // when the cancelled parent is a NUDGE_SERIES recurring parent, each
+        // daily child is an "anchor" with attempts pointing at it via
+        // nudge_series_id. Without this sweep, anchors are sent=true (stopped)
+        // but their pending attempts keep firing every interval_min until the
+        // anchor's deadline. Walk the chain: parent → cancelled anchors →
+        // attempts. Single targeted UPDATE keyed on the anchor IDs.
+        const cancelledAnchorIds = Array.isArray(cancelledChildren)
+          ? (cancelledChildren as Array<{ id: string }>).map((r) => r.id).filter(Boolean)
+          : [];
+        if (cancelledAnchorIds.length > 0) {
+          const { error: attemptErr } = await supabase
+            .from("reminder_queue")
+            .update({ sent: true, metadata: { ...cancelMeta, cancelled_via_anchor: true } })
+            .in("nudge_series_id", cancelledAnchorIds)
+            .eq("household_id", householdId)
+            .eq("sent", false);
+          if (attemptErr) console.error(`${logPrefix} nudge attempts soft-cancel error (non-fatal):`, attemptErr);
+        }
+
+        console.log(`${logPrefix} Cancelled recurring series: parent=${parentId} (was_${isParent ? "parent" : "child"}=${match.id}) cancelled_children=${cancelledAnchorIds.length}`);
         return { ok: true, summary: "בוטלה תזכורת קבועה" };
+      }
+
+      // NUDGE_SERIES anchor cancel (no recurrence on this row but it has
+      // active attempts pointing at it). Catches the case where the user
+      // cancels a one-shot nudge series — without this branch, the matched
+      // row gets soft-cancelled but pending attempts keep firing.
+      if (match.id) {
+        const { data: pendingAttempts } = await supabase
+          .from("reminder_queue")
+          .select("id")
+          .eq("household_id", householdId)
+          .eq("nudge_series_id", match.id)
+          .eq("sent", false)
+          .limit(1);
+        if (Array.isArray(pendingAttempts) && pendingAttempts.length > 0) {
+          const { error: nsAttemptErr } = await supabase
+            .from("reminder_queue")
+            .update({ sent: true, metadata: { ...cancelMeta, cancelled_via_anchor: true } })
+            .eq("nudge_series_id", match.id)
+            .eq("household_id", householdId)
+            .eq("sent", false);
+          if (nsAttemptErr) console.error(`${logPrefix} nudge_series anchor attempts cancel error (non-fatal):`, nsAttemptErr);
+          else console.log(`${logPrefix} Cancelled NUDGE_SERIES anchor + pending attempts: anchor=${match.id}`);
+        }
       }
 
       // One-shot reminder — original soft-cancel path.
@@ -7575,6 +7866,70 @@ async function execute1on1Actions(params: {
       console.log(`${logPrefix} Fallback: extracted ${fallbackItems.length} items: ${fallbackItems.join(", ")}`);
     }
   }
+  // Phantom-add action rescue (2026-05-06 expanded). Sonnet's reply claimed
+  // she did something (save/add/schedule) but emitted ACTIONS=[]. Tiered
+  // fallback: (a) shopping regex if reply mentions list/cart, (b) Haiku
+  // general extraction for reminder/task/event/shopping. EXPLICITLY skips
+  // cancellation + expense claims — those have separate honesty rewrites
+  // because auto-extracting destructive/financial actions is too risky.
+  if (actions.length === 0 && /(הוספתי|רשמתי|שמרתי|עדכנתי|הכנסתי|אזכיר)/.test(visibleReply)) {
+    console.warn(`${logPrefix} Phantom-add: Sonnet claimed save but ACTIONS empty for ${phone}`);
+    let rescued = false;
+    // (a) Shopping fast-path: cheap, no API call. Only when reply explicitly
+    // signals shopping (list/cart/grocery markers).
+    if (/(רשימ|לקנות|🛒|הוספתי\s+לרשימה)/.test(visibleReply)) {
+      const shoppingItems = extractShoppingItemsFromText(text || "");
+      if (shoppingItems.length > 0) {
+        actions = [{ type: "shopping", items: shoppingItems }];
+        console.log(`${logPrefix} Phantom-add rescue (shopping-regex): ${shoppingItems.length} items`);
+        rescued = true;
+      }
+    }
+    // (b) Haiku general extraction — covers reminder/task/event + shopping
+    // when regex misses (compound names, non-list phrasings). The helper
+    // returns {type:"none"} for cancellations/expenses/ambiguous, which
+    // we treat as no-rescue so the reply falls through to the next guard.
+    if (!rescued) {
+      try {
+        const extracted = await haikuExtractActionFromClaim(text || "", visibleReply);
+        if (extracted && extracted.type !== "none") {
+          if (extracted.type === "reminder") {
+            actions = [{ type: "reminder", text: extracted.text, send_at: extracted.send_at }];
+          } else if (extracted.type === "task") {
+            actions = [{ type: "task", text: extracted.text }];
+          } else if (extracted.type === "event") {
+            actions = [{ type: "event", title: extracted.title, date: extracted.date, time: extracted.time }];
+          } else if (extracted.type === "shopping") {
+            actions = [{ type: "shopping", items: extracted.items }];
+          }
+          console.log(`${logPrefix} Phantom-add rescue (haiku-${extracted.type}):`, JSON.stringify(extracted).slice(0, 200));
+          rescued = true;
+        }
+      } catch (err) {
+        console.error(`${logPrefix} Phantom-add Haiku rescue error:`, (err as Error).message);
+      }
+    }
+    if (!rescued) {
+      console.warn(`${logPrefix} Phantom-add unrescued — Sonnet's "${visibleReply.slice(0, 80)}" claim falls through unchanged`);
+    }
+  }
+  // Phantom-cancel hallucination (2026-05-06): Sonnet committed to a
+  // cancellation in the visible reply but emitted ACTIONS:[]. The reminder
+  // or task is still active and WILL fire again — the exact pattern users
+  // hit when "לבטל" replies to a recurring reminder bubble. NO auto-extraction
+  // here: guessing the wrong row to cancel is worse than asking once.
+  if (actions.length === 0 && /(ביטלתי|מחקתי|הסרתי|בוטל\s*[✓✅]|בוטלה\s*[✓✅])/.test(visibleReply)) {
+    console.warn(`${logPrefix} Phantom-cancel: Sonnet claimed cancellation but ACTIONS empty for ${phone}`);
+    visibleReply = "רגע, לא ביטלתי בפועל 🙉 איזו תזכורת לבטל? תכתבי לי חלק מהשם ואטפל.";
+  }
+  // Phantom-expense honesty guard (2026-05-06): Sonnet claimed she logged an
+  // expense but ACTIONS=[]. Money is sensitive — auto-extracting a
+  // hallucinated amount could log fake spend in the audit trail. Better to
+  // ask honestly and let the user re-state.
+  if (actions.length === 0 && /(רשמתי\s+הוצאה|הוצאה\s+של|💸|✅\s*\d+\s*(ש"?ח|₪|שקל))/.test(visibleReply)) {
+    console.warn(`${logPrefix} Phantom-expense: Sonnet claimed expense save but ACTIONS empty for ${phone}`);
+    visibleReply = "רגע, על מה ההוצאה ובכמה? כסף זה רגיש — תכתבי שוב ואני ארשום נכון 🙉";
+  }
 
   // 6. Parse tried capabilities
   let triedCaps: string[] = [];
@@ -7622,6 +7977,12 @@ async function execute1on1Actions(params: {
     }
 
     const mappedActions: any[] = [];
+    // Track outcomes of remove_* / update_* CRUD actions so we can rewrite
+    // a lying "ביטלתי ✓" reply when the executor failed to find a row
+    // (2026-05-06 phantom-cancel fix). Without this, Sonnet's chatty
+    // confirmation ships even when the DB never changed, and the user
+    // sees recurring reminders fire the next day after Sheli said "✓".
+    const removeOutcomes: Array<{ type: string; ok: boolean; error?: string }> = [];
     for (const action of realActions) {
       switch (action.type) {
         case "shopping":
@@ -7832,6 +8193,21 @@ async function execute1on1Actions(params: {
             recurringDeliveryMode = "dm";
             recurringRecipientPhones = [phone];
           }
+          // Dedup: if an active recurring parent with same (group_id, text,
+          // time, days/day_of_month) already exists, SKIP this INSERT
+          // (2026-05-06 double-fire fix). Sonnet sometimes re-emits the full
+          // schedule when the user revises a single slot — without this guard
+          // the duplicate parent fires alongside the original.
+          const existingDup1on1 = await findDuplicateRecurringParent(
+            householdId,
+            recurringTargetGroupId,
+            action.text || "",
+            recurrenceJson,
+          );
+          if (existingDup1on1) {
+            console.log(`${logPrefix} recurring_reminder dedup skip (1:1): matched parent=${existingDup1on1.id} text="${action.text}" recur=${JSON.stringify(recurrenceJson)}`);
+            break;
+          }
           const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
             household_id: householdId,
             group_id: recurringTargetGroupId,
@@ -8028,7 +8404,15 @@ async function execute1on1Actions(params: {
         case "update_shopping": case "update_task": case "update_reminder": case "update_event":
         case "remove_shopping": case "remove_task": case "remove_reminder": case "remove_event": {
           if (!householdId) break;
-          await executeCrudAction(householdId, action as CrudAction, logPrefix);
+          const crudResult = await executeCrudAction(householdId, action as CrudAction, logPrefix);
+          removeOutcomes.push({
+            type: action.type,
+            ok: crudResult?.ok === true,
+            error: crudResult?.error,
+          });
+          if (!crudResult?.ok) {
+            console.warn(`${logPrefix} ${action.type} executor returned not-ok: error=${crudResult?.error || "unknown"} target_text="${(action as any).text || (action as any).name || (action as any).title || ""}"`);
+          }
           break;
         }
         // --- TAG UPDATE / BULK TAG UPDATE (Tier 2 retag, 2026-04-26) ---
@@ -8050,6 +8434,29 @@ async function execute1on1Actions(params: {
         default:
           console.warn(`${logPrefix} Unknown action type: ${action.type}`);
           break;
+      }
+    }
+
+    // Cancel/update executor-honesty guard (2026-05-06 phantom-cancel fix).
+    // When Sonnet committed to a cancellation or reschedule and we DID emit
+    // a remove_*/update_* action but the executor returned not-ok (row not
+    // found), rewrite the lying reply to a clear "couldn't find" ask.
+    // The recurring-cascade in executeCrudAction is correct WHEN it finds
+    // a row — most matcher misses come from prefix-mismatched search text
+    // ("תזכורת X" search vs "X" stored) or stale/typo'd targets.
+    {
+      const removeAttempts = removeOutcomes.filter((o) => o.type.startsWith("remove_"));
+      const updateAttempts = removeOutcomes.filter((o) => o.type.startsWith("update_"));
+      const allRemovesFailed = removeAttempts.length > 0 && removeAttempts.every((o) => !o.ok);
+      const allUpdatesFailed = updateAttempts.length > 0 && updateAttempts.every((o) => !o.ok);
+      const claimsCancel = /(ביטלתי|מחקתי|הסרתי|בוטל\s*[✓✅]|בוטלה\s*[✓✅])/.test(visibleReply);
+      const claimsUpdate = /(זזתי|הזזתי|עדכנתי|שיניתי|העברתי|הועברה|הוזזה)/.test(visibleReply);
+      if (allRemovesFailed && claimsCancel) {
+        console.warn(`${logPrefix} Cancel executor miss: ${removeAttempts.length} remove_* attempts all failed but reply claimed success — rewriting`);
+        visibleReply = "רגע, לא הצלחתי למצוא תזכורת כזו לבטל 🤔 איך היא נכתבה במקור? אפשר חלק מהשם.";
+      } else if (allUpdatesFailed && claimsUpdate) {
+        console.warn(`${logPrefix} Update executor miss: ${updateAttempts.length} update_* attempts all failed but reply claimed success — rewriting`);
+        visibleReply = "רגע, לא הצלחתי לעדכן בפועל 🙉 איזו תזכורת/אירוע, ולמתי? אפשר לפרט שוב?";
       }
     }
 
@@ -8177,6 +8584,174 @@ Reply with ONLY the welcome text. No quotes, no labels, no metadata blocks.`;
 //
 // Gated behind bot_settings.forward_enabled (default 'true'). Flip to 'false'
 // via SQL to disable without a deploy if accuracy is poor or we see misuse.
+
+// Phantom-add action rescue (2026-05-06 expanded from מעיין reminder-only case).
+// Sonnet's reply claimed she did something (save/add/schedule) but emitted
+// ACTIONS=[]. We extract the structured action from her own reply via Haiku
+// so the action actually lands without re-asking the user. Covers four types:
+// reminder, task, event, shopping. EXPLICITLY refuses cancellation/expense
+// extraction (returns "none") — destructive operations need a real action,
+// not auto-fill from a hallucinated reply. Cost ~$0.0003 per detection.
+type ExtractedAction =
+  | { type: "reminder"; text: string; send_at: string }
+  | { type: "task"; text: string }
+  | { type: "event"; title: string; date: string; time: string }
+  | { type: "shopping"; items: string[] }
+  | { type: "none" };
+
+const ACTION_CLAIM_EXTRACTION_PROMPT = `You are an action extractor for Sheli (a Hebrew task-management bot on WhatsApp). Sheli just told a user she did something, but the action JSON wasn't emitted. Read the user's last message + Sheli's reply and extract what Sheli claimed to do, so the executor can do it for real.
+
+INPUT: USER message + SHELI's reply.
+OUTPUT ONLY this JSON (no prose, no code blocks):
+
+For a REMINDER claim ("אזכיר", "אזכיר ב-X" — has a time):
+{"type":"reminder","text":"<core body, no scaffolding>","send_at":"<ISO 8601 with +03:00>"}
+
+For a TASK claim ("רשמתי", "הוספתי משימה" — no specific time):
+{"type":"task","text":"<core body>"}
+
+For an EVENT claim ("שמרתי ביומן", "אירוע ב-X" — has a date):
+{"type":"event","title":"<title>","date":"<YYYY-MM-DD>","time":"<HH:MM>"}
+
+For a SHOPPING claim ("הוספתי לרשימה" — explicit list items):
+{"type":"shopping","items":["<item1>","<item2>",...]}
+
+Otherwise (ambiguous, social, cancellation, deletion, expense, payment) — output:
+{"type":"none"}
+
+RULES:
+- text/title in Hebrew. STRIP scaffolding: "תזכורת", "להזכיר", "אזכיר", "רשמתי", "לרשום", "שמרתי", "תזכירי לי".
+- send_at and event date+time MUST be in the future (now to +30 days). Israel timezone +03:00 (summer 2026).
+- Time resolution against current Israel time: __NOW_IL__
+  - "ב-HH:MM" / "בשעה HH:MM" → today at HH:MM IL (or tomorrow if past)
+  - "מחר ב-HH:MM" → tomorrow HH:MM IL
+  - "בעוד X דקות/שעות" → now + X
+  - "ביום Y" → next occurrence of weekday Y at default 09:00 unless time given
+- Prefer time/date IN SHELI'S REPLY (she already resolved it) over the user's text.
+- Shopping items: each ≥3 chars, max 30 items. Keep compound names ("חלב אורז") as one item.
+- DO NOT auto-extract for cancellations/deletions/expenses/payments. Output {"type":"none"}.
+- DO NOT invent fields. If genuinely ambiguous, output {"type":"none"}.
+
+EXAMPLES:
+USER: "תזכירי לי בעוד 5 דקות לבדוק תנור"
+SHELI: "סבבה, אזכיר ב-19:25 לבדוק תנור 🔔"
+OUT: {"type":"reminder","text":"לבדוק תנור","send_at":"<19:25 today IL>"}
+
+USER: "תוסיפי לי משימה להתקשר לאמא"
+SHELI: "רשמתי! ✅ להתקשר לאמא"
+OUT: {"type":"task","text":"להתקשר לאמא"}
+
+USER: "תשמרי לי פגישה עם דנה ביום ו ב-15:00"
+SHELI: "שמרתי ביומן 📅 פגישה עם דנה ביום שישי 9.5 ב-15:00"
+OUT: {"type":"event","title":"פגישה עם דנה","date":"2026-05-09","time":"15:00"}
+
+USER: "תוסיפי חלב וביצים לרשימה"
+SHELI: "הוספתי 🛒 חלב, ביצים"
+OUT: {"type":"shopping","items":["חלב","ביצים"]}
+
+USER: "תבטלי את התזכורת לטיפול"
+SHELI: "ביטלתי ✓"
+OUT: {"type":"none"}
+
+USER: "שילמתי 200 על דלק"
+SHELI: "רשמתי הוצאה של 200 דלק 💸"
+OUT: {"type":"none"}`;
+
+async function haikuExtractActionFromClaim(
+  userMessage: string,
+  botReply: string,
+): Promise<ExtractedAction | null> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  if (!apiKey) return null;
+  const nowIL = new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", hour12: false });
+  const systemPrompt = ACTION_CLAIM_EXTRACTION_PROMPT.replace("__NOW_IL__", nowIL);
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: HAIKU_MODEL,
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: [{
+          role: "user",
+          content: `USER: ${userMessage.slice(0, 500)}\n\nSHELI: ${botReply.slice(0, 500)}`,
+        }],
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`[ClaimExtract] Haiku ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const rawText = (data.content?.[0]?.text || "").trim();
+    const jsonText = rawText
+      .replace(/^```(?:json)?\s*/, "")
+      .replace(/\s*```$/, "");
+    try {
+      const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      const t = String(parsed.type || "").trim();
+      if (t === "none" || !t) return { type: "none" };
+      // Validate per-type with safety bounds.
+      const now = Date.now();
+      const maxFuture = now + 30 * 24 * 3600_000;
+      const minFuture = now - 60_000;
+      if (t === "reminder") {
+        const text = String(parsed.text || "").trim();
+        const sendAt = String(parsed.send_at || "").trim();
+        if (!text || text.length < 3 || text.length > 200) return null;
+        if (!sendAt) return null;
+        const ts = Date.parse(sendAt);
+        if (!isFinite(ts) || ts < minFuture || ts > maxFuture) {
+          console.warn(`[ClaimExtract] reminder send_at out of bounds: ${sendAt}`);
+          return null;
+        }
+        return { type: "reminder", text, send_at: sendAt };
+      }
+      if (t === "task") {
+        const text = String(parsed.text || "").trim();
+        if (!text || text.length < 3 || text.length > 200) return null;
+        return { type: "task", text };
+      }
+      if (t === "event") {
+        const title = String(parsed.title || "").trim();
+        const date = String(parsed.date || "").trim();
+        const timeStr = String(parsed.time || "").trim();
+        if (!title || title.length < 2 || title.length > 200) return null;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+        if (!/^\d{1,2}:\d{2}$/.test(timeStr)) return null;
+        const ts = Date.parse(`${date}T${timeStr}:00+03:00`);
+        if (!isFinite(ts) || ts < minFuture || ts > maxFuture) {
+          console.warn(`[ClaimExtract] event date out of bounds: ${date} ${timeStr}`);
+          return null;
+        }
+        return { type: "event", title, date, time: timeStr };
+      }
+      if (t === "shopping") {
+        const items = Array.isArray(parsed.items)
+          ? (parsed.items as unknown[])
+              .map((x) => String(x || "").trim())
+              .filter((x) => x.length >= 2 && x.length <= 50)
+              .slice(0, 30)
+          : [];
+        if (items.length === 0) return null;
+        return { type: "shopping", items };
+      }
+      console.warn(`[ClaimExtract] unknown type: ${t}`);
+      return null;
+    } catch {
+      console.warn(`[ClaimExtract] JSON parse failed, raw: ${rawText.slice(0, 100)}`);
+      return null;
+    }
+  } catch (err) {
+    console.warn(`[ClaimExtract] Error:`, (err as Error).message);
+    return null;
+  }
+}
 
 const FORWARD_EXTRACTION_PROMPT = `Extract a task from this forwarded WhatsApp message. The user forwarded it to Sheli (a Hebrew task-management bot) to save it.
 
@@ -13066,6 +13641,20 @@ Deno.serve(async (req: Request) => {
           : [recPhones];
 
       for (const grp of phoneGroups) {
+        // Dedup (2026-05-06 double-fire fix): skip if a matching active recurring
+        // parent already exists for this group + text + cadence. Prevents the
+        // double-shots seen when Sonnet re-emits a full schedule on revision.
+        const recurrenceShape = { days: rec.days, time: rec.time };
+        const dupGroupParent = await findDuplicateRecurringParent(
+          householdId,
+          message.groupId,
+          rec.reminder_text,
+          recurrenceShape,
+        );
+        if (dupGroupParent) {
+          console.log(`[RecurringReminder] Dedup skip (group): matched parent=${dupGroupParent.id} text="${rec.reminder_text}" recur=${JSON.stringify(recurrenceShape)}`);
+          continue;
+        }
         const { data: parent, error: recErr } = await supabase.from("reminder_queue").insert({
           household_id: householdId,
           group_id: message.groupId,
@@ -13076,7 +13665,7 @@ Deno.serve(async (req: Request) => {
           reminder_type: "user",
           created_by_phone: message.senderPhone,
           created_by_name: message.senderName,
-          recurrence: { days: rec.days, time: rec.time },
+          recurrence: recurrenceShape,
           delivery_mode: rec.delivery_mode || "group",
           recipient_phones: grp,
           metadata: { recurring_parent: true, source: "actionable_path" },
