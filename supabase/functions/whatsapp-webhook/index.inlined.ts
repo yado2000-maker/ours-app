@@ -4008,6 +4008,7 @@ Respond ONLY as this JSON — no other text:
     {"type": "add_task", "data": {"title": "...", "assigned_to": "name or null"}},
     {"type": "add_shopping", "data": {"items": [{"name": "...", "qty": "1", "category": "..."}]}},
     {"type": "add_event", "data": {"title": "...", "assigned_to": "name or null", "scheduled_for": "ISO 8601 WITH Israel timezone offset, e.g. 2026-04-12T15:30:00+03:00 — NEVER emit naive strings like 2026-04-12T15:30:00 (Postgres would parse as UTC and the event lands 3h late)"}},
+    {"type": "add_reminder", "data": {"reminder_text": "core body, no scaffolding (e.g. 'לקבוע תור לחיסונים', NOT 'תזכירי לי לקבוע תור')", "send_at": "ISO 8601 WITH Israel timezone offset, e.g. 2026-05-08T09:00:00+03:00 — same naive-string rule as add_event"}},
     {"type": "complete_task", "data": {"id": "task_id"}},
     {"type": "complete_shopping", "data": {"id": "item_id"}}
   ]
@@ -7928,7 +7929,23 @@ async function execute1on1Actions(params: {
   // expense but ACTIONS=[]. Money is sensitive — auto-extracting a
   // hallucinated amount could log fake spend in the audit trail. Better to
   // ask honestly and let the user re-state.
-  if (actions.length === 0 && /(רשמתי\s+הוצאה|הוצאה\s+של|💸|✅\s*\d+\s*(ש"?ח|₪|שקל))/.test(visibleReply)) {
+  //
+  // 2026-05-07 false-positive fix: the original regex matched bare 💸 and
+  // bare "הוצאה של", which also appear DECORATIVELY in two non-claim places:
+  //   (a) CAPABILITIES TOUR (~line 9966): "💸 הוצאות (דוגמה: שילמתי 200 על חשמל)"
+  //   (b) GREETING-ONLY pattern: Sonnet is told to mix capability examples
+  //       with one emoji per capability — 💸 + an example like
+  //       "💸 'שילמתי 200 על דלק'" is normal scaffolding.
+  // When a 1:1 user says "hi" or "מה את יודעת?", actions=[] (no real save)
+  // and bare 💸 hit the guard → entire intro got rewritten to
+  // "רגע, על מה ההוצאה ובכמה?", which has nothing to do with the user.
+  //
+  // Tightened: require 💸 and "הוצאה של" to be co-located with a DIGIT (the
+  // real money signal). Capability/greeting decorations have no digit
+  // immediately after 💸 or after "הוצאה" (it's followed by a paren or
+  // another category), so they no longer match. Real claims like
+  // "💸 רשמתי 200 ש"ח" or "✅ 200 שקל" or "הוצאה של 500 על דלק" still match.
+  if (actions.length === 0 && /(רשמתי\s+הוצאה|הוצאה\s+של\s+\d|💸\s*\d+\s*(?:ש"?ח|₪|שקל)|\d+\s*(?:ש"?ח|₪|שקל)\s*💸|✅\s*\d+\s*(?:ש"?ח|₪|שקל))/.test(visibleReply)) {
     console.warn(`${logPrefix} Phantom-expense: Sonnet claimed expense save but ACTIONS empty for ${phone}`);
     visibleReply = "רגע, על מה ההוצאה ובכמה? כסף זה רגיש — תכתבי שוב ואני ארשום נכון 🙉";
   }
@@ -13257,6 +13274,59 @@ Deno.serve(async (req: Request) => {
       const { summary: sonnetSummary } = await executeActions(householdId, sonnetResult.actions, message.senderName, message.senderPhone);
       console.log(`[Webhook] Sonnet escalation executed ${sonnetSummary.length} actions:`, sonnetSummary);
 
+      // ─── REMINDER ESCALATION RESCUE (Bug 2 fix, 2026-05-07) ───
+      // Sonnet's classifier prompt (~line 3997) declares ONLY these action
+      // shapes: add_task | add_shopping | add_event | complete_task |
+      // complete_shopping. add_reminder is conspicuously absent. The
+      // ClassifiedAction TYPE union (line ~268) lists add_reminder, so
+      // Sonnet COULD emit it — but the prompt doesn't teach it to. In
+      // practice Sonnet either drops the message (→ !respond branch above,
+      // which has its own directAddress reminder rescue) or downgrades the
+      // reminder to add_task / add_event and lands HERE.
+      //
+      // Worse still, executeActions case "add_reminder" at line ~5335 is a
+      // no-op with the comment "Reminders are inserted directly from the
+      // Sonnet reply (step 13b), not here" — but step 13b runs ONLY in the
+      // high-confidence Haiku-actionable path (~line 13643), NOT in this
+      // medium-confidence escalation path. So even if Sonnet did emit
+      // add_reminder, no row would land in reminder_queue.
+      //
+      // Live failure (Shirly Lerer 2026-05-06 21:39:37): "תזכירי לי מחר
+      // לקבוע תור לחיסונים!! זה ממש חשוב תזכירי לי ב9 בבוקר ואז שוב ב15
+      // ואז שוב ב16 ואז שוב ב17". Haiku correctly classified add_reminder
+      // with entities.reminder_text="לקבוע תור לחיסונים", time_iso=
+      // 2026-05-08T09:00:00+03:00. Confidence was medium → escalated → 0
+      // rows in reminder_queue → user complained "למה לא הזכרת" the next
+      // morning. classification_data confirms Haiku had everything it
+      // needed; the escalation path silently dropped it.
+      //
+      // Fix: when the upstream Haiku classification was add_reminder, run
+      // the reply-side reminder pipeline IN ADDITION TO Sonnet's classifier
+      // actions. generateReply has a dedicated REMINDERS section in its
+      // prompt that emits <!--REMINDER:{...}--> blocks (including MULTIPLE
+      // blocks for multi-time messages, see line ~2525 prompt rule
+      // "MULTI-REMINDER in one message"). rescueRemindersAndStrip then
+      // extracts those blocks, saves them to reminder_queue, and returns
+      // the cleaned reply text. Cost: one extra Sonnet call (~$0.01) per
+      // medium-confidence add_reminder escalation — acceptable trade for
+      // never silently dropping a reminder a user asked for.
+      let reminderRescueCleanReply: string | null = null;
+      if (classification.intent === "add_reminder") {
+        try {
+          const directClassification = { ...classification, entities: { ...classification.entities, raw_text: message.text } };
+          const replyCtx = await buildReplyCtx(householdId, "group");
+          const gen = await generateReply(directClassification, message.senderName, replyCtx);
+          if (gen.reply) {
+            reminderRescueCleanReply = await rescueRemindersAndStrip(gen.reply, directClassification, message, householdId);
+            console.log(`[ReminderEscalationRescue] Haiku=add_reminder + Sonnet=actionable; ran reply-side rescue. cleanReplyLen=${reminderRescueCleanReply?.length || 0}`);
+          } else {
+            console.warn(`[ReminderEscalationRescue] generateReply returned empty — reminder still unsaved for msgId=${message.messageId}`);
+          }
+        } catch (err) {
+          console.error(`[ReminderEscalationRescue] error:`, (err as Error).message);
+        }
+      }
+
       // Check if all actions were deduped
       const sonnetAllDeduped = sonnetSummary.length > 0 && sonnetSummary.every(
         (s) => s.includes("-exists:") || s.includes("-updated:")
@@ -13285,8 +13355,13 @@ Deno.serve(async (req: Request) => {
         });
       } else {
         await incrementUsage(householdId);
-        if (sonnetResult.reply) {
-          await sendAndLog(provider, { groupId: message.groupId, text: sonnetResult.reply }, {
+        // Prefer Sonnet's escalation reply (it acknowledged the actions
+        // executeActions ran). Fall back to the reminder-rescue clean reply
+        // when Sonnet's was empty — that way the user still gets a
+        // confirmation that mentions the reminder we just saved.
+        const finalReply = sonnetResult.reply || reminderRescueCleanReply;
+        if (finalReply) {
+          await sendAndLog(provider, { groupId: message.groupId, text: finalReply }, {
             householdId, groupId: message.groupId, inReplyTo: message.messageId, replyType: "sonnet_escalated_reply"
           });
         }
