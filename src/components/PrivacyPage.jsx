@@ -10,7 +10,7 @@ const CONTENT = {
     langToggle: "EN",
     back: "חזרה ל-sheli.ai",
     title: "מדיניות פרטיות",
-    effective: "בתוקף מיום 24 באפריל 2026",
+    effective: "בתוקף מיום 7 במאי 2026",
     intro:
       "שלי (Sheli) היא עוזרת משפחתית בווטסאפ שעוזרת לכם לנהל קניות, מטלות, תזכורות, אירועים והוצאות. הפרטיות שלכם חשובה לנו — הנה מה שחשוב שתדעו.",
     sections: [
@@ -28,7 +28,7 @@ const CONTENT = {
       },
       {
         h: "איך אנחנו משתמשים בזה",
-        p: "המידע שאתם שולחים מועבר אל שלי כדי שהיא תבין אתכם ותגיב — תוסיף לרשימת קניות, תיצור תזכורת, תענה על שאלה. אנחנו גם משתמשים בחלק מהנתונים (בצורה מצומצמת ואנונימית) כדי לשפר את הדיוק של שלי בעברית.",
+        p: "אנחנו משתמשים במידע שאתם שולחים אך ורק כדי לספק את הפיצ'רים של שלי שאתם רואים בפועל ולשפר אותם — רשימות קניות, מטלות, תזכורות, יומן, הוצאות, ותשובות בשיחה. אנחנו לא משתמשים בהודעות שלכם או בתוכן שלכם כדי לאמן מודלי AI/ML כלליים. סטטיסטיקות שימוש מצטברות ואנונימיות לחלוטין — מספרים, זמני תגובה, שיעורי שגיאה, אף פעם לא תוכן הודעה — עוזרות לנו לעקוב אחרי יציבות ולתכנן גידול.",
       },
       {
         h: "מי רואה את המידע שלכם",
@@ -43,12 +43,16 @@ const CONTENT = {
         p: "כדי להבין את ההודעות שלכם, שלי משתמשת במודלים של בינה מלאכותית שמסווגים את הכוונה (למשל: קנייה, תזכורת, שאלה) ומייצרים תשובה. הכוונה מתורגמת לפעולה בחשבון שלכם — ותמיד ניתן לבטל או לתקן בהודעה חוזרת. לצורך העיבוד, הודעות נשלחות לספקי ה-AI (ראו \"ספקי שירות מרכזיים\" למטה) שפועלים בארה\"ב. ההודעות לא משמשות לאימון מודלים של צד שלישי. הודעות קוליות מתומללות לטקסט ונמחקות מיד לאחר התמלול. תמונות שתשלחו (למשל קבלה או מסמך) מעובדות כדי לחלץ את התוכן הרלוונטי (למשל סכום, תאריך, פריטים), ונמחקות לאחר העיבוד — אנחנו לא שומרים את קובץ התמונה עצמו.",
       },
       {
+        h: "נתוני משתמש מ-Google (כניסה דרך Google ויומן Google)",
+        p: "כשאתם נכנסים דרך Google, אנחנו מקבלים את שמכם, כתובת האימייל, תמונת הפרופיל ומזהה החשבון שלכם ב-Google (טענת ה-`sub` ב-OAuth). אם תאשרו את ההרשאה `https://www.googleapis.com/auth/calendar.events`, שלי תוכל גם לקרוא אירועים קרובים מהיומן הראשי שלכם וליצור או לעדכן אירועים שתבקשו ממנה במפורש לתזמן.\n\nעם מי משותפים, מועברים או נחשפים נתוני משתמש מ-Google:\n• Anthropic, PBC (Claude API): כשאתם שואלים את שלי שאלה הקשורה ליומן (\"מה יש לי מחר?\", \"תעבירי את התור לרופא ליום חמישי\"), הכותרות, המועדים והתיאורים של האירועים הרלוונטיים נשלחים בזמן אמת לממשק ה-API של Claude לצורך יצירת התשובה של שלי או ביצוע עדכון היומן שביקשתם. Anthropic מעבדת את הבקשה בהתאם לתנאי ה-API המסחריים שלה; הקלט לא משמש לאימון המודלים של Anthropic, ונשמר אצלם עד 30 יום לצורכי ניטור שימוש לרעה תחת מגבלות חוזיות.\n• Supabase Inc. (בסיס הנתונים הענני המנוהל שלנו, אזור האיחוד האירופי — פרנקפורט): שומר את פרופיל ה-Google שלכם (שם, אימייל, מזהה חשבון) ומטמון של הפניות לאירועים (מזהה אירוע, כותרת, מועד התחלה וסיום) כדי שתזכורות שלי יידעו לאיזה אירוע ביומן הן קשורות. הצפנה במצב מנוחה.\n\nאנחנו לא משתפים, מוכרים או מעבירים נתוני משתמש מ-Google לאף גורם אחר. אנחנו לא מעבירים אותם לפלטפורמות פרסום, סוחרי מידע, מתווכי מידע או לכל ספק AI צד שלישי מלבד Anthropic כפי שתואר לעיל. אנחנו לא משתמשים בנתוני משתמש מ-Google כדי לאמן מודלי AI/ML כלליים, להגיש פרסומות, או לכל מטרה אחרת מלבד הפיצ'רים שאתם רואים במוצר.\n\nהשימוש וההעברה של מידע שמתקבל מממשקי Google APIs לכל אפליקציה אחרת יעמדו במדיניות Google API Services User Data Policy, כולל דרישות ה-Limited Use.\n\nאנשי הצוות שלנו לא ניגשים לנתוני משתמש מ-Google אלא (א) בהסכמה מפורשת ובכתב מצידכם, (ב) לחקירת אירוע אבטחה או שימוש לרעה ספציפי, או (ג) כשהחוק מחייב זאת.\n\nניתן לבטל בכל רגע את הגישה של שלי ל-Google דרך https://myaccount.google.com/permissions או על ידי מחיקת חשבון Sheli שלכם. אנחנו מוחקים נתוני משתמש מ-Google שנשמרו במטמון תוך 30 יום מביטול הגישה או מחיקת החשבון.",
+      },
+      {
         h: "איפה המידע נשמר וכמה זמן",
         p: "הנתונים נשמרים בתשתית ענן מאובטחת באיחוד האירופי. ישראל מוכרת על ידי האיחוד האירופי כמדינה עם רמת הגנה נאותה על מידע אישי, ולהיפך. היסטוריית הודעות פעילה נשמרת עד 30 יום, ולאחר מכן נמחקת אוטומטית (למעט נתונים תפעוליים כמו רשימות ואירועים שאתם בחרתם לשמור). אנחנו לא מוכרים מידע לאף גורם.",
       },
       {
         h: "ספקי שירות מרכזיים",
-        p: "כדי להפעיל את השירות אנחנו נעזרים בספקי צד שלישי אמינים: Anthropic (מודל Claude, לסיווג כוונה, יצירת תשובות ועיבוד תמונות), Groq (תמלול הודעות קוליות), Meta / WhatsApp (הערוץ שבו שלי מדברת איתכם), ו-iCount (חיוב וחשבוניות למנויים בתשלום). כל ספק מקבל רק את המינימום הנדרש כדי לבצע את תפקידו, ומחויב בחוזה לסטנדרטים של אבטחת מידע.",
+        p: "כדי להפעיל את השירות אנחנו נעזרים בספקי צד שלישי אמינים: Anthropic, PBC (מודל Claude — לסיווג כוונה, יצירת תשובות, עיבוד תמונות, ולהבנת בקשות יומן Google); Hugging Face Inc. (תמלול הודעות קוליות קצרות, מופעל על נקודת קצה ייעודית פרטית); Groq Inc. (תמלול הודעות קוליות במצב גיבוי, כשהספק הראשי לא זמין); Google LLC (כניסה דרך Google, ולמשתמשים שמחברים — Google Calendar API); Supabase Inc. (בסיס נתונים מנוהל באיחוד האירופי); Meta Platforms / WhatsApp (הערוץ שבו שלי מדברת איתכם); ו-iCount (חיוב וחשבוניות למנויים בתשלום). כל ספק מקבל רק את המינימום הנדרש כדי לבצע את תפקידו, ומחויב בחוזה לסטנדרטים של אבטחת מידע.",
       },
       {
         h: "עוגיות ואנליטיקה",
@@ -82,7 +86,7 @@ const CONTENT = {
     langToggle: "עב",
     back: "Back to sheli.ai",
     title: "Privacy Policy",
-    effective: "Effective April 24, 2026",
+    effective: "Effective May 7, 2026",
     intro:
       "Sheli is a family assistant on WhatsApp that helps you manage shopping, tasks, reminders, events and expenses. Your privacy matters to us — here's what you should know.",
     sections: [
@@ -100,7 +104,7 @@ const CONTENT = {
       },
       {
         h: "How we use it",
-        p: "So Sheli can understand you and respond — add to your shopping list, set a reminder, answer a question. We also use limited, anonymized data to improve Sheli's accuracy in Hebrew.",
+        p: "We use the data you send only to provide and improve the user-facing features in Sheli — shopping lists, tasks, reminders, calendar, expenses, and conversational replies. We do not use your messages or content to train generalized AI/ML models. Aggregate, fully de-identified usage statistics — counts, latency, error rates, never message content — help us monitor reliability and plan capacity.",
       },
       {
         h: "Who sees your data",
@@ -115,12 +119,16 @@ const CONTENT = {
         p: "To understand your messages, Sheli uses AI models that classify intent (e.g. shopping, reminder, question) and generate a reply. That intent is turned into an action in your account — you can always undo or correct it with a follow-up message. For this processing, messages are sent to our AI providers (see \"Key service providers\" below), which operate in the US. Your messages are not used to train third-party models. Voice messages are transcribed to text and deleted immediately after transcription. Images you send (e.g. a receipt or document) are processed to extract the relevant content (amount, date, items) and then deleted — we don't keep the image file itself.",
       },
       {
+        h: "Google User Data (Google Sign-In and Google Calendar)",
+        p: "When you sign in with Google, we receive your name, email address, profile picture, and Google account identifier (the OAuth `sub` claim). If you grant the `https://www.googleapis.com/auth/calendar.events` scope, Sheli can also read upcoming events from your primary calendar and create or update events you explicitly ask her to schedule.\n\nWith whom Google user data is shared, transferred, or disclosed:\n• Anthropic, PBC (Claude API): when you ask Sheli something that involves your calendar (e.g. \"what's on my schedule tomorrow?\", or \"move my dentist appointment to Thursday\"), the relevant event titles, times, and descriptions are sent transiently to Anthropic's Claude API for the sole purpose of generating Sheli's reply or carrying out the calendar update you requested. Anthropic processes the request under their commercial API terms; inputs are not used to train Anthropic's models, and Anthropic retains API requests for up to 30 days for abuse monitoring under contractual restrictions.\n• Supabase Inc. (our managed Postgres database, EU region — Frankfurt): stores your Google profile (name, email, account ID) and a cache of event references (event ID, title, start/end time) so Sheli can match your reminders to the right calendar event. Encrypted at rest.\n\nWe do not share, sell, or transfer Google user data to any other party. We do not transfer it to advertising platforms, data brokers, information resellers, or any third-party AI provider other than Anthropic as described above. We do not use Google user data to train generalized AI/ML models, to serve advertising, or for any purpose other than the user-facing features described in this policy.\n\nSheli's use and transfer of information received from Google APIs to any other app will adhere to the Google API Services User Data Policy, including the Limited Use requirements.\n\nHumans on our team do not access Google user data except (a) with your explicit written consent, (b) to investigate a specific security or abuse incident, or (c) where required by law.\n\nYou can revoke Sheli's Google access at any time from https://myaccount.google.com/permissions or by deleting your Sheli account. We delete cached Google user data within 30 days of revocation or account deletion.",
+      },
+      {
         h: "Where data is stored and for how long",
         p: "Data is stored on secure cloud infrastructure in the EU. Israel is recognized by the EU as providing an adequate level of data protection, and vice versa. Active message history is retained for up to 30 days and then automatically deleted (except operational data like lists and events you chose to keep). We don't sell your data to anyone.",
       },
       {
         h: "Key service providers",
-        p: "To run the service we rely on trusted third-party providers: Anthropic (Claude model, for intent classification, reply generation and image processing), Groq (voice message transcription), Meta / WhatsApp (the channel Sheli talks to you on), and iCount (billing and invoicing for paid subscriptions). Each provider receives only the minimum data needed for its role and is contractually bound to data-security standards.",
+        p: "To run the service we rely on trusted third-party providers: Anthropic, PBC (Claude API — for intent classification, reply generation, image content extraction, and reasoning over Google Calendar requests); Hugging Face Inc. (short voice-message transcription, served from a dedicated private inference endpoint); Groq Inc. (voice-message transcription as a fallback when our primary endpoint is unavailable); Google LLC (Google Sign-In and, for users who connect it, the Google Calendar API); Supabase Inc. (managed Postgres database in the EU region); Meta Platforms / WhatsApp (the channel Sheli talks to you on); and iCount (billing and invoicing for paid subscriptions). Each provider receives only the minimum data needed for its role and is contractually bound to data-security standards.",
       },
       {
         h: "Cookies and analytics",
@@ -208,7 +216,20 @@ export default function PrivacyPage() {
             >
               {s.h}
             </h2>
-            <p style={{ fontSize: 15, lineHeight: 1.7, color: "#1E2D2D" }}>{s.p}</p>
+            {s.p.split("\n\n").map((para, j) => (
+              <p
+                key={j}
+                style={{
+                  fontSize: 15,
+                  lineHeight: 1.7,
+                  color: "#1E2D2D",
+                  marginBottom: 12,
+                  whiteSpace: "pre-line",
+                }}
+              >
+                {para}
+              </p>
+            ))}
           </div>
         ))}
       </section>
